@@ -4,7 +4,9 @@
 
 Corporate AI Assistant `ai_agent_v1.1` — локальный корпоративный AI-ассистент для русскоязычной enterprise-среды. Продукт ориентирован на развёртывание внутри организации, где важны контролируемый Linux VM deployment, аутентификация через Active Directory и локальный inference без внешнего SaaS.
 
-Этот workspace подготовлен как clean release snapshot на базе validated code baseline `bab04bf`. Основной поддерживаемый сценарий — Linux VM + Docker Compose + Nginx + Redis + Ollama + Kerberos/LDAP authentication.
+Этот workspace подготовлен как clean release snapshot на базе validated code baseline `bab04bf`. Для v1.1 primary/supported deployment path сформулирован однозначно: Linux VM + Docker Compose + `install.sh`.
+
+Legacy helper files могут оставаться в репозитории для совместимости и справки, но они не являются основным или validated release baseline для v1.1.
 
 ## Что реально входит в релизную основу
 
@@ -34,6 +36,7 @@ Corporate AI Assistant `ai_agent_v1.1` — локальный корпорати
 - 4 vCPU / 8 GB RAM minimum
 - 8 vCPU / 16 GB RAM recommended
 - Active Directory / Kerberos / LDAP доступны с хоста и из контейнеров
+- основной и поддерживаемый путь для v1.1: Linux VM + Docker Compose + `install.sh`
 - основной путь — CPU-first deployment
 - GPU profile остаётся optional и требует отдельно подготовленного хоста
 

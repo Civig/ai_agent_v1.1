@@ -9,7 +9,12 @@
 - интеграция с Active Directory / Kerberos / LDAP
 - Ollama как локальный inference runtime
 
-Предпочтительный путь установки — `./install.sh`. Ручное развёртывание возможно, но это вторичный сценарий и он требует большей аккуратности со стороны оператора.
+Предпочтительный путь установки — `./install.sh`. Для v1.1 это primary/supported deployment path и единственный validated release baseline. Ручное развёртывание возможно, но это вторичный сценарий и он требует большей аккуратности со стороны оператора.
+
+Legacy deployment paths, которые могут встречаться в репозитории:
+
+- `install.bat`, `start.bat`, `clean.bat` — legacy Windows helper path, не основной и не validated release baseline
+- `deploy/setup-systemd.sh` и `deploy/ai-assistant.service` — legacy systemd Python path, не основной и не validated release baseline
 
 ## Поддерживаемый профиль хоста
 

@@ -4,6 +4,8 @@
 
 This workspace prepares a clean release snapshot of Corporate AI Assistant for internal and pilot deployments in Active Directory environments. The validated code baseline behind this release is `bab04bf`.
 
+For v1.1, the primary and supported deployment path is explicitly: Linux VM + Docker Compose + `install.sh`. Legacy helper files may remain in the repository, but they are not the primary validated release baseline.
+
 The supported deployment model remains:
 
 - Linux VM
@@ -12,6 +14,7 @@ The supported deployment model remains:
 - Redis
 - Ollama
 - Kerberos / LDAP-backed authentication
+- installer-driven deployment through `install.sh`
 
 ## What This Release Snapshot Contains
 
