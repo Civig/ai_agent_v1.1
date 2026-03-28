@@ -2,6 +2,8 @@
 
 This guide is the shortest path to a working Corporate AI Assistant deployment on a fresh Ubuntu or Debian VM.
 
+For v1.1, this is the primary and supported deployment path: Linux VM + Docker Compose + `install.sh`. Do not mix this quick-start flow with the legacy Windows `.bat` helpers or the legacy systemd Python service path kept in the repository for reference.
+
 ## 1. Clone the repository
 
 ```bash

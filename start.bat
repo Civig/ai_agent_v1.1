@@ -1,4 +1,11 @@
 @echo off
+REM ============================================================================
+REM LEGACY DEPLOYMENT PATH WARNING
+REM This Windows helper is a legacy deployment path kept for reference only.
+REM Corporate AI Assistant v1.1 primary/supported deployment path is:
+REM Linux VM + Docker Compose + install.sh
+REM This .bat path is not the primary validated release baseline for v1.1.
+REM ============================================================================
 REM Corporate AI Assistant - Windows Start Script
 REM Быстрый запуск приложения
 

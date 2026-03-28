@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# ============================================================================
+# LEGACY DEPLOYMENT PATH WARNING
+# This systemd-based Python service setup is a legacy deployment path.
+# Corporate AI Assistant v1.1 primary/supported deployment path is:
+# Linux VM + Docker Compose + install.sh
+# This script is not the primary validated release baseline for v1.1.
+# ============================================================================
+
 # Corporate AI Assistant - Systemd Setup Script
 # Автоматическая настройка systemd сервисов
 

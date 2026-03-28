@@ -9,7 +9,12 @@ This guide documents the currently supported installation path for Corporate AI 
 - Active Directory / Kerberos / LDAP integration
 - Ollama as the local inference runtime
 
-The preferred path is `./install.sh`. Manual deployment is possible, but it is a secondary path and requires more operator care.
+The preferred path is `./install.sh`. For v1.1, this is the primary/supported deployment path and the only validated release baseline. Manual deployment is possible, but it is a secondary path and requires more operator care.
+
+Legacy deployment paths that may still appear in the repository:
+
+- `install.bat`, `start.bat`, `clean.bat` are a legacy Windows helper path and not the primary validated release baseline
+- `deploy/setup-systemd.sh` and `deploy/ai-assistant.service` are a legacy systemd Python path and not the primary validated release baseline
 
 ## Supported Host Profile
 
