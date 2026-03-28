@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Corporate AI Assistant{% endblock %}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #212121;
+            --panel: #171717;
+            --panel-2: #1f1f1f;
+            --border: #2f2f2f;
+            --text: #ececec;
+            --muted: #a1a1aa;
+            --hover: #2a2a2a;
+            --input: #2b2b2b;
+            --accent: #10a37f;
+            --accent-hover: #0e8b6c;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .navbar {
+            background-color: var(--panel);
+            border-bottom: 1px solid var(--border);
+            padding: 0.75rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(8px);
+        }
+
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+            text-decoration: none;
+            letter-spacing: -0.02em;
+        }
+
+        .navbar-brand:hover {
+            color: var(--accent-hover);
+        }
+
+        .navbar-menu {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: var(--panel-2);
+            padding: 0.5rem 1rem;
+            border-radius: 30px;
+            border: 1px solid var(--border);
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            background: var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: white;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        .user-email {
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .logout-btn {
+            background: none;
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            border-radius: 30px;
+            color: #ef4444;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        .logout-btn:hover {
+            background-color: rgba(239, 68, 68, 0.1);
+            border-color: #ef4444;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0;
+        }
+
+        /* Индикатор пользователя в левом нижнем углу (будет виден на всех страницах) */
+        .user-corner {
+            position: fixed;
+            bottom: 1rem;
+            left: 1rem;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 40px;
+            padding: 0.5rem 1rem 0.5rem 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            z-index: 1000;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .user-corner-avatar {
+            width: 36px;
+            height: 36px;
+            background: var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: white;
+        }
+
+        .user-corner-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-corner-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        .user-corner-status {
+            font-size: 0.7rem;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .user-corner-status::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    {% if is_authenticated %}
+    <nav class="navbar">
+        <a href="/chat" class="navbar-brand">Corporate AI Assistant</a>
+        <div class="navbar-menu">
+            <div class="user-info">
+                <div class="user-avatar">{{ current_user.display_name[0] | upper }}</div>
+                <div class="user-details">
+                    <span class="user-name">{{ current_user.display_name }}</span>
+                    <span class="user-email">{{ current_user.email }}</span>
+                </div>
+            </div>
+            <button id="baseLogoutBtn" class="logout-btn" type="button">Выйти</button>
+        </div>
+    </nav>
+
+    <!-- Индикатор пользователя в левом нижнем углу -->
+    <div class="user-corner">
+        <div class="user-corner-avatar">{{ current_user.display_name[0] | upper }}</div>
+        <div class="user-corner-info">
+            <span class="user-corner-name">{{ current_user.display_name }}</span>
+            <span class="user-corner-status">Активен • Корпоративный доступ</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    {% if is_authenticated %}
+    <script type="module" src="/static/js/base-shell.js"></script>
+    {% endif %}
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

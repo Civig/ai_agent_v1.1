@@ -1,0 +1,16 @@
+[Unit]
+Description=Ollama Service
+After=network-online.target
+Documentation=https://ollama.ai
+
+[Service]
+Type=simple
+User=ollama
+Group=ollama
+ExecStart=/usr/local/bin/ollama serve
+Restart=always
+RestartSec=3
+Environment="OLLAMA_HOST=127.0.0.1:11434"
+
+[Install]
+WantedBy=multi-user.target

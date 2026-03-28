@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment
+.env
+.env.local
+.install/
+.ollama/
+deploy/certs/
+deploy/krb5.conf
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+LICENSE
+*.md
+docs/
+
+# Backups
+*.backup.*
+
+# Logs
+*.log
+
+# Local models
+models/
+app/models/
+*.gguf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Platform-specific and operator-only files
+*.bat
+deploy/*.service

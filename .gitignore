@@ -1,0 +1,93 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+.install/
+
+# Backups
+*.backup.*
+
+# Models (large GGUF files excluded from git)
+models/
+*.gguf
+
+# Generated deployment files
+deploy/certs/
+deploy/fqdn-certs/
+deploy/sso/
+deploy/krb5.conf
+docker-compose.override.yml
+.ollama/
+
+# Sensitive key and certificate material
+*.key
+*.keytab
+*.p12
+*.pfx
+*.pem
+*.crt
+*.cer
+*.csr
+
+# Python caches and tooling
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Test files
+test_*.py
+!tests/test_*.py
+
+# Database
+*.db
+*.sqlite
+*.sqlite3

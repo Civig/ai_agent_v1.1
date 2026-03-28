@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corporate AI Assistant</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app-shell" id="appRoot">
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-title">Corporate AI Assistant</div>
+                <div class="brand-subtitle">On-prem enterprise workspace</div>
+            </div>
+
+            <div class="sidebar-actions">
+                <button class="sidebar-btn sidebar-btn--primary" id="newChatBtn" type="button">
+                    Новый чат
+                </button>
+                <button class="sidebar-btn" id="clearHistoryBtn" type="button">
+                    Сбросить активный контекст
+                </button>
+            </div>
+
+            <section class="sidebar-section">
+                <div class="section-head">
+                    <span>Диалоги</span>
+                    <span class="section-count" id="threadCount">0</span>
+                </div>
+                <div class="thread-list" id="threadList"></div>
+            </section>
+
+            <div class="sidebar-footer">
+                <div class="footer-card">
+                    <div class="footer-label">Пользователь</div>
+                    <div class="footer-value">{{ current_user.display_name }}</div>
+                    <div class="footer-muted">{{ current_user.username }}</div>
+                </div>
+                <div class="footer-card">
+                    <div class="footer-label">Среда</div>
+                    <div class="footer-value">{{ request.url.hostname }}</div>
+                    <div class="footer-muted">Внутренний корпоративный контур</div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="workspace">
+            <div class="workspace-frame">
+                <div class="workspace-main-column chat-wrapper">
+                    <header class="workspace-header">
+                        <div class="workspace-heading header-left">
+                            <h1>Enterprise chat workspace</h1>
+                            <p>Безопасная on-prem AI-сессия с локальными моделями</p>
+                        </div>
+
+                        <div class="workspace-actions header-right">
+                            <div class="model-switcher">
+                                <select id="modelSelect" class="model-select" aria-label="Выбор модели">
+                                    <option value="{{ model_key }}">{{ model_name }}</option>
+                                </select>
+                            </div>
+                            <div class="user-summary user-badge" title="{{ current_user.username }}">
+                                <span class="user-summary-name">{{ current_user.display_name }}</span>
+                            </div>
+                            <button id="logoutBtn" class="logout-btn" type="button">Выйти</button>
+                        </div>
+                    </header>
+
+                    <div class="thread-banner" id="threadBanner" hidden></div>
+
+                    <section class="chat-scroll" id="chatScroll">
+                        <div class="chat-inner" id="chatInner"></div>
+                    </section>
+
+                    <footer class="composer-shell">
+                        <div class="attachment-list" id="attachmentList" hidden></div>
+
+                        <form class="composer input-wrapper" id="chatForm">
+                            <input id="attachmentInput" type="file" multiple hidden>
+                            <button class="composer-icon-btn" id="attachBtn" type="button" aria-label="Добавить файлы">
+                                Вложить
+                            </button>
+                            <textarea
+                                id="prompt"
+                                class="composer-input chat-input"
+                                name="prompt"
+                                rows="1"
+                                placeholder="Напишите сообщение... (Shift+Enter для новой строки)"
+                                required
+                            ></textarea>
+                            <button id="stopBtn" class="composer-stop" type="button" hidden>
+                                Stop
+                            </button>
+                            <button type="submit" class="composer-send send-btn" id="sendBtn">
+                                Отправить
+                            </button>
+                        </form>
+
+                        <div class="composer-note">
+                            Можно прикрепить до 10 файлов размером до 50 MB каждый. Текст документов добавляется в контекст ответа.
+                        </div>
+                    </footer>
+                </div>
+
+                <aside class="workspace-rail" aria-hidden="true"></aside>
+            </div>
+        </main>
+    </div>
+
+    <script id="chatBootstrap" type="application/json">
+        {{ {
+            "messages": messages,
+            "model": {
+                "name": model_name,
+                "key": model_key,
+                "description": model_description
+            },
+            "user": current_user,
+            "host": request.url.hostname
+        } | tojson }}
+    </script>
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

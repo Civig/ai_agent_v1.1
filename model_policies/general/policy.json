@@ -1,0 +1,19 @@
+{
+  "category": "general",
+  "display_name": "General-purpose models",
+  "enabled": true,
+  "models": [
+    {
+      "model_key": "phi3:mini",
+      "display_name": "Phi-3 Mini"
+    },
+    {
+      "model_key": "gemma2:2b",
+      "display_name": "Gemma 2 2B"
+    },
+    {
+      "model_key": "mistral",
+      "display_name": "Mistral"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "category": "coding",
+  "display_name": "Coding models",
+  "enabled": true,
+  "models": [
+    {
+      "model_key": "codellama:13b",
+      "display_name": "Code Llama 13B"
+    },
+    {
+      "model_key": "deepseek-coder:7b",
+      "display_name": "DeepSeek Coder 7B"
+    },
+    {
+      "model_key": "qwen2.5-coder:7b",
+      "display_name": "Qwen 2.5 Coder 7B"
+    }
+  ]
+}

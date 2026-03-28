@@ -1,0 +1,283 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: corporate-ai-assistant
+    env_file:
+      - .env
+    environment:
+      APP_RELOAD: 'false'
+      AUTO_START_OLLAMA: 'false'
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      OLLAMA_URL: http://ollama:11434/api/chat
+    expose:
+      - '8000'
+    volumes:
+      - ./models:/app/models
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      scheduler:
+        condition: service_healthy
+      worker-chat:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "python", "runtime_healthcheck.py", "app"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  sso-proxy:
+    build: .
+    container_name: corporate-ai-sso-proxy
+    env_file:
+      - .env
+    environment:
+      APP_RELOAD: 'false'
+    command: ["uvicorn", "sso_proxy_auth:app", "--host", "0.0.0.0", "--port", "8081"]
+    expose:
+      - '8081'
+    volumes:
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+      - ./deploy/sso:/etc/corporate-ai-sso:ro
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD-SHELL", "status=$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/health/live || true); [ \"$$status\" = \"200\" ] || [ \"$$status\" = \"503\" ]"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  scheduler:
+    build: .
+    container_name: corporate-ai-scheduler
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    command: ["python", "scheduler.py"]
+    volumes:
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "python", "runtime_healthcheck.py", "scheduler"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  worker-chat:
+    build: .
+    container_name: corporate-ai-worker-chat
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      OLLAMA_URL: http://ollama:11434/api/chat
+      WORKER_TARGET_KIND: cpu
+      WORKER_POOL: chat
+      WORKER_SUPPORTED_WORKLOADS: chat
+      WORKER_TARGET_ID: ollama-main
+      WORKER_NODE_ID: local-node
+    command: ["python", "worker.py"]
+    volumes:
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "python", "runtime_healthcheck.py", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  worker-siem:
+    build: .
+    container_name: corporate-ai-worker-siem
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      OLLAMA_URL: http://ollama:11434/api/chat
+      WORKER_TARGET_KIND: cpu
+      WORKER_POOL: siem
+      WORKER_SUPPORTED_WORKLOADS: siem
+      WORKER_TARGET_ID: ollama-main
+      WORKER_NODE_ID: local-node
+    command: ["python", "worker.py"]
+    volumes:
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "python", "runtime_healthcheck.py", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  worker-batch:
+    build: .
+    container_name: corporate-ai-worker-batch
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      OLLAMA_URL: http://ollama:11434/api/chat
+      WORKER_TARGET_KIND: cpu
+      WORKER_POOL: batch
+      WORKER_SUPPORTED_WORKLOADS: batch
+      WORKER_TARGET_ID: ollama-main
+      WORKER_NODE_ID: local-node
+    command: ["python", "worker.py"]
+    volumes:
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "python", "runtime_healthcheck.py", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  worker-gpu:
+    build: .
+    container_name: corporate-ai-worker-gpu
+    profiles:
+      - gpu
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      OLLAMA_URL: http://ollama:11434/api/chat
+      WORKER_TARGET_KIND: gpu
+      WORKER_POOL: chat
+      WORKER_SUPPORTED_WORKLOADS: chat
+      WORKER_TARGET_ID: ollama-gpu
+      WORKER_NODE_ID: local-gpu-node
+    command: ["python", "worker.py"]
+    volumes:
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+    healthcheck:
+      test: ["CMD", "python", "runtime_healthcheck.py", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: corporate-ai-redis
+    env_file:
+      - .env
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$REDIS_PASSWORD\""]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-server
+    expose:
+      - '11434'
+    volumes:
+      - ./.ollama:/root/.ollama
+      - ./models:/models:ro
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "/bin/ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: corporate-ai-nginx
+    depends_on:
+      app:
+        condition: service_healthy
+      sso-proxy:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1 && test -s /var/run/nginx.pid"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  ai-network:
+    driver: bridge
+
+volumes:
+  ollama-data:
+    driver: local
+  redis-data:
+    driver: local
