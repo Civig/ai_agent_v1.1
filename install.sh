@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${ROOT_DIR}/.install"
 LOG_FILE="${LOG_DIR}/install-$(date +%Y%m%d-%H%M%S).log"
 STATE_FILE="${LOG_DIR}/install-state.env"
+INSTALL_USER="${SUDO_USER:-${USER:-$(id -un)}}"
 
 mkdir -p "${LOG_DIR}"
 touch "${LOG_FILE}"
@@ -17,6 +18,7 @@ readonly ROOT_DIR
 readonly LOG_DIR
 readonly LOG_FILE
 readonly STATE_FILE
+readonly INSTALL_USER
 
 MANAGED_OVERRIDE_MARKER="# Managed by Corporate AI Assistant install.sh"
 MANAGED_OVERRIDE_FILE="${ROOT_DIR}/docker-compose.override.yml"
@@ -85,6 +87,26 @@ MODEL_BOOTSTRAP_STATUS="pending"
 MODEL_PRESENT_AFTER_BOOTSTRAP="unknown"
 CHAT_READY_IMMEDIATELY="no"
 TLS_CERTS_GENERATED_BY_INSTALLER="0"
+PREINSTALL_DOCKER_CLI="0"
+PREINSTALL_DOCKER_COMPOSE_PLUGIN="0"
+PREINSTALL_DOCKER_SERVICE_ENABLED="0"
+PREINSTALL_DOCKER_SERVICE_ACTIVE="0"
+PREINSTALL_OLLAMA_CLI="0"
+PREINSTALL_OLLAMA_SERVICE_PRESENT="0"
+PREINSTALL_OLLAMA_SERVICE_ENABLED="0"
+PREINSTALL_OLLAMA_SERVICE_ACTIVE="0"
+PREINSTALL_USER_IN_DOCKER_GROUP="0"
+PREEXISTING_DOCKER_KEYRING="0"
+PREEXISTING_DOCKER_REPO_FILE="0"
+INSTALLER_MANAGED_DOCKER_REPO_FILE="0"
+DOCKER_REPO_FILE_BACKUP=""
+INSTALLER_ADDED_DOCKER_KEYRING="0"
+INSTALLER_ADDED_USER_TO_DOCKER_GROUP="0"
+INSTALLER_INSTALLED_OLLAMA_CLI="0"
+POSTINSTALL_OLLAMA_BIN_PATH=""
+POSTINSTALL_OLLAMA_SERVICE_FRAGMENT=""
+
+declare -a APT_PACKAGES_INSTALLED_BY_INSTALLER=()
 
 readonly SUPPORTED_INSTALL_MODES="auto cpu gpu"
 readonly MIN_RECOMMENDED_CPU_CORES=4
@@ -167,6 +189,71 @@ status_from_command() {
         printf "installed"
     else
         printf "not installed"
+    fi
+}
+
+systemd_unit_exists() {
+    command_exists systemctl && systemctl list-unit-files "$1" >/dev/null 2>&1
+}
+
+systemd_unit_enabled() {
+    systemd_unit_exists "$1" && systemctl is-enabled "$1" >/dev/null 2>&1
+}
+
+systemd_unit_active() {
+    systemd_unit_exists "$1" && systemctl is-active "$1" >/dev/null 2>&1
+}
+
+append_unique_installed_package() {
+    local pkg="$1"
+    local existing
+    for existing in "${APT_PACKAGES_INSTALLED_BY_INSTALLER[@]}"; do
+        [[ "${existing}" == "${pkg}" ]] && return
+    done
+    APT_PACKAGES_INSTALLED_BY_INSTALLER+=("${pkg}")
+}
+
+join_by_space() {
+    local output=""
+    local item
+    for item in "$@"; do
+        [[ -z "${item}" ]] && continue
+        if [[ -n "${output}" ]]; then
+            output+=" "
+        fi
+        output+="${item}"
+    done
+    printf "%s" "${output}"
+}
+
+capture_preinstall_state() {
+    if command_exists docker; then
+        PREINSTALL_DOCKER_CLI="1"
+        if docker compose version >/dev/null 2>&1; then
+            PREINSTALL_DOCKER_COMPOSE_PLUGIN="1"
+        fi
+    fi
+
+    if command_exists ollama; then
+        PREINSTALL_OLLAMA_CLI="1"
+    fi
+
+    if id -nG "${INSTALL_USER}" 2>/dev/null | grep -qw docker; then
+        PREINSTALL_USER_IN_DOCKER_GROUP="1"
+    fi
+
+    [[ -f /etc/apt/keyrings/docker.asc ]] && PREEXISTING_DOCKER_KEYRING="1"
+    [[ -f /etc/apt/sources.list.d/docker.list ]] && PREEXISTING_DOCKER_REPO_FILE="1"
+
+    if systemd_unit_exists docker.service; then
+        systemd_unit_enabled docker.service && PREINSTALL_DOCKER_SERVICE_ENABLED="1"
+        systemd_unit_active docker.service && PREINSTALL_DOCKER_SERVICE_ACTIVE="1"
+    fi
+
+    if systemd_unit_exists ollama.service; then
+        PREINSTALL_OLLAMA_SERVICE_PRESENT="1"
+        systemd_unit_enabled ollama.service && PREINSTALL_OLLAMA_SERVICE_ENABLED="1"
+        systemd_unit_active ollama.service && PREINSTALL_OLLAMA_SERVICE_ACTIVE="1"
     fi
 }
 
@@ -644,6 +731,7 @@ apt_install_if_missing() {
     for pkg in "$@"; do
         if ! dpkg -s "${pkg}" >/dev/null 2>&1; then
             missing+=("${pkg}")
+            append_unique_installed_package "${pkg}"
         fi
     done
 
@@ -678,6 +766,7 @@ install_base_packages() {
 configure_docker_repository() {
     local keyring="/etc/apt/keyrings/docker.asc"
     local repo_file="/etc/apt/sources.list.d/docker.list"
+    local backup_file="${LOG_DIR}/docker.list.preinstall.bak"
     local architecture
 
     architecture="$(dpkg --print-architecture)"
@@ -685,6 +774,7 @@ configure_docker_repository() {
     if [[ ! -f "${keyring}" ]]; then
         curl -fsSL "https://download.docker.com/linux/${OS_ID}/gpg" | as_root tee "${keyring}" >/dev/null
         as_root chmod a+r "${keyring}"
+        INSTALLER_ADDED_DOCKER_KEYRING="1"
     fi
 
     if [[ -z "${OS_CODENAME}" ]]; then
@@ -692,8 +782,14 @@ configure_docker_repository() {
     fi
 
     if [[ ! -f "${repo_file}" ]] || ! grep -q "download.docker.com/linux/${OS_ID}" "${repo_file}"; then
+        if [[ -f "${repo_file}" && -z "${DOCKER_REPO_FILE_BACKUP}" ]]; then
+            cp "${repo_file}" "${backup_file}"
+            chmod 600 "${backup_file}"
+            DOCKER_REPO_FILE_BACKUP="${backup_file}"
+        fi
         printf "deb [arch=%s signed-by=%s] https://download.docker.com/linux/%s %s stable\n" \
             "${architecture}" "${keyring}" "${OS_ID}" "${OS_CODENAME}" | as_root tee "${repo_file}" >/dev/null
+        INSTALLER_MANAGED_DOCKER_REPO_FILE="1"
     fi
 }
 
@@ -715,6 +811,7 @@ ensure_docker_installed() {
 
     if [[ "${EUID}" -ne 0 ]] && ! id -nG "${USER}" | grep -qw docker; then
         as_root usermod -aG docker "${USER}" || true
+        INSTALLER_ADDED_USER_TO_DOCKER_GROUP="1"
         print_warning "User '${USER}' was added to the docker group. A new login session is required for passwordless docker use."
     fi
 
@@ -732,10 +829,15 @@ ensure_ollama_cli() {
         curl -fsSL https://ollama.com/install.sh -o "${installer}"
         as_root sh "${installer}"
         rm -f "${installer}"
+        INSTALLER_INSTALLED_OLLAMA_CLI="1"
         print_success "Ollama CLI installed"
     fi
 
     as_root systemctl disable --now ollama.service >/dev/null 2>&1 || true
+    POSTINSTALL_OLLAMA_BIN_PATH="$(command -v ollama || true)"
+    if systemd_unit_exists ollama.service; then
+        POSTINSTALL_OLLAMA_SERVICE_FRAGMENT="$(systemctl show -p FragmentPath --value ollama.service 2>/dev/null || true)"
+    fi
     print_info "Host ollama service is disabled to avoid conflicts with the containerized runtime"
 }
 
@@ -1440,10 +1542,31 @@ write_install_manifest() {
     cat >"${STATE_FILE}" <<EOF
 # Generated by Corporate AI Assistant install.sh
 MANIFEST_VERSION=1
+REPO_ROOT=${ROOT_DIR}
+INSTALL_USER=${INSTALL_USER}
 OLLAMA_HOST_DIR=${ollama_dir}
 GENERATED_ENV_FILE=1
 GENERATED_KRB5_CONF=1
 GENERATED_TLS_CERTS=${TLS_CERTS_GENERATED_BY_INSTALLER}
+PREINSTALL_DOCKER_CLI=${PREINSTALL_DOCKER_CLI}
+PREINSTALL_DOCKER_COMPOSE_PLUGIN=${PREINSTALL_DOCKER_COMPOSE_PLUGIN}
+PREINSTALL_DOCKER_SERVICE_ENABLED=${PREINSTALL_DOCKER_SERVICE_ENABLED}
+PREINSTALL_DOCKER_SERVICE_ACTIVE=${PREINSTALL_DOCKER_SERVICE_ACTIVE}
+PREINSTALL_OLLAMA_CLI=${PREINSTALL_OLLAMA_CLI}
+PREINSTALL_OLLAMA_SERVICE_PRESENT=${PREINSTALL_OLLAMA_SERVICE_PRESENT}
+PREINSTALL_OLLAMA_SERVICE_ENABLED=${PREINSTALL_OLLAMA_SERVICE_ENABLED}
+PREINSTALL_OLLAMA_SERVICE_ACTIVE=${PREINSTALL_OLLAMA_SERVICE_ACTIVE}
+PREINSTALL_USER_IN_DOCKER_GROUP=${PREINSTALL_USER_IN_DOCKER_GROUP}
+PREEXISTING_DOCKER_KEYRING=${PREEXISTING_DOCKER_KEYRING}
+PREEXISTING_DOCKER_REPO_FILE=${PREEXISTING_DOCKER_REPO_FILE}
+INSTALLER_MANAGED_DOCKER_REPO_FILE=${INSTALLER_MANAGED_DOCKER_REPO_FILE}
+DOCKER_REPO_FILE_BACKUP=${DOCKER_REPO_FILE_BACKUP}
+INSTALLER_ADDED_DOCKER_KEYRING=${INSTALLER_ADDED_DOCKER_KEYRING}
+INSTALLER_ADDED_USER_TO_DOCKER_GROUP=${INSTALLER_ADDED_USER_TO_DOCKER_GROUP}
+INSTALLER_INSTALLED_OLLAMA_CLI=${INSTALLER_INSTALLED_OLLAMA_CLI}
+POSTINSTALL_OLLAMA_BIN_PATH=${POSTINSTALL_OLLAMA_BIN_PATH}
+POSTINSTALL_OLLAMA_SERVICE_FRAGMENT=${POSTINSTALL_OLLAMA_SERVICE_FRAGMENT}
+APT_PACKAGES_INSTALLED_BY_INSTALLER=$(join_by_space "${APT_PACKAGES_INSTALLED_BY_INSTALLER[@]}")
 EOF
     chmod 600 "${STATE_FILE}"
     print_success "Install manifest recorded at ${STATE_FILE}"
@@ -1581,6 +1704,7 @@ print_final_summary() {
 
 main() {
     precheck_os
+    capture_preinstall_state
     collect_system_audit
     print_system_audit_summary
     print_preflight_warnings

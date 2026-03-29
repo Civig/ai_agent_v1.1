@@ -404,25 +404,57 @@ docker compose down
 
 ## Uninstall
 
-Используйте repository uninstall flow, когда нужно снять текущее развёртывание без широкого host cleanup:
+Используйте repository uninstall flow, когда нужно снять текущее развёртывание без длинного ручного cleanup checklist.
+
+Safe mode:
 
 ```bash
 bash uninstall.sh --dry-run
 bash uninstall.sh --yes
 ```
 
-Поведение по умолчанию:
+Factory-reset mode:
+
+```bash
+sudo bash uninstall.sh --dry-run --factory-reset
+sudo bash uninstall.sh --yes --factory-reset
+```
+
+Factory-reset с удалением repo и deferred self-delete:
+
+```bash
+sudo bash uninstall.sh --dry-run --factory-reset --remove-repo
+sudo bash uninstall.sh --yes --factory-reset --remove-repo
+```
+
+Поведение safe mode:
 
 - удаляет текущий Docker Compose stack этого репозитория, включая named Compose volumes
 - удаляет project-local generated state: `.env`, `deploy/krb5.conf`, installer-managed `docker-compose.override.yml`, текущую Ollama host directory и `.install`
 - сохраняет host-installed Docker/Ollama packages, apt repositories, membership в группе `docker` и unrelated Docker assets на хосте
 - сохраняет `deploy/sso` keytab material, потому что это operator-provided secret, а не артефакт, который генерирует installer
 
-Обработка TLS certificates:
+Поведение factory-reset:
+
+- сохраняет всю safe-mode cleanup semantics
+- удаляет installer-owned host dependencies только там, где expanded install manifest доказывает ownership
+- может удалить exact apt packages, записанные как installer-installed
+- может восстановить или удалить Docker repo/keyring только когда ownership installer доказан
+- может восстановить или удалить Docker/Ollama host service state только если manifest доказывает, что installer его изменял
+- может убрать membership в группе `docker` только когда manifest доказывает, что installer её добавил
+- по-прежнему не трогает unrelated Docker assets и unrelated host configuration
+
+Удаление repo и self-delete:
+
+- `--remove-repo` требует `--factory-reset`
+- удаление repo выполняется через deferred background cleanup после завершения основного скрипта, поэтому текущий script может безопасно удалить собственный репозиторий
+- `--remove-repo` намеренно сделан явным, потому что он удаляет всю директорию репозитория
+
+Manifest и TLS handling:
 
 - если install manifest подтверждает, что self-signed TLS material был сгенерирован через `install.sh`, `uninstall.sh` удаляет `deploy/certs`
 - если ownership installer не доказан, `deploy/certs` сохраняется, чтобы не удалить operator-managed certificate material
-- поэтому более старые установки, сделанные до manifest-aware flow, могут сохранять `deploy/certs` даже после uninstall
+- установки, созданные до expanded manifest flow, могут выполнять только частичный factory-reset rollback, потому что ownership host dependencies тогда ещё не записывался
 
 ## Проверка health
 

@@ -27,7 +27,7 @@ Russian documents are the primary operator reference. English documents are kept
 - Synced companion / Синхронизированная companion-версия: [INSTALL_en.md](INSTALL_en.md)
 - Supported OS matrix / Матрица поддерживаемых ОС: [SUPPORTED_OS.md](SUPPORTED_OS.md)
 - When to read / Когда читать: when preparing or performing a supported installation
-- Covers / Что покрывает: host profile, prerequisites, environment configuration, installer behavior, manual installation, uninstall flow, first login, install verification
+- Covers / Что покрывает: host profile, prerequisites, environment configuration, installer behavior, manual installation, safe uninstall, factory-reset uninstall, first login, install verification
 - Does not cover / Что не покрывает: day-2 operations, full production hardening, architecture internals
 
 ## Administration / Администрирование
