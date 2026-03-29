@@ -61,6 +61,8 @@ FastAPI-приложение отвечает за:
 
 Для file-chat app выполняет staging upload и text extraction до постановки job в очередь. Model inference выполняется worker'ами, а не прямо внутри request handler.
 
+Целевой redesign parser-stage, который выносит тяжёлую file processing логику из request path, описан отдельно в [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md).
+
 Основной app не выполняет raw Kerberos/SPNEGO negotiation напрямую. Вместо этого он принимает trusted identity headers только на выделенном SSO entry path и только при включённом trusted proxy mode. Password login остаётся доступным fallback auth source.
 
 Policy catalog не является директорией хранения моделей. Он определяет только то, какие exact model keys входят во внутренние категории проекта. Доступ к категориям вычисляется отдельно через `.env` group mapping: authenticated users получают `general`, а `coding` и `admin` открываются только при exact AD group match из `MODEL_ACCESS_CODING_GROUPS` и `MODEL_ACCESS_ADMIN_GROUPS`. Пользователь по-прежнему вручную выбирает модель из разрешённого набора, который приходит через `/api/models`.
@@ -258,6 +260,7 @@ Job state хранится в Redis и включает:
 
 - выделенная persistent database для chat history
 - HA Redis / Sentinel profile
+- redesign parser-stage с выносом тяжёлого file parsing из app request path; см. [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md)
 - packaged external monitoring stack
 - antivirus или sandbox-based file scanning
 - standalone RAG subsystem

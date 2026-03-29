@@ -42,6 +42,7 @@ Russian documents are the primary operator reference. English documents are kept
 
 - Primary document / Основной документ: [ARCHITECTURE_ru.md](ARCHITECTURE_ru.md)
 - Synced companion / Синхронизированная companion-версия: [ARCHITECTURE_en.md](ARCHITECTURE_en.md)
+- Parser-stage target design / Целевой дизайн parser-stage: [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md)
 - When to read / Когда читать: when you need the implemented system design, component boundaries, request paths, and current limitations
 - Covers / Что покрывает: current architecture, components, request flows, storage model, implemented vs planned scope
 - Does not cover / Что не покрывает: installation runbook, production rollout checklist, operator incident recovery
@@ -75,6 +76,7 @@ Russian documents are the primary operator reference. English documents are kept
 ## Supporting And Reference Docs / Вспомогательные и справочные документы
 
 - [SUPPORTED_OS.md](SUPPORTED_OS.md) - canonical supported OS matrix and validation status
+- [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md) - canonical design for moving heavy file parsing outside the app request path
 - [../PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) - repository layout reference
 - [../CHANGELOG.md](../CHANGELOG.md) - release and change history
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) - contribution workflow and coding style

@@ -61,6 +61,8 @@ The FastAPI application handles:
 
 For file chat, the app performs upload staging and text extraction before the job is queued. Model inference is executed by workers, not directly in the request handler.
 
+The target parser-stage redesign for moving heavy file processing out of the request path is documented separately in [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md).
+
 The main app does not perform raw Kerberos/SPNEGO negotiation. Instead, it accepts trusted identity headers only on the dedicated SSO entry path and only when trusted proxy mode is enabled. Password login remains available as a fallback auth source.
 
 The policy catalog is not a model storage directory. It only defines which exact model keys belong to which internal categories. Category access is resolved separately from `.env` group mapping: authenticated users receive `general`, while `coding` and `admin` are opened only by exact AD group matches from `MODEL_ACCESS_CODING_GROUPS` and `MODEL_ACCESS_ADMIN_GROUPS`. Users still choose a model manually from the allowed set returned by `/api/models`.
@@ -258,6 +260,7 @@ No full metrics stack is packaged in the repository.
 
 - dedicated persistent database for chat history
 - HA Redis / Sentinel profile
+- parser-stage redesign that moves heavy file parsing outside the app request path; see [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md)
 - packaged external monitoring stack
 - antivirus or sandbox-based file scanning
 - standalone RAG subsystem
