@@ -444,6 +444,8 @@ https://<vm-ip>
 
 ## Базовый troubleshooting установки
 
+Если install path ломается из-за reachability до Docker/PyPI/Ollama, host DNS, `/etc/resolv.conf`, `systemd-resolved` или drift между host/container DNS, используйте выделенный network troubleshooting section в [TROUBLESHOOTING_ru.md](TROUBLESHOOTING_ru.md).
+
 ### `health/ready` не становится healthy
 
 Проверьте:

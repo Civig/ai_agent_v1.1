@@ -444,6 +444,8 @@ Notes:
 
 ## Install Troubleshooting Basics
 
+For install-path failures caused by Docker/PyPI/Ollama reachability, host DNS, `/etc/resolv.conf`, `systemd-resolved`, or Docker/container DNS drift, use the dedicated network troubleshooting section in [TROUBLESHOOTING_en.md](TROUBLESHOOTING_en.md).
+
 ### `health/ready` never becomes healthy
 
 Check:

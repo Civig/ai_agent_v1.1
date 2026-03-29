@@ -23,6 +23,7 @@ curl -k -fsS https://127.0.0.1/health/ready
 - login, Kerberos, or LDAP issues -> [docs/TROUBLESHOOTING_ru.md](docs/TROUBLESHOOTING_ru.md) / [docs/TROUBLESHOOTING_en.md](docs/TROUBLESHOOTING_en.md)
 - `/health/ready` unhealthy -> [docs/TROUBLESHOOTING_ru.md](docs/TROUBLESHOOTING_ru.md) / [docs/TROUBLESHOOTING_en.md](docs/TROUBLESHOOTING_en.md)
 - missing models, file upload, or PDF parsing issues -> [docs/TROUBLESHOOTING_ru.md](docs/TROUBLESHOOTING_ru.md) / [docs/TROUBLESHOOTING_en.md](docs/TROUBLESHOOTING_en.md)
+- installer network, docker.io, PyPI, DNS, or Ollama pull issues -> [docs/TROUBLESHOOTING_ru.md](docs/TROUBLESHOOTING_ru.md) / [docs/TROUBLESHOOTING_en.md](docs/TROUBLESHOOTING_en.md)
 - queue, worker, or GPU issues -> [docs/TROUBLESHOOTING_ru.md](docs/TROUBLESHOOTING_ru.md) / [docs/TROUBLESHOOTING_en.md](docs/TROUBLESHOOTING_en.md)
 
 For document roles and reading order, see [docs/INDEX.md](docs/INDEX.md).

@@ -13,6 +13,137 @@ curl -k -i https://127.0.0.1/health/live
 curl -k -i https://127.0.0.1/health/ready
 ```
 
+## Installer Fails on Docker, PyPI, or Ollama Reachability Checks
+
+### Symptom
+
+- `install.sh` stops during outbound connectivity checks
+- errors mention Docker download, Docker registry, PyPI, or Ollama reachability
+- package download, Docker pull, or model bootstrap fails before the application is healthy
+
+### Probable cause
+
+- host internet connectivity issue
+- host DNS issue
+- temporary upstream registry/package-host outage
+- Docker/container DNS issue if host checks pass but Docker pulls or later container lookups still fail
+
+### How to check
+
+```bash
+curl -I --max-time 10 https://registry-1.docker.io/v2/
+curl -I --max-time 10 https://pypi.org/simple/
+curl -I --max-time 10 https://files.pythonhosted.org/
+getent hosts registry-1.docker.io
+getent hosts pypi.org
+getent hosts files.pythonhosted.org
+```
+
+If Ollama model bootstrap is the failing step, also check:
+
+```bash
+docker compose exec -T ollama ollama list
+docker compose logs --tail=100 ollama
+```
+
+### How to fix
+
+- if host DNS or HTTPS reachability is failing, fix that first and retry the installer only after the host can repeatedly resolve and reach the required endpoints
+- if host checks succeed but Docker pulls still fail, continue with the Docker/container DNS checks below
+- if the upstream registry or package host is temporarily unavailable, wait and retry later
+- this class of failure is outside application scope until basic outbound connectivity is healthy
+
+## Host DNS, `/etc/resolv.conf`, or `systemd-resolved` Is Wrong
+
+### Symptom
+
+- host lookups for Docker/PyPI endpoints fail
+- `/etc/resolv.conf` points to a stub or resolver path that is not actually working on this VM
+- DNS behavior changes unexpectedly after reboot or differs from the resolver policy you intended
+
+### Probable cause
+
+- broken host DNS configuration
+- `/etc/resolv.conf` points to the wrong resolver file or stale stub listener
+- `systemd-resolved` is running, but its upstream DNS settings do not match the host's intended resolver policy
+
+### How to check
+
+```bash
+cat /etc/resolv.conf
+resolvectl status || systemd-resolve --status || true
+getent hosts registry-1.docker.io
+getent hosts pypi.org
+getent hosts files.pythonhosted.org
+```
+
+### How to fix
+
+- align the host DNS configuration with your environment's intended resolver policy before retrying the install
+- if `systemd-resolved` is in use, make sure `/etc/resolv.conf` points to the resolver file your host policy expects and that the configured upstream resolvers are healthy
+- if `systemd-resolved` is not part of the intended host setup, remove the mismatch instead of leaving a broken stub resolver in place
+- retry install only after repeated host lookups return stable results
+- this is host infrastructure work, not an application bug
+
+## Host DNS Works But Docker or Containers Still Cannot Resolve
+
+### Symptom
+
+- host `curl`/`getent` works, but Docker pulls still fail
+- container-side LDAP or external lookups fail even though host DNS looks healthy
+- container DNS instability appears during install or later auth/runtime checks
+
+### Probable cause
+
+- Docker daemon inherited stale or incorrect DNS settings
+- container DNS path differs from host DNS
+- `systemd-resolved` stub behavior and Docker DNS inheritance are misaligned
+
+### How to check
+
+```bash
+cat /etc/docker/daemon.json 2>/dev/null || true
+docker info
+docker compose exec -T app bash -lc 'getent hosts <ldap-hostname>'
+docker compose exec -T app bash -lc 'getent hosts pypi.org || true'
+```
+
+### How to fix
+
+- if Docker daemon DNS is explicitly managed in your environment, correct it and restart Docker according to host policy
+- keep host DNS and Docker/container DNS aligned before rerunning install or restarting the stack
+- if the issue affects only AD lookups from containers, the installer's AD IP override may be an acceptable workaround, but it does not fix general internet or registry reachability problems
+- retry install or model bootstrap only after both host and container lookups are stable
+
+## Ollama Model Pull Fails Because of Network or DNS
+
+### Symptom
+
+- `ollama pull` fails, times out, or never completes
+- `ollama list` stays empty after install
+- `/health/ready` remains degraded because no model was fetched successfully
+
+### Probable cause
+
+- upstream Ollama reachability problem
+- host or container DNS problem
+- Docker/container egress issue
+
+### How to check
+
+```bash
+docker compose exec -T ollama ollama list
+docker compose exec -T ollama ollama pull phi3:mini
+docker compose logs --tail=100 ollama
+```
+
+### How to fix
+
+- first resolve host/Docker DNS or outbound network issues
+- retry `ollama pull` only after the basic Docker/PyPI/host reachability checks succeed
+- if the external Ollama endpoint remains unavailable while local DNS and egress are healthy, wait and retry later
+- this is outside application scope until the model source is reachable
+
 ## Login Failed or Kerberos Error
 
 ### Symptom
