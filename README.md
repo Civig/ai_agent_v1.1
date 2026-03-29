@@ -19,12 +19,13 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 
 1. [Documentation Map](docs/INDEX.md) — document roles and navigation
 2. [QUICKSTART.md](QUICKSTART.md) — shortest first launch path
-3. [Install Guide (EN)](docs/INSTALL_en.md) or [Install Guide (RU)](docs/INSTALL_ru.md) — full installation and installer behavior
-4. [Production Deployment Guide](docs/PRODUCTION_DEPLOY.md) — production-only deltas and exposure guidance
-5. [Administration (EN)](docs/ADMIN_en.md) / [Administration (RU)](docs/ADMIN_ru.md) — day-2 operations
-6. [Security Baseline (EN)](docs/SECURITY_en.md) / [Security Baseline (RU)](docs/SECURITY_ru.md) — product security baseline
-7. [Troubleshooting (EN)](docs/TROUBLESHOOTING_en.md) / [Troubleshooting (RU)](docs/TROUBLESHOOTING_ru.md) — full diagnostics and recovery
-8. [Architecture (EN)](docs/ARCHITECTURE_en.md) / [Architecture (RU)](docs/ARCHITECTURE_ru.md) — implemented system design
+3. [Supported OS Matrix](docs/SUPPORTED_OS.md) — validated vs supported vs unsupported platform status
+4. [Install Guide (EN)](docs/INSTALL_en.md) or [Install Guide (RU)](docs/INSTALL_ru.md) — full installation and installer behavior
+5. [Production Deployment Guide](docs/PRODUCTION_DEPLOY.md) — production-only deltas and exposure guidance
+6. [Administration (EN)](docs/ADMIN_en.md) / [Administration (RU)](docs/ADMIN_ru.md) — day-2 operations
+7. [Security Baseline (EN)](docs/SECURITY_en.md) / [Security Baseline (RU)](docs/SECURITY_ru.md) — product security baseline
+8. [Troubleshooting (EN)](docs/TROUBLESHOOTING_en.md) / [Troubleshooting (RU)](docs/TROUBLESHOOTING_ru.md) — full diagnostics and recovery
+9. [Architecture (EN)](docs/ARCHITECTURE_en.md) / [Architecture (RU)](docs/ARCHITECTURE_ru.md) — implemented system design
 
 ## Supported Deployment Baseline
 
@@ -39,6 +40,7 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 ## Documentation
 
 - [Documentation Map](docs/INDEX.md)
+- [Supported OS Matrix](docs/SUPPORTED_OS.md)
 - [QUICKSTART.md](QUICKSTART.md)
 - [Install Guide (EN)](docs/INSTALL_en.md)
 - [Install Guide (RU)](docs/INSTALL_ru.md)

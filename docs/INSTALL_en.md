@@ -23,6 +23,8 @@ Legacy deployment paths that may still appear in the repository:
 - Ubuntu 20.04 or newer
 - Debian 11 or newer
 
+For the canonical support policy, validation status, and unsupported-platform boundaries, use [SUPPORTED_OS.md](SUPPORTED_OS.md).
+
 ### Minimum hardware
 
 - 4 CPU cores

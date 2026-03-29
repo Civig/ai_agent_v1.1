@@ -30,17 +30,19 @@ Legacy helper files могут оставаться в репозитории д
 ## Порядок чтения
 
 1. [docs/INDEX.md](docs/INDEX.md) — карта документации и роли документов
-2. [QUICKSTART.md](QUICKSTART.md) — shortest path до первого запуска
-3. [docs/INSTALL_ru.md](docs/INSTALL_ru.md) или [docs/INSTALL_en.md](docs/INSTALL_en.md) — полная установка и поведение installer
-4. [docs/PRODUCTION_DEPLOY.md](docs/PRODUCTION_DEPLOY.md) — production-specific deltas и требования к публикации сервиса
-5. [docs/ADMIN_ru.md](docs/ADMIN_ru.md) / [docs/ADMIN_en.md](docs/ADMIN_en.md) — day-2 operations
-6. [docs/SECURITY_ru.md](docs/SECURITY_ru.md) / [docs/SECURITY_en.md](docs/SECURITY_en.md) — product security baseline
-7. [docs/TROUBLESHOOTING_ru.md](docs/TROUBLESHOOTING_ru.md) / [docs/TROUBLESHOOTING_en.md](docs/TROUBLESHOOTING_en.md) — полная диагностика и recovery
-8. [docs/ARCHITECTURE_ru.md](docs/ARCHITECTURE_ru.md) / [docs/ARCHITECTURE_en.md](docs/ARCHITECTURE_en.md) — реализованная архитектура
+2. [docs/SUPPORTED_OS.md](docs/SUPPORTED_OS.md) — canonical matrix поддерживаемых ОС, validated и unsupported статусов
+3. [QUICKSTART.md](QUICKSTART.md) — shortest path до первого запуска
+4. [docs/INSTALL_ru.md](docs/INSTALL_ru.md) или [docs/INSTALL_en.md](docs/INSTALL_en.md) — полная установка и поведение installer
+5. [docs/PRODUCTION_DEPLOY.md](docs/PRODUCTION_DEPLOY.md) — production-specific deltas и требования к публикации сервиса
+6. [docs/ADMIN_ru.md](docs/ADMIN_ru.md) / [docs/ADMIN_en.md](docs/ADMIN_en.md) — day-2 operations
+7. [docs/SECURITY_ru.md](docs/SECURITY_ru.md) / [docs/SECURITY_en.md](docs/SECURITY_en.md) — product security baseline
+8. [docs/TROUBLESHOOTING_ru.md](docs/TROUBLESHOOTING_ru.md) / [docs/TROUBLESHOOTING_en.md](docs/TROUBLESHOOTING_en.md) — полная диагностика и recovery
+9. [docs/ARCHITECTURE_ru.md](docs/ARCHITECTURE_ru.md) / [docs/ARCHITECTURE_en.md](docs/ARCHITECTURE_en.md) — реализованная архитектура
 
 ## Документация
 
 - [docs/INDEX.md](docs/INDEX.md)
+- [docs/SUPPORTED_OS.md](docs/SUPPORTED_OS.md)
 - [QUICKSTART.md](QUICKSTART.md)
 - [docs/INSTALL_ru.md](docs/INSTALL_ru.md)
 - [docs/INSTALL_en.md](docs/INSTALL_en.md)

@@ -25,6 +25,7 @@ Russian documents are the primary operator reference. English documents are kept
 
 - Primary document / Основной документ: [INSTALL_ru.md](INSTALL_ru.md)
 - Synced companion / Синхронизированная companion-версия: [INSTALL_en.md](INSTALL_en.md)
+- Supported OS matrix / Матрица поддерживаемых ОС: [SUPPORTED_OS.md](SUPPORTED_OS.md)
 - When to read / Когда читать: when preparing or performing a supported installation
 - Covers / Что покрывает: host profile, prerequisites, environment configuration, installer behavior, manual installation, first login, install verification
 - Does not cover / Что не покрывает: day-2 operations, full production hardening, architecture internals
@@ -73,6 +74,7 @@ Russian documents are the primary operator reference. English documents are kept
 
 ## Supporting And Reference Docs / Вспомогательные и справочные документы
 
+- [SUPPORTED_OS.md](SUPPORTED_OS.md) - canonical supported OS matrix and validation status
 - [../PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) - repository layout reference
 - [../CHANGELOG.md](../CHANGELOG.md) - release and change history
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) - contribution workflow and coding style
