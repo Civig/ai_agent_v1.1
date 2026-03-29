@@ -402,6 +402,28 @@ docker compose up -d --build
 docker compose down
 ```
 
+## Uninstall
+
+Используйте repository uninstall flow, когда нужно снять текущее развёртывание без широкого host cleanup:
+
+```bash
+bash uninstall.sh --dry-run
+bash uninstall.sh --yes
+```
+
+Поведение по умолчанию:
+
+- удаляет текущий Docker Compose stack этого репозитория, включая named Compose volumes
+- удаляет project-local generated state: `.env`, `deploy/krb5.conf`, installer-managed `docker-compose.override.yml`, текущую Ollama host directory и `.install`
+- сохраняет host-installed Docker/Ollama packages, apt repositories, membership в группе `docker` и unrelated Docker assets на хосте
+- сохраняет `deploy/sso` keytab material, потому что это operator-provided secret, а не артефакт, который генерирует installer
+
+Обработка TLS certificates:
+
+- если install manifest подтверждает, что self-signed TLS material был сгенерирован через `install.sh`, `uninstall.sh` удаляет `deploy/certs`
+- если ownership installer не доказан, `deploy/certs` сохраняется, чтобы не удалить operator-managed certificate material
+- поэтому более старые установки, сделанные до manifest-aware flow, могут сохранять `deploy/certs` даже после uninstall
+
 ## Проверка health
 
 ### Состояние контейнеров
