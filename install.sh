@@ -311,15 +311,25 @@ capture_preinstall_state() {
     [[ -f /etc/apt/sources.list.d/docker.list ]] && PREEXISTING_DOCKER_REPO_FILE="1"
 
     if systemd_unit_exists docker.service; then
-        systemd_unit_enabled docker.service && PREINSTALL_DOCKER_SERVICE_ENABLED="1"
-        systemd_unit_active docker.service && PREINSTALL_DOCKER_SERVICE_ACTIVE="1"
+        if systemd_unit_enabled docker.service; then
+            PREINSTALL_DOCKER_SERVICE_ENABLED="1"
+        fi
+        if systemd_unit_active docker.service; then
+            PREINSTALL_DOCKER_SERVICE_ACTIVE="1"
+        fi
     fi
 
     if systemd_unit_exists ollama.service; then
         PREINSTALL_OLLAMA_SERVICE_PRESENT="1"
-        systemd_unit_enabled ollama.service && PREINSTALL_OLLAMA_SERVICE_ENABLED="1"
-        systemd_unit_active ollama.service && PREINSTALL_OLLAMA_SERVICE_ACTIVE="1"
+        if systemd_unit_enabled ollama.service; then
+            PREINSTALL_OLLAMA_SERVICE_ENABLED="1"
+        fi
+        if systemd_unit_active ollama.service; then
+            PREINSTALL_OLLAMA_SERVICE_ACTIVE="1"
+        fi
     fi
+
+    return 0
 }
 
 safe_lscpu_field() {
