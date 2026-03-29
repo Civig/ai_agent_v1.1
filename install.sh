@@ -6,6 +6,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${ROOT_DIR}/.install"
 LOG_FILE="${LOG_DIR}/install-$(date +%Y%m%d-%H%M%S).log"
 STATE_FILE="${LOG_DIR}/install-state.env"
+HOST_STATE_DIR="/var/lib/corporate-ai-assistant"
+HOST_STATE_FILE="${HOST_STATE_DIR}/host-state.env"
+HOST_BACKUP_DIR="${HOST_STATE_DIR}/backups"
+HOST_DOCKER_REPO_BACKUP="${HOST_BACKUP_DIR}/docker.list.preinstall.bak"
 INSTALL_USER="${SUDO_USER:-${USER:-$(id -un)}}"
 
 mkdir -p "${LOG_DIR}"
@@ -18,6 +22,10 @@ readonly ROOT_DIR
 readonly LOG_DIR
 readonly LOG_FILE
 readonly STATE_FILE
+readonly HOST_STATE_DIR
+readonly HOST_STATE_FILE
+readonly HOST_BACKUP_DIR
+readonly HOST_DOCKER_REPO_BACKUP
 readonly INSTALL_USER
 
 MANAGED_OVERRIDE_MARKER="# Managed by Corporate AI Assistant install.sh"
@@ -102,6 +110,8 @@ INSTALLER_MANAGED_DOCKER_REPO_FILE="0"
 DOCKER_REPO_FILE_BACKUP=""
 INSTALLER_ADDED_DOCKER_KEYRING="0"
 INSTALLER_ADDED_USER_TO_DOCKER_GROUP="0"
+INSTALLER_INSTALLED_DOCKER_ENGINE="0"
+INSTALLER_INSTALLED_DOCKER_COMPOSE_PLUGIN="0"
 INSTALLER_INSTALLED_OLLAMA_CLI="0"
 POSTINSTALL_OLLAMA_BIN_PATH=""
 POSTINSTALL_OLLAMA_SERVICE_FRAGMENT=""
@@ -192,6 +202,10 @@ status_from_command() {
     fi
 }
 
+bool_is_true() {
+    [[ "${1:-0}" == "1" || "${1:-}" == "true" ]]
+}
+
 systemd_unit_exists() {
     command_exists systemctl && systemctl list-unit-files "$1" >/dev/null 2>&1
 }
@@ -211,6 +225,55 @@ append_unique_installed_package() {
         [[ "${existing}" == "${pkg}" ]] && return
     done
     APT_PACKAGES_INSTALLED_BY_INSTALLER+=("${pkg}")
+}
+
+append_unique_array_item() {
+    local array_name="$1"
+    local item="$2"
+    local existing
+    local -n target_array="${array_name}"
+
+    for existing in "${target_array[@]}"; do
+        [[ "${existing}" == "${item}" ]] && return
+    done
+    target_array+=("${item}")
+}
+
+array_contains() {
+    local needle="$1"
+    shift
+    local item
+    for item in "$@"; do
+        [[ "${item}" == "${needle}" ]] && return 0
+    done
+    return 1
+}
+
+state_file_value() {
+    local file="$1"
+    local key="$2"
+
+    [[ -f "${file}" ]] || return 1
+    awk -F= -v key="${key}" '$1 == key { print substr($0, index($0, "=") + 1) }' "${file}" | tail -n 1
+}
+
+coalesce_value() {
+    local value
+    for value in "$@"; do
+        if [[ -n "${value}" ]]; then
+            printf "%s" "${value}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+or_bool() {
+    if bool_is_true "${1:-0}" || bool_is_true "${2:-0}"; then
+        printf "1"
+    else
+        printf "0"
+    fi
 }
 
 join_by_space() {
@@ -766,9 +829,14 @@ install_base_packages() {
 configure_docker_repository() {
     local keyring="/etc/apt/keyrings/docker.asc"
     local repo_file="/etc/apt/sources.list.d/docker.list"
-    local backup_file="${LOG_DIR}/docker.list.preinstall.bak"
+    local backup_file="${HOST_DOCKER_REPO_BACKUP}"
     local architecture
+    local existing_owned_repo="0"
 
+    existing_owned_repo="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_REPO_FILE" || true)"
+    if bool_is_true "${existing_owned_repo}"; then
+        DOCKER_REPO_FILE_BACKUP="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_REPO_BACKUP" || true)"
+    fi
     architecture="$(dpkg --print-architecture)"
     as_root install -m 0755 -d /etc/apt/keyrings
     if [[ ! -f "${keyring}" ]]; then
@@ -782,9 +850,10 @@ configure_docker_repository() {
     fi
 
     if [[ ! -f "${repo_file}" ]] || ! grep -q "download.docker.com/linux/${OS_ID}" "${repo_file}"; then
-        if [[ -f "${repo_file}" && -z "${DOCKER_REPO_FILE_BACKUP}" ]]; then
-            cp "${repo_file}" "${backup_file}"
-            chmod 600 "${backup_file}"
+        if [[ -f "${repo_file}" && -z "${DOCKER_REPO_FILE_BACKUP}" ]] && ! bool_is_true "${existing_owned_repo}"; then
+            as_root install -m 0755 -d "${HOST_BACKUP_DIR}"
+            as_root cp "${repo_file}" "${backup_file}"
+            as_root chmod 0644 "${backup_file}"
             DOCKER_REPO_FILE_BACKUP="${backup_file}"
         fi
         printf "deb [arch=%s signed-by=%s] https://download.docker.com/linux/%s %s stable\n" \
@@ -804,6 +873,15 @@ ensure_docker_installed() {
         configure_docker_repository
         APT_UPDATED=0
         apt_install_if_missing docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    fi
+
+    if array_contains "docker-ce" "${APT_PACKAGES_INSTALLED_BY_INSTALLER[@]}" || \
+       array_contains "docker-ce-cli" "${APT_PACKAGES_INSTALLED_BY_INSTALLER[@]}" || \
+       array_contains "containerd.io" "${APT_PACKAGES_INSTALLED_BY_INSTALLER[@]}"; then
+        INSTALLER_INSTALLED_DOCKER_ENGINE="1"
+    fi
+    if array_contains "docker-compose-plugin" "${APT_PACKAGES_INSTALLED_BY_INSTALLER[@]}"; then
+        INSTALLER_INSTALLED_DOCKER_COMPOSE_PLUGIN="1"
     fi
 
     as_root systemctl enable --now docker
@@ -1541,13 +1619,16 @@ write_install_manifest() {
 
     cat >"${STATE_FILE}" <<EOF
 # Generated by Corporate AI Assistant install.sh
-MANIFEST_VERSION=1
+MANIFEST_VERSION=2
 REPO_ROOT=${ROOT_DIR}
+HOST_STATE_DIR=${HOST_STATE_DIR}
+HOST_STATE_FILE=${HOST_STATE_FILE}
 INSTALL_USER=${INSTALL_USER}
 OLLAMA_HOST_DIR=${ollama_dir}
 GENERATED_ENV_FILE=1
 GENERATED_KRB5_CONF=1
 GENERATED_TLS_CERTS=${TLS_CERTS_GENERATED_BY_INSTALLER}
+CERTS_GENERATED_BY_INSTALLER=${TLS_CERTS_GENERATED_BY_INSTALLER}
 PREINSTALL_DOCKER_CLI=${PREINSTALL_DOCKER_CLI}
 PREINSTALL_DOCKER_COMPOSE_PLUGIN=${PREINSTALL_DOCKER_COMPOSE_PLUGIN}
 PREINSTALL_DOCKER_SERVICE_ENABLED=${PREINSTALL_DOCKER_SERVICE_ENABLED}
@@ -1563,6 +1644,8 @@ INSTALLER_MANAGED_DOCKER_REPO_FILE=${INSTALLER_MANAGED_DOCKER_REPO_FILE}
 DOCKER_REPO_FILE_BACKUP=${DOCKER_REPO_FILE_BACKUP}
 INSTALLER_ADDED_DOCKER_KEYRING=${INSTALLER_ADDED_DOCKER_KEYRING}
 INSTALLER_ADDED_USER_TO_DOCKER_GROUP=${INSTALLER_ADDED_USER_TO_DOCKER_GROUP}
+INSTALLER_INSTALLED_DOCKER_ENGINE=${INSTALLER_INSTALLED_DOCKER_ENGINE}
+INSTALLER_INSTALLED_DOCKER_COMPOSE_PLUGIN=${INSTALLER_INSTALLED_DOCKER_COMPOSE_PLUGIN}
 INSTALLER_INSTALLED_OLLAMA_CLI=${INSTALLER_INSTALLED_OLLAMA_CLI}
 POSTINSTALL_OLLAMA_BIN_PATH=${POSTINSTALL_OLLAMA_BIN_PATH}
 POSTINSTALL_OLLAMA_SERVICE_FRAGMENT=${POSTINSTALL_OLLAMA_SERVICE_FRAGMENT}
@@ -1570,6 +1653,116 @@ APT_PACKAGES_INSTALLED_BY_INSTALLER=$(join_by_space "${APT_PACKAGES_INSTALLED_BY
 EOF
     chmod 600 "${STATE_FILE}"
     print_success "Install manifest recorded at ${STATE_FILE}"
+}
+
+write_host_state_manifest() {
+    local existing_owned_packages existing_owned_docker_engine existing_owned_compose_plugin
+    local existing_owned_repo_file existing_owned_repo_backup existing_owned_keyring
+    local existing_owned_group existing_owned_group_user existing_owned_ollama_cli
+    local existing_owned_ollama_bin existing_owned_ollama_service
+    local existing_pre_docker_cli existing_pre_docker_compose existing_pre_docker_enabled existing_pre_docker_active
+    local existing_pre_ollama_cli existing_pre_ollama_service_present existing_pre_ollama_enabled existing_pre_ollama_active
+    local owned_docker_engine owned_compose_plugin owned_repo_file owned_keyring owned_group owned_ollama_cli
+    local owned_group_user owned_repo_backup owned_ollama_bin owned_ollama_service
+    local pre_docker_cli pre_docker_compose pre_docker_enabled pre_docker_active
+    local pre_ollama_cli pre_ollama_service_present pre_ollama_enabled pre_ollama_active
+    local temp_file pkg
+    local -a merged_owned_packages=()
+
+    existing_owned_packages="$(state_file_value "${HOST_STATE_FILE}" "OWNED_APT_PACKAGES" || true)"
+    existing_owned_docker_engine="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_ENGINE" || true)"
+    existing_owned_compose_plugin="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_COMPOSE_PLUGIN" || true)"
+    existing_owned_repo_file="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_REPO_FILE" || true)"
+    existing_owned_repo_backup="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_REPO_BACKUP" || true)"
+    existing_owned_keyring="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_KEYRING" || true)"
+    existing_owned_group="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_GROUP_MEMBERSHIP" || true)"
+    existing_owned_group_user="$(state_file_value "${HOST_STATE_FILE}" "OWNED_DOCKER_GROUP_USER" || true)"
+    existing_owned_ollama_cli="$(state_file_value "${HOST_STATE_FILE}" "OWNED_OLLAMA_CLI" || true)"
+    existing_owned_ollama_bin="$(state_file_value "${HOST_STATE_FILE}" "OWNED_OLLAMA_BIN_PATH" || true)"
+    existing_owned_ollama_service="$(state_file_value "${HOST_STATE_FILE}" "OWNED_OLLAMA_SERVICE_FRAGMENT" || true)"
+    existing_pre_docker_cli="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_DOCKER_CLI" || true)"
+    existing_pre_docker_compose="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_DOCKER_COMPOSE_PLUGIN" || true)"
+    existing_pre_docker_enabled="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_DOCKER_SERVICE_ENABLED" || true)"
+    existing_pre_docker_active="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_DOCKER_SERVICE_ACTIVE" || true)"
+    existing_pre_ollama_cli="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_OLLAMA_CLI" || true)"
+    existing_pre_ollama_service_present="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_OLLAMA_SERVICE_PRESENT" || true)"
+    existing_pre_ollama_enabled="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_OLLAMA_SERVICE_ENABLED" || true)"
+    existing_pre_ollama_active="$(state_file_value "${HOST_STATE_FILE}" "PREINSTALL_OLLAMA_SERVICE_ACTIVE" || true)"
+
+    if [[ -n "${existing_owned_packages}" ]]; then
+        local -a existing_packages=()
+        read -r -a existing_packages <<<"${existing_owned_packages}"
+        for pkg in "${existing_packages[@]}"; do
+            append_unique_array_item "merged_owned_packages" "${pkg}"
+        done
+    fi
+    for pkg in "${APT_PACKAGES_INSTALLED_BY_INSTALLER[@]}"; do
+        append_unique_array_item "merged_owned_packages" "${pkg}"
+    done
+
+    owned_docker_engine="$(or_bool "${existing_owned_docker_engine}" "${INSTALLER_INSTALLED_DOCKER_ENGINE}")"
+    owned_compose_plugin="$(or_bool "${existing_owned_compose_plugin}" "${INSTALLER_INSTALLED_DOCKER_COMPOSE_PLUGIN}")"
+    owned_repo_file="$(or_bool "${existing_owned_repo_file}" "${INSTALLER_MANAGED_DOCKER_REPO_FILE}")"
+    owned_keyring="$(or_bool "${existing_owned_keyring}" "${INSTALLER_ADDED_DOCKER_KEYRING}")"
+    owned_group="$(or_bool "${existing_owned_group}" "${INSTALLER_ADDED_USER_TO_DOCKER_GROUP}")"
+    owned_ollama_cli="$(or_bool "${existing_owned_ollama_cli}" "${INSTALLER_INSTALLED_OLLAMA_CLI}")"
+
+    owned_group_user="${existing_owned_group_user}"
+    if [[ -z "${owned_group_user}" ]] && bool_is_true "${INSTALLER_ADDED_USER_TO_DOCKER_GROUP}"; then
+        owned_group_user="${INSTALL_USER}"
+    fi
+    owned_repo_backup="$(coalesce_value "${existing_owned_repo_backup}" "${DOCKER_REPO_FILE_BACKUP}" || true)"
+
+    if bool_is_true "${owned_ollama_cli}"; then
+        owned_ollama_bin="$(coalesce_value "${existing_owned_ollama_bin}" "${POSTINSTALL_OLLAMA_BIN_PATH}" || true)"
+        owned_ollama_service="$(coalesce_value "${existing_owned_ollama_service}" "${POSTINSTALL_OLLAMA_SERVICE_FRAGMENT}" || true)"
+    else
+        owned_ollama_bin=""
+        owned_ollama_service=""
+    fi
+
+    pre_docker_cli="$(coalesce_value "${existing_pre_docker_cli}" "${PREINSTALL_DOCKER_CLI}" || true)"
+    pre_docker_compose="$(coalesce_value "${existing_pre_docker_compose}" "${PREINSTALL_DOCKER_COMPOSE_PLUGIN}" || true)"
+    pre_docker_enabled="$(coalesce_value "${existing_pre_docker_enabled}" "${PREINSTALL_DOCKER_SERVICE_ENABLED}" || true)"
+    pre_docker_active="$(coalesce_value "${existing_pre_docker_active}" "${PREINSTALL_DOCKER_SERVICE_ACTIVE}" || true)"
+    pre_ollama_cli="$(coalesce_value "${existing_pre_ollama_cli}" "${PREINSTALL_OLLAMA_CLI}" || true)"
+    pre_ollama_service_present="$(coalesce_value "${existing_pre_ollama_service_present}" "${PREINSTALL_OLLAMA_SERVICE_PRESENT}" || true)"
+    pre_ollama_enabled="$(coalesce_value "${existing_pre_ollama_enabled}" "${PREINSTALL_OLLAMA_SERVICE_ENABLED}" || true)"
+    pre_ollama_active="$(coalesce_value "${existing_pre_ollama_active}" "${PREINSTALL_OLLAMA_SERVICE_ACTIVE}" || true)"
+
+    temp_file="$(mktemp)"
+    cat >"${temp_file}" <<EOF
+# Generated by Corporate AI Assistant install.sh
+HOST_STATE_VERSION=1
+LAST_REPO_ROOT=${ROOT_DIR}
+INSTALL_USER=${INSTALL_USER}
+OWNED_APT_PACKAGES=$(join_by_space "${merged_owned_packages[@]}")
+OWNED_DOCKER_ENGINE=${owned_docker_engine}
+OWNED_DOCKER_COMPOSE_PLUGIN=${owned_compose_plugin}
+OWNED_DOCKER_REPO_FILE=${owned_repo_file}
+OWNED_DOCKER_REPO_BACKUP=${owned_repo_backup}
+OWNED_DOCKER_KEYRING=${owned_keyring}
+OWNED_DOCKER_GROUP_MEMBERSHIP=${owned_group}
+OWNED_DOCKER_GROUP_USER=${owned_group_user}
+OWNED_OLLAMA_CLI=${owned_ollama_cli}
+OWNED_OLLAMA_BIN_PATH=${owned_ollama_bin}
+OWNED_OLLAMA_SERVICE_FRAGMENT=${owned_ollama_service}
+PREINSTALL_DOCKER_CLI=${pre_docker_cli}
+PREINSTALL_DOCKER_COMPOSE_PLUGIN=${pre_docker_compose}
+PREINSTALL_DOCKER_SERVICE_ENABLED=${pre_docker_enabled}
+PREINSTALL_DOCKER_SERVICE_ACTIVE=${pre_docker_active}
+PREINSTALL_OLLAMA_CLI=${pre_ollama_cli}
+PREINSTALL_OLLAMA_SERVICE_PRESENT=${pre_ollama_service_present}
+PREINSTALL_OLLAMA_SERVICE_ENABLED=${pre_ollama_enabled}
+PREINSTALL_OLLAMA_SERVICE_ACTIVE=${pre_ollama_active}
+CERTS_GENERATED_BY_INSTALLER=${TLS_CERTS_GENERATED_BY_INSTALLER}
+EOF
+
+    as_root install -m 0755 -d "${HOST_STATE_DIR}"
+    as_root cp "${temp_file}" "${HOST_STATE_FILE}"
+    as_root chmod 0644 "${HOST_STATE_FILE}"
+    rm -f "${temp_file}"
+    print_success "Durable host ownership manifest recorded at ${HOST_STATE_FILE}"
 }
 
 wait_for_ollama_container() {
@@ -1723,6 +1916,7 @@ main() {
     write_compose_override_if_needed
     ensure_ollama_host_dir
     ensure_tls_certs
+    write_host_state_manifest
     write_install_manifest
     build_and_start_stack
     wait_for_ready

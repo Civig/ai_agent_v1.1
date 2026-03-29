@@ -4,12 +4,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="${ROOT_DIR}/.install/install-state.env"
-LOG_FILE="/tmp/corporate-ai-uninstall-$(date +%Y%m%d-%H%M%S).log"
+HOST_STATE_DIR="/var/lib/corporate-ai-assistant"
+HOST_STATE_FILE="${HOST_STATE_DIR}/host-state.env"
+RUN_TOKEN="$(date +%Y%m%d-%H%M%S)-$$"
+LOG_FILE="/tmp/corporate-ai-uninstall-${RUN_TOKEN}.log"
+HELPER_FILE="/tmp/corporate-ai-uninstall-helper-${RUN_TOKEN}.sh"
 MANAGED_OVERRIDE_MARKER="# Managed by Corporate AI Assistant install.sh"
 
 readonly ROOT_DIR
 readonly STATE_FILE
+readonly HOST_STATE_DIR
+readonly HOST_STATE_FILE
+readonly RUN_TOKEN
 readonly LOG_FILE
+readonly HELPER_FILE
 readonly MANAGED_OVERRIDE_MARKER
 
 DRY_RUN=0
@@ -98,10 +106,32 @@ systemd_unit_exists() {
     command_exists systemctl && systemctl list-unit-files "$1" >/dev/null 2>&1
 }
 
-state_value() {
+state_value_from_file() {
+    local file="$1"
+    local key="$2"
+
+    [[ -f "${file}" ]] || return 1
+    awk -F= -v key="${key}" '$1 == key { print substr($0, index($0, "=") + 1) }' "${file}" | tail -n 1
+}
+
+repo_state_value() {
+    state_value_from_file "${STATE_FILE}" "$1"
+}
+
+host_state_value() {
+    state_value_from_file "${HOST_STATE_FILE}" "$1"
+}
+
+preferred_state_value() {
     local key="$1"
-    [[ -f "${STATE_FILE}" ]] || return 1
-    grep -E "^${key}=" "${STATE_FILE}" | tail -n 1 | cut -d'=' -f2- || true
+    local value=""
+
+    value="$(host_state_value "${key}" || true)"
+    if [[ -n "${value}" ]]; then
+        printf "%s" "${value}"
+        return 0
+    fi
+    repo_state_value "${key}"
 }
 
 extract_ollama_host_dir() {
@@ -237,7 +267,7 @@ remove_tls_certs_if_manifest_allows() {
     local generated_tls
     local cert_dir="${ROOT_DIR}/deploy/certs"
 
-    generated_tls="$(state_value "GENERATED_TLS_CERTS" || true)"
+    generated_tls="$(repo_state_value "CERTS_GENERATED_BY_INSTALLER" || repo_state_value "GENERATED_TLS_CERTS" || true)"
     if bool_is_true "${generated_tls}"; then
         remove_path "installer-generated TLS certificate directory" "${cert_dir}"
         return
@@ -254,7 +284,7 @@ remove_ollama_state() {
     local ollama_dir
     local resolved_dir
 
-    ollama_dir="$(state_value "OLLAMA_HOST_DIR" || true)"
+    ollama_dir="$(repo_state_value "OLLAMA_HOST_DIR" || true)"
     if [[ -z "${ollama_dir}" ]]; then
         ollama_dir="$(extract_ollama_host_dir)"
     fi
@@ -323,7 +353,10 @@ remove_manifest_owned_packages() {
     local -a installed_packages=()
     local pkg
 
-    package_line="$(state_value "APT_PACKAGES_INSTALLED_BY_INSTALLER" || true)"
+    package_line="$(host_state_value "OWNED_APT_PACKAGES" || true)"
+    if [[ -z "${package_line}" ]]; then
+        package_line="$(repo_state_value "APT_PACKAGES_INSTALLED_BY_INSTALLER" || true)"
+    fi
     if [[ -z "${package_line}" ]]; then
         print_warning "Manifest does not contain installer-owned apt package data; host package rollback is skipped"
         return
@@ -339,7 +372,7 @@ remove_manifest_owned_packages() {
         return
     fi
 
-    run_root_cmd "Removed manifest-owned apt packages" env DEBIAN_FRONTEND=noninteractive apt-get remove -y "${installed_packages[@]}"
+    run_root_cmd "Purged manifest-owned apt packages" env DEBIAN_FRONTEND=noninteractive apt-get purge -y "${installed_packages[@]}"
 }
 
 rollback_docker_repo_and_keyring() {
@@ -347,9 +380,9 @@ rollback_docker_repo_and_keyring() {
     local repo_file="/etc/apt/sources.list.d/docker.list"
     local keyring_file="/etc/apt/keyrings/docker.asc"
 
-    managed_repo="$(state_value "INSTALLER_MANAGED_DOCKER_REPO_FILE" || true)"
-    backup_file="$(state_value "DOCKER_REPO_FILE_BACKUP" || true)"
-    added_keyring="$(state_value "INSTALLER_ADDED_DOCKER_KEYRING" || true)"
+    managed_repo="$(host_state_value "OWNED_DOCKER_REPO_FILE" || repo_state_value "INSTALLER_MANAGED_DOCKER_REPO_FILE" || true)"
+    backup_file="$(host_state_value "OWNED_DOCKER_REPO_BACKUP" || repo_state_value "DOCKER_REPO_FILE_BACKUP" || true)"
+    added_keyring="$(host_state_value "OWNED_DOCKER_KEYRING" || repo_state_value "INSTALLER_ADDED_DOCKER_KEYRING" || true)"
 
     if bool_is_true "${managed_repo}"; then
         if [[ -n "${backup_file}" && -f "${backup_file}" ]]; then
@@ -371,8 +404,8 @@ rollback_docker_repo_and_keyring() {
 rollback_docker_group_membership() {
     local added_membership install_user
 
-    added_membership="$(state_value "INSTALLER_ADDED_USER_TO_DOCKER_GROUP" || true)"
-    install_user="$(state_value "INSTALL_USER" || true)"
+    added_membership="$(host_state_value "OWNED_DOCKER_GROUP_MEMBERSHIP" || repo_state_value "INSTALLER_ADDED_USER_TO_DOCKER_GROUP" || true)"
+    install_user="$(host_state_value "OWNED_DOCKER_GROUP_USER" || repo_state_value "INSTALL_USER" || true)"
 
     if ! bool_is_true "${added_membership}"; then
         print_info "docker group membership is preserved because installer ownership is not proven"
@@ -412,13 +445,13 @@ rollback_ollama_host_install() {
     local preexisting_ollama install_owned_ollama service_present service_enabled service_active
     local bin_path service_fragment
 
-    preexisting_ollama="$(state_value "PREINSTALL_OLLAMA_CLI" || true)"
-    install_owned_ollama="$(state_value "INSTALLER_INSTALLED_OLLAMA_CLI" || true)"
-    service_present="$(state_value "PREINSTALL_OLLAMA_SERVICE_PRESENT" || true)"
-    service_enabled="$(state_value "PREINSTALL_OLLAMA_SERVICE_ENABLED" || true)"
-    service_active="$(state_value "PREINSTALL_OLLAMA_SERVICE_ACTIVE" || true)"
-    bin_path="$(state_value "POSTINSTALL_OLLAMA_BIN_PATH" || true)"
-    service_fragment="$(state_value "POSTINSTALL_OLLAMA_SERVICE_FRAGMENT" || true)"
+    preexisting_ollama="$(preferred_state_value "PREINSTALL_OLLAMA_CLI" || true)"
+    install_owned_ollama="$(host_state_value "OWNED_OLLAMA_CLI" || repo_state_value "INSTALLER_INSTALLED_OLLAMA_CLI" || true)"
+    service_present="$(preferred_state_value "PREINSTALL_OLLAMA_SERVICE_PRESENT" || true)"
+    service_enabled="$(preferred_state_value "PREINSTALL_OLLAMA_SERVICE_ENABLED" || true)"
+    service_active="$(preferred_state_value "PREINSTALL_OLLAMA_SERVICE_ACTIVE" || true)"
+    bin_path="$(host_state_value "OWNED_OLLAMA_BIN_PATH" || preferred_state_value "POSTINSTALL_OLLAMA_BIN_PATH" || true)"
+    service_fragment="$(host_state_value "OWNED_OLLAMA_SERVICE_FRAGMENT" || preferred_state_value "POSTINSTALL_OLLAMA_SERVICE_FRAGMENT" || true)"
 
     if bool_is_true "${install_owned_ollama}" && ! bool_is_true "${preexisting_ollama}"; then
         if systemd_unit_exists ollama.service; then
@@ -472,11 +505,17 @@ rollback_ollama_host_install() {
 }
 
 rollback_docker_service_state_if_needed() {
-    local pre_docker_cli pre_enabled pre_active
+    local owned_docker_engine pre_docker_cli pre_enabled pre_active
 
-    pre_docker_cli="$(state_value "PREINSTALL_DOCKER_CLI" || true)"
-    pre_enabled="$(state_value "PREINSTALL_DOCKER_SERVICE_ENABLED" || true)"
-    pre_active="$(state_value "PREINSTALL_DOCKER_SERVICE_ACTIVE" || true)"
+    owned_docker_engine="$(host_state_value "OWNED_DOCKER_ENGINE" || true)"
+    if bool_is_true "${owned_docker_engine}"; then
+        print_info "Docker service rollback is covered by removing installer-owned Docker packages"
+        return
+    fi
+
+    pre_docker_cli="$(preferred_state_value "PREINSTALL_DOCKER_CLI" || true)"
+    pre_enabled="$(preferred_state_value "PREINSTALL_DOCKER_SERVICE_ENABLED" || true)"
+    pre_active="$(preferred_state_value "PREINSTALL_DOCKER_SERVICE_ACTIVE" || true)"
 
     if ! bool_is_true "${pre_docker_cli}"; then
         print_info "Docker service state is not restored because Docker did not pre-exist install according to the manifest"
@@ -500,10 +539,34 @@ remove_project_state() {
     remove_tls_certs_if_manifest_allows
 }
 
+cleanup_host_state() {
+    local backup_file
+
+    backup_file="$(host_state_value "OWNED_DOCKER_REPO_BACKUP" || true)"
+    if [[ -n "${backup_file}" ]]; then
+        remove_root_path "durable Docker repo backup" "${backup_file}"
+    fi
+    remove_root_path "durable host manifest" "${HOST_STATE_FILE}"
+
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+        print_info "[dry-run] sudo rmdir --ignore-fail-on-non-empty ${HOST_STATE_DIR}/backups"
+        print_info "[dry-run] sudo rmdir --ignore-fail-on-non-empty ${HOST_STATE_DIR}"
+        return
+    fi
+
+    as_root rmdir --ignore-fail-on-non-empty "${HOST_STATE_DIR}/backups" >/dev/null 2>&1 || true
+    as_root rmdir --ignore-fail-on-non-empty "${HOST_STATE_DIR}" >/dev/null 2>&1 || true
+    print_success "Durable host manifest state cleaned up"
+}
+
 run_factory_reset() {
-    if [[ ! -f "${STATE_FILE}" ]]; then
+    if [[ ! -f "${STATE_FILE}" && ! -f "${HOST_STATE_FILE}" ]]; then
         print_warning "Install manifest is missing. Factory-reset will be partial and limited to provable project-local cleanup."
         return
+    fi
+
+    if [[ ! -f "${STATE_FILE}" && -f "${HOST_STATE_FILE}" ]]; then
+        print_warning "Repo-local manifest is missing; continuing with durable host manifest for installer-owned host rollback"
     fi
 
     rollback_ollama_host_install
@@ -511,22 +574,30 @@ run_factory_reset() {
     rollback_docker_repo_and_keyring
     rollback_docker_group_membership
     rollback_docker_service_state_if_needed
+    cleanup_host_state
 }
 
 schedule_repo_removal() {
     if [[ "${DRY_RUN}" -eq 1 ]]; then
-        print_info "[dry-run] deferred background removal of ${ROOT_DIR} and ${LOG_FILE}"
+        print_info "[dry-run] write deferred self-delete helper ${HELPER_FILE}"
+        print_info "[dry-run] deferred background removal of ${ROOT_DIR}, ${LOG_FILE}, and ${HELPER_FILE}"
         return
     fi
 
-    nohup bash -c '
-        set -euo pipefail
-        target_dir="$1"
-        log_file="$2"
-        sleep 1
-        rm -rf -- "$target_dir"
-        rm -f -- "$log_file"
-    ' bash "${ROOT_DIR}" "${LOG_FILE}" >/dev/null 2>&1 </dev/null &
+    cat >"${HELPER_FILE}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+target_dir="$1"
+log_file="$2"
+helper_file="$3"
+
+sleep 1
+rm -rf -- "${target_dir}"
+rm -f -- "${log_file}"
+rm -f -- "${helper_file}"
+EOF
+    chmod 700 "${HELPER_FILE}"
+    nohup bash "${HELPER_FILE}" "${ROOT_DIR}" "${LOG_FILE}" "${HELPER_FILE}" >/dev/null 2>&1 </dev/null &
 
     print_success "Deferred repository self-delete has been scheduled"
 }
@@ -610,20 +681,24 @@ print_plan() {
     print_info "- remove deploy/certs only when the install manifest proves install.sh generated them"
     if [[ "${FACTORY_RESET}" -eq 1 ]]; then
         print_info "Factory-reset additions:"
-        print_info "- remove exact apt packages recorded as installer-owned"
+        print_info "- remove exact apt packages recorded as installer-owned in the durable host manifest"
         print_info "- restore or remove Docker repo/keyring only when manifest ownership exists"
         print_info "- restore or remove Docker/Ollama host service state only when manifest proves installer changed it"
         print_info "- remove docker group membership only when manifest proves installer added it"
+        print_info "- remove durable host ownership state after successful rollback"
     fi
     if [[ "${REMOVE_REPO}" -eq 1 ]]; then
         print_info "Repo removal:"
-        print_info "- schedule deferred background deletion of the repository directory and this uninstall log"
+        print_info "- schedule deferred background deletion of the repository directory, this uninstall log, and the helper itself"
     fi
     print_info "Preserved on purpose:"
     print_info "- unrelated Docker assets"
     print_info "- deploy/sso keytab material"
     print_info "- host dependencies without manifest ownership proof"
     print_info "Uninstall log: ${LOG_FILE}"
+    if [[ "${REMOVE_REPO}" -eq 1 ]]; then
+        print_info "Self-delete helper: ${HELPER_FILE}"
+    fi
 }
 
 main() {

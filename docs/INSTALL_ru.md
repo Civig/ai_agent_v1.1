@@ -442,19 +442,21 @@ sudo bash uninstall.sh --yes --factory-reset --remove-repo
 - может восстановить или удалить Docker repo/keyring только когда ownership installer доказан
 - может восстановить или удалить Docker/Ollama host service state только если manifest доказывает, что installer его изменял
 - может убрать membership в группе `docker` только когда manifest доказывает, что installer её добавил
+- использует durable host manifest в `/var/lib/corporate-ai-assistant/host-state.env`, поэтому rollback installer-owned host dependencies переживает safe uninstall плюс reinstall cycle
 - по-прежнему не трогает unrelated Docker assets и unrelated host configuration
 
 Удаление repo и self-delete:
 
 - `--remove-repo` требует `--factory-reset`
 - удаление repo выполняется через deferred background cleanup после завершения основного скрипта, поэтому текущий script может безопасно удалить собственный репозиторий
+- deferred helper удаляет текущий uninstall log и собственный helper file, поэтому успешный `--remove-repo` run не должен оставлять новые `/tmp/corporate-ai-uninstall-*` helper или log traces
 - `--remove-repo` намеренно сделан явным, потому что он удаляет всю директорию репозитория
 
 Manifest и TLS handling:
 
 - если install manifest подтверждает, что self-signed TLS material был сгенерирован через `install.sh`, `uninstall.sh` удаляет `deploy/certs`
 - если ownership installer не доказан, `deploy/certs` сохраняется, чтобы не удалить operator-managed certificate material
-- установки, созданные до expanded manifest flow, могут выполнять только частичный factory-reset rollback, потому что ownership host dependencies тогда ещё не записывался
+- установки, созданные до durable host manifest flow, могут выполнять только частичный factory-reset rollback, потому что cumulative ownership installer-owned host dependencies тогда ещё не записывался
 
 ## Проверка health
 

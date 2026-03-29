@@ -442,19 +442,21 @@ Factory-reset behavior:
 - can restore or remove Docker repo/keyring state only when installer ownership is proven
 - can restore or remove Docker/Ollama host service state only when the manifest proves installer changed it
 - can remove docker group membership only when the manifest proves installer added it
+- uses a durable host manifest at `/var/lib/corporate-ai-assistant/host-state.env`, so installer-owned host rollback survives safe uninstall plus reinstall cycles
 - still does not touch unrelated Docker assets or unrelated host configuration
 
 Repo removal and self-delete:
 
 - `--remove-repo` requires `--factory-reset`
 - repository removal happens through deferred background cleanup after the main script finishes, so the running script can delete its own repository safely
+- the deferred helper removes the current uninstall log and its own helper file, so a successful `--remove-repo` run does not leave new `/tmp/corporate-ai-uninstall-*` helper or log leftovers
 - `--remove-repo` is intentionally explicit because it removes the entire repository directory
 
 Manifest and TLS handling:
 
 - if the install manifest proves that `install.sh` generated self-signed TLS material, `uninstall.sh` removes `deploy/certs`
 - if installer ownership is not proven, `deploy/certs` is preserved to avoid deleting operator-managed certificate material
-- installs created before the expanded manifest flow may perform only partial factory-reset rollback, because host dependency ownership was not recorded yet
+- installs created before the durable host manifest flow may perform only partial factory-reset rollback, because cumulative installer-owned host state was not recorded yet
 
 ## Health Verification
 
