@@ -1,6 +1,7 @@
 # Production Deployment Guide
 
-This guide describes the recommended deployment path for Corporate AI Assistant in a Linux VM environment.
+This guide covers production-specific deployment deltas for Corporate AI Assistant.
+Read it after the standard installation documents. Full installation steps live in [INSTALL_ru.md](INSTALL_ru.md) and [INSTALL_en.md](INSTALL_en.md). Routine day-2 operations live in [ADMIN_ru.md](ADMIN_ru.md) and [ADMIN_en.md](ADMIN_en.md).
 
 ## Target Environment
 
@@ -10,147 +11,49 @@ This guide describes the recommended deployment path for Corporate AI Assistant 
 - 40-50 GB free disk
 - Access to Active Directory / Kerberos infrastructure
 
-## Deployment Model
+## What This Guide Covers
 
-The supported production path is Docker Compose based:
+- production-specific differences from the standard install path
+- TLS, FQDN, firewall, and exposure expectations
+- hardening-oriented rollout checks before production use
+- cross-references to the primary install, security, admin, and troubleshooting docs
 
-- `nginx` provides HTTPS ingress
-- `app` hosts the FastAPI API plane
-- `redis` provides the control plane
-- `scheduler` performs admission and job requeue
-- `worker-chat`, `worker-siem`, and `worker-batch` execute workloads
-- `ollama` provides local inference
+## What This Guide Does Not Cover
 
-## Recommended Path
+- full installer walkthrough
+- full manual installation runbook
+- routine service lifecycle commands
+- full incident diagnostics and recovery
 
-```bash
-git clone <repo-url> ai_agent_v1.1
-cd ai_agent_v1.1
-chmod +x install.sh
-./install.sh
-```
+## Standard Deployment Baseline
 
-Replace `<repo-url>` with the actual repository URL after publication.
+The supported deployment baseline remains Linux VM + Docker Compose + `install.sh`.
+Use [INSTALL_ru.md](INSTALL_ru.md) or [INSTALL_en.md](INSTALL_en.md) for the supported installation path, installer behavior, and manual installation fallback.
 
-## What `install.sh` Does
+## Production Prerequisites And Deltas
 
-- validates OS, privileges, and network connectivity
-- installs Docker Engine and Docker Compose
-- installs Kerberos / LDAP dependencies
-- installs the Ollama CLI when missing
-- prompts for:
-  - AD domain
-  - LDAP server hostname or FQDN
-  - optional separate Kerberos KDC hostname or FQDN
-  - Base DN
-  - optional smoke-test account
-  - optional AD IP override
-  - Redis password
-  - JWT secret
-- writes `.env` with `chmod 600`
-- generates `deploy/krb5.conf`
-- generates self-signed certificates in `deploy/certs/`
-- writes an installer-managed compose override when an AD IP override is needed
-- builds and starts the stack
-- waits for `https://127.0.0.1/health/ready`
+- use a real HTTPS FQDN, not only a lab IP
+- replace installer-generated self-signed TLS with organization-approved certificate material
+- confirm AD, DNS, and SPN consistency for the hostname profile you actually publish
+- if SSO is planned, prepare the real `HTTP/<fqdn>@REALM` SPN and service keytab before enabling it
+- keep `.env` only on the deployment host and rotate `SECRET_KEY` and `REDIS_PASSWORD`
+- plan monitoring, log forwarding, backup, and host-access controls according to your environment
+- keep Redis on the internal Compose network; do not expose Redis or the FastAPI container directly
 
-## Information to Prepare Before Deployment
+## Production Rollout Checklist
 
-- AD domain, for example `example.local`
-- LDAP / KDC hostname, for example `dc01.example.local`
-- Base DN, for example `dc=example,dc=local`
-- Optional test account for login smoke testing
-- Optional IP override if container DNS cannot resolve the AD host
+1. Complete the standard install through [INSTALL_ru.md](INSTALL_ru.md) or [INSTALL_en.md](INSTALL_en.md).
+2. Replace the contents of `deploy/certs/` with trusted TLS material for the real FQDN.
+3. Verify AD hostname, DNS, and SPN alignment for LDAP and any planned SSO path.
+4. Confirm only the intended public ports are exposed and that Redis remains internal-only.
+5. Verify `https://<fqdn>/health/live` and `https://<fqdn>/health/ready`, login, and model availability.
+6. Hand off routine operations to [ADMIN_ru.md](ADMIN_ru.md) / [ADMIN_en.md](ADMIN_en.md) and incident handling to [TROUBLESHOOTING_ru.md](TROUBLESHOOTING_ru.md) / [TROUBLESHOOTING_en.md](TROUBLESHOOTING_en.md).
 
-## Post-Install Verification
+## TLS And FQDN
 
-```bash
-docker compose ps
-curl -k -fsS https://127.0.0.1/health/live
-curl -k -fsS https://127.0.0.1/health/ready
-docker compose logs --tail=100 app scheduler worker-chat nginx
-```
+The standard install path can generate self-signed certificates for internal smoke validation. That is not the recommended production posture. For production use, publish the service on the real FQDN and replace `deploy/certs/` with organization-approved TLS material.
 
-## Manual Deployment
-
-Use the manual flow only if you cannot use the installer.
-
-```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl git gnupg jq lsb-release openssl \
-  python3 python3-venv python3-pip krb5-user libsasl2-modules-gssapi-mit ldap-utils
-
-# Install Docker Engine and the Docker Compose plugin.
-# Install the Ollama CLI if it is not available.
-
-cp .env.example .env
-chmod 600 .env
-```
-
-Generate `deploy/krb5.conf`:
-
-```ini
-[libdefaults]
-    default_realm = EXAMPLE.LOCAL
-    dns_lookup_kdc = false
-    dns_lookup_realm = false
-    rdns = false
-
-[realms]
-    EXAMPLE.LOCAL = {
-        kdc = dc01.example.local
-        admin_server = dc01.example.local
-    }
-
-[domain_realm]
-    .example.local = EXAMPLE.LOCAL
-    example.local = EXAMPLE.LOCAL
-```
-
-Generate TLS certificates:
-
-```bash
-mkdir -p deploy/certs
-openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
-  -keyout deploy/certs/server.key \
-  -out deploy/certs/server.crt
-```
-
-Start the stack:
-
-```bash
-docker compose build
-docker compose up -d
-```
-
-## Operations
-
-Start or update the stack:
-
-```bash
-docker compose up -d
-docker compose up -d --build
-```
-
-View status and logs:
-
-```bash
-docker compose ps
-docker compose logs -f app
-docker compose logs -f scheduler worker-chat
-```
-
-Stop the stack:
-
-```bash
-docker compose down
-```
-
-## TLS
-
-The built-in deployment uses self-signed certificates generated by the installer. For production use, replace the contents of `deploy/certs/` with organization-approved TLS material.
-
-## Firewall
+## Network Exposure And Firewall
 
 Expose only:
 
@@ -159,16 +62,16 @@ Expose only:
 
 The application container itself should not be exposed directly.
 
-## Hardening Notes
+## Hardening And Operations References
 
-- keep `.env` out of Git
-- rotate `SECRET_KEY` and `REDIS_PASSWORD`
-- replace self-signed TLS certificates
-- keep Redis on the internal Compose network
-- do not enable debug load generation in production
+- [SECURITY.md](../SECURITY.md) - repository-level vulnerability reporting entrypoint
+- [SECURITY_ru.md](SECURITY_ru.md) / [SECURITY_en.md](SECURITY_en.md) - product security baseline and operator-owned controls
+- [ADMIN_ru.md](ADMIN_ru.md) / [ADMIN_en.md](ADMIN_en.md) - routine operations and maintenance
+- [TROUBLESHOOTING_ru.md](TROUBLESHOOTING_ru.md) / [TROUBLESHOOTING_en.md](TROUBLESHOOTING_en.md) - full diagnostics and recovery
 
 ## Related Documents
 
-- [README.md](../README.md)
-- [SECURITY.md](../SECURITY.md)
-- [TROUBLESHOOTING.md](../TROUBLESHOOTING.md)
+- [../README.md](../README.md)
+- [INSTALL_ru.md](INSTALL_ru.md)
+- [INSTALL_en.md](INSTALL_en.md)
+- [INDEX.md](INDEX.md)

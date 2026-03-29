@@ -1,12 +1,32 @@
 # ai_agent_v1.1 — Corporate AI Assistant
 
-[Primary Russian document](README.ru.md) | [English summary](README.md)
+[Primary Russian document](README.ru.md) | [Documentation map](docs/INDEX.md)
 
-This workspace prepares a clean release snapshot of Corporate AI Assistant for internal and pilot deployments in Active Directory environments. The validated code baseline behind this release is `bab04bf`.
+Corporate AI Assistant `ai_agent_v1.1` is an internal/on-prem AI assistant for Linux VM deployment in Active Directory environments.
 
-For v1.1, the primary and supported deployment path is explicitly: Linux VM + Docker Compose + `install.sh`. Legacy helper files may remain in the repository, but they are not the primary validated release baseline.
+This repository contains the `v1.1.0` release baseline plus later hardening and documentation updates already present in the current branch. The supported deployment baseline remains Linux VM + Docker Compose + `install.sh`. Legacy helper files may remain in the repository for reference, but they are not the primary supported path.
 
-The supported deployment model remains:
+## Current State Summary
+
+- FastAPI backend with web chat
+- Kerberos + LDAP-backed password login
+- optional trusted reverse-proxy SSO path
+- Redis-backed scheduler, workers, rate limiting, and session state
+- Ollama as the local inference runtime
+- Russian-first operator docs with synced English documents
+
+## Reading Order
+
+1. [Documentation Map](docs/INDEX.md) — document roles and navigation
+2. [QUICKSTART.md](QUICKSTART.md) — shortest first launch path
+3. [Install Guide (EN)](docs/INSTALL_en.md) or [Install Guide (RU)](docs/INSTALL_ru.md) — full installation and installer behavior
+4. [Production Deployment Guide](docs/PRODUCTION_DEPLOY.md) — production-only deltas and exposure guidance
+5. [Administration (EN)](docs/ADMIN_en.md) / [Administration (RU)](docs/ADMIN_ru.md) — day-2 operations
+6. [Security Baseline (EN)](docs/SECURITY_en.md) / [Security Baseline (RU)](docs/SECURITY_ru.md) — product security baseline
+7. [Troubleshooting (EN)](docs/TROUBLESHOOTING_en.md) / [Troubleshooting (RU)](docs/TROUBLESHOOTING_ru.md) — full diagnostics and recovery
+8. [Architecture (EN)](docs/ARCHITECTURE_en.md) / [Architecture (RU)](docs/ARCHITECTURE_ru.md) — implemented system design
+
+## Supported Deployment Baseline
 
 - Linux VM
 - Docker Compose
@@ -16,60 +36,21 @@ The supported deployment model remains:
 - Kerberos / LDAP-backed authentication
 - installer-driven deployment through `install.sh`
 
-## What This Release Snapshot Contains
-
-- FastAPI backend with web chat
-- password login backed by Kerberos + LDAP
-- optional trusted reverse-proxy SSO path
-- Redis-backed scheduler, workers, rate limiting, and session state
-- installer-driven deployment through `install.sh`
-- Russian-first operator documentation with synced English docs
-
-## Validated Baseline Fixes Included
-
-- deduplicated AD host aliases in installer-managed compose override generation
-- explicit `request` passed to login template responses
-- LDAP GSSAPI lookup uses `ldapsearch -N`
-- explicit `request` passed to chat template responses
-
-## Quick Start
-
-Replace `<repo-url>` with the actual repository URL after publication:
-
-```bash
-git clone <repo-url> ai_agent_v1.1
-cd ai_agent_v1.1
-chmod +x install.sh
-./install.sh
-```
-
-Then verify:
-
-```bash
-docker compose ps
-curl -k -fsS https://127.0.0.1/health/live
-curl -k -fsS https://127.0.0.1/health/ready
-```
-
-## Important Notes
-
-- self-signed TLS is still the default installer path for first-run internal validation
-- production deployments should replace self-signed TLS material with a trusted certificate chain
-- hostname/SPN consistency still matters for Kerberos / LDAP interoperability
-- lab values such as `srv-ad`, `srv-ad.corp.local`, or `10.10.10.10` are examples only, not universal release constants
-
 ## Documentation
 
-- [README.ru.md](README.ru.md) — primary product overview
-- [Install Guide (RU)](docs/INSTALL_ru.md)
+- [Documentation Map](docs/INDEX.md)
+- [QUICKSTART.md](QUICKSTART.md)
 - [Install Guide (EN)](docs/INSTALL_en.md)
-- [Architecture (RU)](docs/ARCHITECTURE_ru.md)
-- [Architecture (EN)](docs/ARCHITECTURE_en.md)
-- [Security Baseline (RU)](docs/SECURITY_ru.md)
-- [Security Baseline (EN)](docs/SECURITY_en.md)
-- [Troubleshooting (RU)](docs/TROUBLESHOOTING_ru.md)
-- [Troubleshooting (EN)](docs/TROUBLESHOOTING_en.md)
+- [Install Guide (RU)](docs/INSTALL_ru.md)
 - [Production Deployment Guide](docs/PRODUCTION_DEPLOY.md)
+- [Administration (EN)](docs/ADMIN_en.md)
+- [Administration (RU)](docs/ADMIN_ru.md)
+- [Security Baseline (EN)](docs/SECURITY_en.md)
+- [Security Baseline (RU)](docs/SECURITY_ru.md)
+- [Troubleshooting (EN)](docs/TROUBLESHOOTING_en.md)
+- [Troubleshooting (RU)](docs/TROUBLESHOOTING_ru.md)
+- [Architecture (EN)](docs/ARCHITECTURE_en.md)
+- [Architecture (RU)](docs/ARCHITECTURE_ru.md)
 - [Changelog](CHANGELOG.md)
 
 ## License
