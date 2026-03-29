@@ -290,6 +290,8 @@ join_by_space() {
 }
 
 capture_preinstall_state() {
+    local install_user="${INSTALL_USER:-${SUDO_USER:-${USER:-}}}"
+
     if command_exists docker; then
         PREINSTALL_DOCKER_CLI="1"
         if docker compose version >/dev/null 2>&1; then
@@ -301,7 +303,7 @@ capture_preinstall_state() {
         PREINSTALL_OLLAMA_CLI="1"
     fi
 
-    if id -nG "${INSTALL_USER}" 2>/dev/null | grep -qw docker; then
+    if [[ -n "${install_user}" ]] && id -nG "${install_user}" 2>/dev/null | grep -qw docker; then
         PREINSTALL_USER_IN_DOCKER_GROUP="1"
     fi
 
