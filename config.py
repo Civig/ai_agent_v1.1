@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     LLM_CPU_RUNTIME_OVERHEAD_MB: int = 512
     LLM_KV_CACHE_MB_PER_1K_TOKENS: int = 96
     LLM_PINNED_MODELS: str = ""
+    ENABLE_PARSER_STAGE: bool = False
+    PARSER_STAGING_ROOT: str = "/tmp/corporate-ai-parser-staging"
+    PARSER_JOB_TIMEOUT_SECONDS: int = 300
+    PARSER_STAGING_TTL_SECONDS: int = 3600
 
     SCHEDULER_LOOP_INTERVAL_SECONDS: float = 0.5
     SCHEDULER_REAPER_INTERVAL_SECONDS: float = 5.0
@@ -142,7 +146,7 @@ class Settings(BaseSettings):
     WORKER_NODE_ID: str = "local-node"
     WORKER_TARGET_KIND: str = "auto"
     WORKER_GPU_INDEX: Optional[int] = None
-    WORKER_SUPPORTED_WORKLOADS: str = "chat"
+    WORKER_SUPPORTED_WORKLOADS: str = ""
     WORKER_RUNTIME_LABEL: str = "ollama"
 
     DEBUG_LOAD_MAX_TASKS: int = 20
@@ -173,8 +177,8 @@ class Settings(BaseSettings):
     @classmethod
     def validate_worker_pool(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"chat", "siem", "batch"}:
-            raise ValueError("WORKER_POOL must be one of: chat, siem, batch")
+        if normalized not in {"chat", "siem", "batch", "parser"}:
+            raise ValueError("WORKER_POOL must be one of: chat, siem, batch, parser")
         return normalized
 
     @field_validator("WORKER_TARGET_KIND")
@@ -196,7 +200,11 @@ class Settings(BaseSettings):
     @property
     def worker_supported_workloads(self) -> list[str]:
         items = [item.strip().lower() for item in self.WORKER_SUPPORTED_WORKLOADS.split(",") if item.strip()]
-        return items or [self.WORKER_POOL]
+        if items:
+            return items
+        if self.WORKER_POOL == "parser":
+            return ["parse"]
+        return [self.WORKER_POOL]
 
     @property
     def redis_connection_kwargs(self) -> Dict[str, object]:

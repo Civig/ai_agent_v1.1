@@ -31,10 +31,12 @@ from llm_gateway import (
     ERROR_TYPE_NONE,
     GENERIC_CHAT_ERROR,
     JOB_KIND_FILE_CHAT,
+    JOB_KIND_PARSE,
     JOB_STATUS_CANCELLED,
     JOB_STATUS_COMPLETED,
     JOB_STATUS_FAILED,
     LLMGateway,
+    WORKER_POOL_PARSER,
     compute_queue_wait_ms,
     current_time_ms,
     elapsed_ms,
@@ -251,7 +253,7 @@ class OllamaWorkerClient:
 
 
 class LocalResourceMonitor:
-    def __init__(self, ollama: OllamaWorkerClient):
+    def __init__(self, ollama: Optional[OllamaWorkerClient]):
         self.ollama = ollama
         self.hostname = socket.gethostname()
         self.cpu_count = os.cpu_count() or 1
@@ -334,7 +336,7 @@ class LocalResourceMonitor:
     async def collect_target_report(self) -> Dict[str, Any]:
         ram_total_mb, ram_free_mb = self._memory_snapshot_mb()
         cpu_percent = self._cpu_percent()
-        loaded_models = await self.ollama.fetch_loaded_models()
+        loaded_models = await self.ollama.fetch_loaded_models() if self.ollama is not None else []
         gpu = await self._query_gpu() if settings.WORKER_TARGET_KIND in {"auto", "gpu"} else None
 
         if gpu is not None:
@@ -392,7 +394,8 @@ class LLMWorker:
     def __init__(self):
         self.gateway = LLMGateway(settings.REDIS_URL)
         self.chat_store = AsyncChatStore(settings.REDIS_URL, max_history=100)
-        self.ollama = OllamaWorkerClient(settings.OLLAMA_URL)
+        self.is_parser_pool = settings.WORKER_POOL == WORKER_POOL_PARSER
+        self.ollama = None if self.is_parser_pool else OllamaWorkerClient(settings.OLLAMA_URL)
         self.monitor = LocalResourceMonitor(self.ollama)
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}:{settings.WORKER_POOL}"
         self.target_kind = (os.getenv("WORKER_TARGET_KIND", "cpu").strip().lower() or "cpu")
@@ -403,14 +406,16 @@ class LLMWorker:
     async def start(self) -> None:
         await self.gateway.connect()
         await self.chat_store.connect()
-        await self.ollama.connect()
-        self.background_tasks.update(
-            {
-                asyncio.create_task(self.heartbeat_loop()),
-                asyncio.create_task(self.refresh_model_catalog_loop()),
-                asyncio.create_task(self.lease_loop()),
-            }
-        )
+        if self.ollama is not None:
+            await self.ollama.connect()
+
+        startup_tasks = {
+            asyncio.create_task(self.heartbeat_loop()),
+            asyncio.create_task(self.lease_loop()),
+        }
+        if not self.is_parser_pool:
+            startup_tasks.add(asyncio.create_task(self.refresh_model_catalog_loop()))
+        self.background_tasks.update(startup_tasks)
         try:
             await self.run()
         finally:
@@ -425,7 +430,8 @@ class LLMWorker:
             for task in list(self.active_tasks.values()):
                 with suppress(asyncio.CancelledError):
                     await task
-            await self.ollama.close()
+            if self.ollama is not None:
+                await self.ollama.close()
             await self.chat_store.close()
             await self.gateway.close()
 
@@ -582,7 +588,27 @@ class LLMWorker:
             await self.gateway.emit_event(job["id"], {"result": assistant_text})
         return assistant_text, inference_ms
 
+    async def _process_parser_job(self, job: Dict[str, Any]) -> None:
+        job_id = job["id"]
+        if await self.gateway.is_cancel_requested(job_id):
+            await self.gateway.mark_job_cancelled(job_id, worker_id=self.worker_id)
+            return
+
+        if not self.is_parser_pool:
+            error_text = "Parser jobs must run on the parser worker pool"
+        elif not settings.ENABLE_PARSER_STAGE:
+            error_text = "Parser stage is disabled"
+        else:
+            error_text = "Parser stage groundwork only: parser execution is not implemented"
+
+        logger.warning("Parser job %s failed safely: %s", job_id, error_text)
+        await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+
     async def process_job(self, job: Dict[str, Any]) -> None:
+        if job.get("job_kind") == JOB_KIND_PARSE:
+            await self._process_parser_job(job)
+            return
+
         job_id = job["id"]
         username = job["username"]
         model_name = job["model_name"]

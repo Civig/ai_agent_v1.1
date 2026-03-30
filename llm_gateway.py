@@ -33,20 +33,25 @@ TERMINAL_JOB_STATUSES = {JOB_STATUS_COMPLETED, JOB_STATUS_FAILED, JOB_STATUS_CAN
 WORKLOAD_CHAT = "chat"
 WORKLOAD_SIEM = "siem"
 WORKLOAD_BATCH = "batch"
+WORKLOAD_PARSE = "parse"
+WORKER_POOL_PARSER = "parser"
 JOB_KIND_CHAT = "chat"
 JOB_KIND_FILE_CHAT = "file_chat"
+JOB_KIND_PARSE = "parse"
 PRIORITY_P0 = "p0"
 PRIORITY_P1 = "p1"
 PRIORITY_P2 = "p2"
 PRIORITY_P3 = "p3"
 DEFAULT_PRIORITY_BY_WORKLOAD = {
     WORKLOAD_CHAT: PRIORITY_P1,
+    WORKLOAD_PARSE: PRIORITY_P1,
     WORKLOAD_SIEM: PRIORITY_P2,
     WORKLOAD_BATCH: PRIORITY_P3,
 }
 QUEUE_ORDER: list[tuple[str, str]] = [
     (WORKLOAD_SIEM, PRIORITY_P0),
     (WORKLOAD_CHAT, PRIORITY_P1),
+    (WORKLOAD_PARSE, PRIORITY_P1),
     (WORKLOAD_SIEM, PRIORITY_P2),
     (WORKLOAD_BATCH, PRIORITY_P3),
 ]
@@ -120,7 +125,12 @@ def compute_total_job_ms(job: Dict[str, Any]) -> int:
 def get_job_file_count(job: Dict[str, Any]) -> int:
     file_chat = job.get("file_chat") if isinstance(job, dict) else None
     files = file_chat.get("files") if isinstance(file_chat, dict) else None
-    return len(files) if isinstance(files, list) else 0
+    if isinstance(files, list):
+        return len(files)
+
+    parser_metadata = job.get("parser_metadata") if isinstance(job, dict) else None
+    parser_files = parser_metadata.get("files") if isinstance(parser_metadata, dict) else None
+    return len(parser_files) if isinstance(parser_files, list) else 0
 
 
 def extract_job_observability_fields(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -141,8 +151,12 @@ def extract_job_observability_fields(job: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "job_id": job.get("id") or "unknown",
         "username": job.get("username") or "unknown",
-        "job_kind": job.get("job_kind") if job.get("job_kind") in {JOB_KIND_CHAT, JOB_KIND_FILE_CHAT} else JOB_KIND_CHAT,
-        "workload_class": worker_pool_for_workload(job.get("workload_class", WORKLOAD_CHAT)),
+        "job_kind": (
+            job.get("job_kind")
+            if job.get("job_kind") in {JOB_KIND_CHAT, JOB_KIND_FILE_CHAT, JOB_KIND_PARSE}
+            else JOB_KIND_CHAT
+        ),
+        "workload_class": normalize_workload_class(job.get("workload_class", WORKLOAD_CHAT)),
         "target_kind": normalize_target_kind(job.get("target_kind")),
         "model_key": job.get("model_key") or job.get("model_name") or "unknown",
         "model_name": job.get("model_name") or job.get("model_key") or "unknown",
@@ -398,10 +412,17 @@ def prepare_ollama_messages_with_metrics(
     return messages, metrics
 
 
-def worker_pool_for_workload(workload_class: str) -> str:
+def normalize_workload_class(workload_class: str) -> str:
     normalized = workload_class.strip().lower()
-    if normalized not in {WORKLOAD_CHAT, WORKLOAD_SIEM, WORKLOAD_BATCH}:
+    if normalized not in {WORKLOAD_CHAT, WORKLOAD_SIEM, WORKLOAD_BATCH, WORKLOAD_PARSE}:
         return WORKLOAD_CHAT
+    return normalized
+
+
+def worker_pool_for_workload(workload_class: str) -> str:
+    normalized = normalize_workload_class(workload_class)
+    if normalized == WORKLOAD_PARSE:
+        return WORKER_POOL_PARSER
     return normalized
 
 
@@ -996,11 +1017,15 @@ class LLMGateway(RedisBackedComponent):
         priority: Optional[str] = None,
         context_tokens: Optional[int] = None,
         max_output_tokens: Optional[int] = None,
+        root_job_id: Optional[str] = None,
+        parent_job_id: Optional[str] = None,
+        staging_id: Optional[str] = None,
+        parser_metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         if self.redis is None:
             raise HTTPException(status_code=503, detail="LLM control plane unavailable")
 
-        workload_class = worker_pool_for_workload(workload_class)
+        workload_class = normalize_workload_class(workload_class)
         priority = self._normalize_priority(workload_class, priority)
         total_pending = await self.get_total_pending_jobs()
         if total_pending >= await self._dynamic_queue_limit():
@@ -1036,10 +1061,13 @@ class LLMGateway(RedisBackedComponent):
         history_tokens = sum(approximate_token_count(message.get("content", "")) for message in history)
         now = int(time.time())
         now_ms = current_time_ms()
+        normalized_job_kind = (job_kind or "").strip().lower()
+        if normalized_job_kind not in {JOB_KIND_CHAT, JOB_KIND_FILE_CHAT, JOB_KIND_PARSE}:
+            normalized_job_kind = JOB_KIND_CHAT
         job = {
             "id": job_id,
             "username": username,
-            "job_kind": JOB_KIND_FILE_CHAT if job_kind == JOB_KIND_FILE_CHAT else JOB_KIND_CHAT,
+            "job_kind": normalized_job_kind,
             "workload_class": workload_class,
             "priority": priority,
             "target_kind": target_kind,
@@ -1074,6 +1102,10 @@ class LLMGateway(RedisBackedComponent):
             "reserved_ram_mb": 0,
             "profile": None,
             "file_chat": file_chat if isinstance(file_chat, dict) else None,
+            "root_job_id": (root_job_id or "").strip() or None,
+            "parent_job_id": (parent_job_id or "").strip() or None,
+            "staging_id": (staging_id or "").strip() or None,
+            "parser_metadata": parser_metadata if isinstance(parser_metadata, dict) else None,
         }
         queue_key = self.pending_queue_key(workload_class, priority)
         async with self.redis.pipeline(transaction=True) as pipeline:
