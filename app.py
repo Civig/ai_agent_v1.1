@@ -569,6 +569,62 @@ async def enqueue_parser_job(
     )
 
 
+async def run_parser_public_job(
+    *,
+    gateway: LLMGateway,
+    chat_store: AsyncChatStore,
+    username: str,
+    model_info: Dict[str, str],
+    message: str,
+    history: list[dict[str, Any]],
+    history_entry: str,
+    staging_id: str,
+    staged_files: list[dict[str, Any]],
+    requested_model: Optional[str] = None,
+) -> tuple[str, Dict[str, Any]]:
+    job_id = await enqueue_parser_public_job(
+        gateway=gateway,
+        chat_store=chat_store,
+        username=username,
+        model_info=model_info,
+        message=message,
+        history=history,
+        history_entry=history_entry,
+        staging_id=staging_id,
+        staged_files=staged_files,
+        requested_model=requested_model,
+    )
+    result = await wait_for_terminal_job(gateway, job_id, settings.LLM_JOB_DEADLINE_SECONDS)
+    return job_id, result
+
+
+async def enqueue_parser_public_job(
+    *,
+    gateway: LLMGateway,
+    chat_store: AsyncChatStore,
+    username: str,
+    model_info: Dict[str, str],
+    message: str,
+    history: list[dict[str, Any]],
+    history_entry: str,
+    staging_id: str,
+    staged_files: list[dict[str, Any]],
+    requested_model: Optional[str] = None,
+) -> str:
+    job_id = await enqueue_parser_job(
+        gateway=gateway,
+        username=username,
+        model_info=model_info,
+        message=message,
+        history=history,
+        staging_id=staging_id,
+        staged_files=staged_files,
+        requested_model=requested_model,
+    )
+    await chat_store.append_message(username, "user", history_entry)
+    return job_id
+
+
 async def stage_uploads(
     files: list[UploadFile],
     *,
@@ -1640,6 +1696,90 @@ async def api_chat_with_files(
     trimmed_doc_chars = 0
     staging_started = perf_counter()
     try:
+        if settings.ENABLE_PARSER_PUBLIC_CUTOVER:
+            if not settings.ENABLE_PARSER_STAGE:
+                raise RuntimeError("Parser stage is disabled")
+
+            staged_request = await stage_uploads_for_parser(files, username=username)
+            staging_ms = elapsed_ms(staging_started)
+            staged_files = list(staged_request.get("files") or [])
+            original_history = await chat_store.get_history(username)
+            history = apply_history_budget(original_history)
+            history_entry = (
+                f"{prompt or 'Пользователь не уточнил задачу'}\n\n"
+                f"[Вложения: {', '.join(file_info['name'] for file_info in staged_files)}]"
+            )
+            logger.info(
+                "File chat public cutover request accepted for user %s with %s files and parser root job model %s",
+                username,
+                len(staged_files),
+                model_info["key"],
+            )
+
+            if wants_event_stream(request):
+                job_id = await enqueue_parser_public_job(
+                    gateway=gateway,
+                    chat_store=chat_store,
+                    username=username,
+                    model_info=model_info,
+                    message=prompt,
+                    history=history,
+                    history_entry=history_entry,
+                    staging_id=staged_request["staging_id"],
+                    staged_files=staged_files,
+                    requested_model=requested_model,
+                )
+
+                async def event_stream():
+                    try:
+                        yield f"data: {json.dumps({'job_id': job_id}, ensure_ascii=False)}\n\n"
+                        async for event in gateway.stream_events(job_id):
+                            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    except asyncio.CancelledError:
+                        await gateway.cancel_job(job_id, username=username)
+                        raise
+
+                return StreamingResponse(
+                    event_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            job_id, result = await run_parser_public_job(
+                gateway=gateway,
+                chat_store=chat_store,
+                username=username,
+                model_info=model_info,
+                message=prompt,
+                history=history,
+                history_entry=history_entry,
+                staging_id=staged_request["staging_id"],
+                staged_files=staged_files,
+                requested_model=requested_model,
+            )
+            status = result.get("status")
+            if status == "completed":
+                response_text = normalize_document_response((result.get("result") or "").strip())
+                return JSONResponse(
+                    {
+                        "response": response_text or DOCUMENT_UNCLEAR_REQUEST_RESPONSE,
+                        "files": [{"name": file_info["name"], "size": file_info["size"]} for file_info in staged_files],
+                        "job_id": job_id,
+                    }
+                )
+            if status == "failed":
+                await restore_chat_history(chat_store, username, history)
+                return JSONResponse({"error": result.get("error") or "Сервис временно недоступен"}, status_code=503)
+            if status == "cancelled":
+                await restore_chat_history(chat_store, username, history)
+                return JSONResponse({"error": "Генерация была отменена"}, status_code=409)
+            await restore_chat_history(chat_store, username, history)
+            return JSONResponse({"error": "Истекло время ожидания ответа модели"}, status_code=504)
+
         temp_dir, staged_files = await stage_uploads(files, username=username)
         staging_ms = elapsed_ms(staging_started)
         parse_started = perf_counter()

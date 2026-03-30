@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     LLM_KV_CACHE_MB_PER_1K_TOKENS: int = 96
     LLM_PINNED_MODELS: str = ""
     ENABLE_PARSER_STAGE: bool = False
+    ENABLE_PARSER_PUBLIC_CUTOVER: bool = False
     PARSER_STAGING_ROOT: str = "/tmp/corporate-ai-parser-staging"
     PARSER_JOB_TIMEOUT_SECONDS: int = 300
     PARSER_STAGING_TTL_SECONDS: int = 3600
