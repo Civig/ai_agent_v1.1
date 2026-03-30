@@ -43,6 +43,7 @@ from llm_gateway import (
     extract_job_observability_fields,
     prepare_ollama_messages_with_metrics,
 )
+from parser_stage import delete_staged_raw_files, prepare_parser_job_artifacts, write_parser_result_metadata
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -51,6 +52,7 @@ logging.basicConfig(
 logger = logging.getLogger("llm_worker")
 CANCELLED_TEXT = "Генерация остановлена"
 DOCUMENT_NO_INFORMATION_RESPONSE = "В предоставленных документах нет информации для ответа на этот вопрос."
+PARSER_STAGE_COMPLETED_TEXT = "Parser stage completed"
 DOCUMENT_RETRY_PATTERNS = (
     "не имею доступа к файлам",
     "не могу прочитать файл",
@@ -596,13 +598,76 @@ class LLMWorker:
 
         if not self.is_parser_pool:
             error_text = "Parser jobs must run on the parser worker pool"
-        elif not settings.ENABLE_PARSER_STAGE:
+            logger.warning("Parser job %s failed safely: %s", job_id, error_text)
+            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+            return
+        if not settings.ENABLE_PARSER_STAGE:
             error_text = "Parser stage is disabled"
-        else:
-            error_text = "Parser stage groundwork only: parser execution is not implemented"
+            logger.warning("Parser job %s failed safely: %s", job_id, error_text)
+            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+            return
 
-        logger.warning("Parser job %s failed safely: %s", job_id, error_text)
-        await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+        staging_id = (job.get("staging_id") or "").strip()
+        if not staging_id:
+            error_text = "Parser job is missing staging_id"
+            logger.warning("Parser job %s failed safely: %s", job_id, error_text)
+            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+            return
+
+        try:
+            prepared = await asyncio.wait_for(
+                asyncio.to_thread(
+                    prepare_parser_job_artifacts,
+                    staging_id=staging_id,
+                    message=job.get("prompt") or "",
+                    history=job.get("history") or [],
+                    model_key=job.get("model_key") or "",
+                    model_name=job.get("model_name") or "",
+                    staging_root=settings.PARSER_STAGING_ROOT,
+                ),
+                timeout=settings.PARSER_JOB_TIMEOUT_SECONDS,
+            )
+            raw_deleted = await asyncio.to_thread(
+                delete_staged_raw_files,
+                staging_id,
+                staging_root=settings.PARSER_STAGING_ROOT,
+            )
+            parser_record = await asyncio.to_thread(
+                write_parser_result_metadata,
+                staging_id,
+                staging_root=settings.PARSER_STAGING_ROOT,
+                payload={
+                    "status": "parsed",
+                    "raw_deleted": raw_deleted,
+                    **prepared,
+                },
+            )
+            updated_job = dict(job)
+            updated_job["parser_metadata"] = {
+                **(job.get("parser_metadata") or {}),
+                "phase": "parsed",
+                "files": prepared["files"],
+                "original_doc_chars": prepared["original_doc_chars"],
+                "trimmed_doc_chars": prepared["trimmed_doc_chars"],
+                "raw_deleted": raw_deleted,
+                "artifact": "meta/parser.json",
+            }
+            await self.gateway.save_job(updated_job)
+            logger.info(
+                "Parser job %s prepared staged documents: file_count=%s raw_deleted=%s",
+                job_id,
+                len(prepared["files"]),
+                parser_record.get("raw_deleted"),
+            )
+            await self.gateway.mark_job_completed(job_id, PARSER_STAGE_COMPLETED_TEXT, worker_id=self.worker_id)
+        except TimeoutError:
+            error_text = "Parser stage timed out"
+            logger.warning("Parser job %s failed: %s", job_id, error_text)
+            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+        except Exception as exc:
+            error_text = str(exc) or "Parser stage failed"
+            logger.warning("Parser job %s failed: %s", job_id, error_text, exc_info=True)
+            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
 
     async def process_job(self, job: Dict[str, Any]) -> None:
         if job.get("job_kind") == JOB_KIND_PARSE:

@@ -1,0 +1,491 @@
+import json
+import logging
+import re
+import shutil
+import time
+import uuid
+import zipfile
+from pathlib import Path
+from typing import Any, Optional
+from xml.etree import ElementTree
+
+from fastapi import HTTPException, UploadFile
+
+logger = logging.getLogger("app")
+
+MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024
+MAX_UPLOAD_FILES = 10
+GENERIC_UPLOAD_CONTENT_TYPES = {"", "application/octet-stream"}
+ALLOWED_UPLOAD_MIME_TYPES: dict[str, set[str]] = {
+    ".txt": {"text/plain"},
+    ".pdf": {"application/pdf"},
+    ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    ".png": {"image/png"},
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+}
+MAX_DOCUMENT_CHARS = 12_000
+MAX_PARSED_DOCUMENT_CHARS = MAX_DOCUMENT_CHARS
+MAX_PDF_PAGES = 20
+IMAGE_OCR_MAX_DIMENSION = 2000
+DOCUMENT_TRUNCATION_MARKER = "[DOCUMENT_TRUNCATED]"
+UPLOAD_UNSUPPORTED_TYPE_ERROR = "Поддерживаются только TXT, PDF, DOCX, PNG, JPG и JPEG."
+DOCUMENT_NO_INFORMATION_RESPONSE = "В предоставленных документах нет информации для ответа на этот вопрос."
+
+
+def sanitize_upload_filename(filename: str) -> str:
+    candidate = Path(filename or "upload.bin").name
+    extension = Path(candidate).suffix.lower()
+    stem = Path(candidate).stem
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or "upload"
+    safe_extension = re.sub(r"[^a-z0-9.]+", "", extension) or ".bin"
+    safe_stem = safe_stem[:80]
+    return f"{uuid.uuid4().hex[:12]}-{safe_stem}{safe_extension}"
+
+
+def detect_extension(filename: str) -> str:
+    return Path(filename).suffix.lower()
+
+
+def normalize_upload_content_type(content_type: Optional[str]) -> str:
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+def upload_content_type_is_allowed(extension: str, content_type: Optional[str]) -> bool:
+    allowed_content_types = ALLOWED_UPLOAD_MIME_TYPES.get(extension)
+    if not allowed_content_types:
+        return False
+
+    normalized_content_type = normalize_upload_content_type(content_type)
+    if normalized_content_type in GENERIC_UPLOAD_CONTENT_TYPES:
+        return True
+
+    return normalized_content_type in allowed_content_types
+
+
+def log_upload_rejection(
+    *,
+    reason: str,
+    safe_name: str,
+    extension: str,
+    content_type: Optional[str],
+    username: Optional[str],
+) -> None:
+    logger.warning(
+        "upload_rejected reason=%s filename=%s extension=%s content_type=%s username=%s",
+        reason,
+        safe_name,
+        extension,
+        normalize_upload_content_type(content_type) or "application/octet-stream",
+        (username or "").strip() or "unknown",
+    )
+
+
+def extract_text_from_txt(path: Path) -> str:
+    chunks = []
+    consumed = 0
+    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+        while consumed < MAX_PARSED_DOCUMENT_CHARS:
+            chunk = handle.read(min(4096, MAX_PARSED_DOCUMENT_CHARS - consumed))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            consumed += len(chunk)
+    return "".join(chunks)
+
+
+def extract_text_from_docx(path: Path) -> str:
+    with zipfile.ZipFile(path) as archive:
+        xml_bytes = archive.read("word/document.xml")
+    root = ElementTree.fromstring(xml_bytes)
+    text_chunks = []
+    for node in root.iter():
+        if node.tag.endswith("}t") and node.text:
+            text_chunks.append(node.text)
+        elif node.tag.endswith("}p"):
+            text_chunks.append("\n")
+    return "".join(text_chunks).strip()
+
+
+def extract_text_from_pdf(path: Path) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+
+        reader = PdfReader(str(path))
+        return "\n".join((page.extract_text() or "") for page in reader.pages[:MAX_PDF_PAGES]).strip()
+    except ImportError:
+        try:
+            import fitz  # type: ignore
+
+            document = fitz.open(path)
+            try:
+                page_count = min(len(document), MAX_PDF_PAGES)
+                return "\n".join(document[index].get_text() for index in range(page_count)).strip()
+            finally:
+                document.close()
+        except ImportError as exc:
+            raise RuntimeError("PDF parser unavailable on server") from exc
+
+
+def extract_text_from_image(path: Path) -> str:
+    try:
+        import pytesseract  # type: ignore
+        from PIL import Image  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("OCR parser unavailable on server") from exc
+
+    with Image.open(path) as image:
+        image.thumbnail((IMAGE_OCR_MAX_DIMENSION, IMAGE_OCR_MAX_DIMENSION))
+        return pytesseract.image_to_string(image).strip()
+
+
+def parse_uploaded_file(path: Path) -> str:
+    extension = detect_extension(path.name)
+    if extension == ".txt":
+        return extract_text_from_txt(path)
+    if extension == ".docx":
+        return extract_text_from_docx(path)
+    if extension == ".pdf":
+        return extract_text_from_pdf(path)
+    if extension in {".png", ".jpg", ".jpeg"}:
+        return extract_text_from_image(path)
+    raise ValueError(UPLOAD_UNSUPPORTED_TYPE_ERROR)
+
+
+def apply_document_budget(extracted_documents: list[dict[str, str]]) -> list[dict[str, str]]:
+    budgeted_documents: list[dict[str, str]] = []
+    consumed_chars = 0
+
+    for document in extracted_documents:
+        name = (document.get("name") or "").strip() or "document"
+        content = (document.get("content") or "").strip()
+        if not content:
+            continue
+
+        remaining = MAX_DOCUMENT_CHARS - consumed_chars
+        if remaining <= 0:
+            budgeted_documents.append({"name": name, "content": DOCUMENT_TRUNCATION_MARKER})
+            continue
+
+        if len(content) > remaining:
+            marker = f"\n{DOCUMENT_TRUNCATION_MARKER}"
+            snippet_limit = max(0, remaining - len(marker))
+            snippet = content[:snippet_limit].rstrip()
+            content = f"{snippet}{marker}" if snippet else DOCUMENT_TRUNCATION_MARKER
+
+        consumed_chars += len(content)
+        budgeted_documents.append({"name": name, "content": content})
+
+    return budgeted_documents
+
+
+def _build_document_prompt(
+    message: str,
+    extracted_documents: list[dict[str, str]],
+    *,
+    force_documents: bool,
+) -> str:
+    document_chunks = []
+    budgeted_documents = apply_document_budget(extracted_documents)
+
+    for index, document in enumerate(budgeted_documents, start=1):
+        content = document["content"].strip()
+        if not content:
+            continue
+        document_chunks.append(f"[Документ {index}: {document['name']}]\n{content}")
+
+    if not document_chunks:
+        raise ValueError("Не удалось извлечь текст из выбранных файлов")
+
+    document_block = "\n\n".join(document_chunks)
+    request_text = message.strip() or "Пользователь не уточнил задачу"
+    extra_guard = ""
+    if force_documents:
+        extra_guard = (
+            "\n# ДОПОЛНИТЕЛЬНОЕ ТРЕБОВАНИЕ\n"
+            "Текст документов уже передан тебе ниже. "
+            "Нельзя говорить, что у тебя нет доступа к файлам, документам или вложениям. "
+            "Если фактов недостаточно, верни только точную фразу:\n"
+            f"\"{DOCUMENT_NO_INFORMATION_RESPONSE}\"\n"
+        )
+
+    return f"""
+Ты — корпоративный AI-ассистент.
+
+---
+
+# КРИТИЧЕСКОЕ ПРАВИЛО
+
+Ты НЕ имеешь права выдумывать информацию.
+
+---
+
+# РАБОТА С ДОКУМЕНТАМИ
+
+- Документы уже загружены.
+- Их текст приведён ниже.
+- Блок ДОКУМЕНТЫ ниже — это уже извлечённое буквальное содержимое файлов.
+- Это твой ЕДИНСТВЕННЫЙ источник данных.
+- Отвечай как корпоративный аналитик: кратко, точно, по существу.
+
+---
+
+# ЗАПРЕЩЕНО
+
+- говорить, что у тебя нет доступа к файлам
+- игнорировать документы
+- придумывать факты, цифры, даты, имена, выводы
+- дополнять ответ предположениями
+- использовать фразы вроде "скорее всего", если этого нет в тексте
+
+---
+
+# ЕСЛИ ДАННЫХ НЕТ
+
+Ответь ровно так:
+"{DOCUMENT_NO_INFORMATION_RESPONSE}"
+
+---
+
+# ПОВЕДЕНИЕ
+
+- Если вопрос пользователя конкретный: ответь только по документам.
+- Если пользователь спрашивает "что в файле", "что в документе" или просит показать содержимое, передай содержание прямо по тексту документа без выдумок.
+- Если запрос пустой или неясный: предложи один из вариантов действий кратким списком.
+- Если документы противоречат друг другу: прямо укажи на противоречие и не делай догадок.
+{extra_guard}
+---
+
+# ДОКУМЕНТЫ
+
+{document_block}
+
+---
+
+# ЗАПРОС ПОЛЬЗОВАТЕЛЯ
+
+{request_text}
+""".strip()
+
+
+def build_document_prompt(message: str, extracted_documents: list[dict[str, str]]) -> str:
+    return _build_document_prompt(message, extracted_documents, force_documents=False)
+
+
+def build_retry_document_prompt(message: str, extracted_documents: list[dict[str, str]]) -> str:
+    return _build_document_prompt(message, extracted_documents, force_documents=True)
+
+
+def build_file_chat_job_metadata(
+    *,
+    retry_prompt: Optional[str],
+    staged_files: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "retry_prompt": (retry_prompt or "").strip() or None,
+        "suppress_token_stream": True,
+        "files": [
+            {
+                "name": file_info["name"],
+                "size": int(file_info["size"]),
+            }
+            for file_info in staged_files
+        ],
+    }
+
+
+def shared_staging_paths(staging_id: str, *, staging_root: str) -> dict[str, Path]:
+    safe_staging_id = re.sub(r"[^a-zA-Z0-9_-]+", "", staging_id or "").strip() or "staging"
+    root = Path(staging_root) / "staging" / safe_staging_id
+    meta_dir = root / "meta"
+    return {
+        "root": root,
+        "raw_dir": root / "raw",
+        "meta_dir": meta_dir,
+        "request_path": meta_dir / "request.json",
+        "parser_path": meta_dir / "parser.json",
+    }
+
+
+async def stage_uploads_to_shared_root(
+    files: list[UploadFile],
+    *,
+    staging_root: str,
+    username: Optional[str] = None,
+) -> dict[str, Any]:
+    if not files:
+        raise HTTPException(status_code=400, detail="Не выбраны файлы")
+    if len(files) > MAX_UPLOAD_FILES:
+        raise HTTPException(status_code=400, detail=f"Максимум файлов за запрос: {MAX_UPLOAD_FILES}")
+
+    staging_id = uuid.uuid4().hex
+    paths = shared_staging_paths(staging_id, staging_root=staging_root)
+    staged_files: list[dict[str, Any]] = []
+    try:
+        paths["raw_dir"].mkdir(parents=True, exist_ok=False)
+        paths["meta_dir"].mkdir(parents=True, exist_ok=True)
+        for upload in files:
+            safe_name = sanitize_upload_filename(upload.filename or "upload.bin")
+            display_name = Path(upload.filename or safe_name).name or safe_name
+            suffix = detect_extension(safe_name)
+            normalized_content_type = normalize_upload_content_type(upload.content_type)
+            if suffix not in ALLOWED_UPLOAD_MIME_TYPES:
+                log_upload_rejection(
+                    reason="unsupported_extension",
+                    safe_name=safe_name,
+                    extension=suffix or "<none>",
+                    content_type=normalized_content_type,
+                    username=username,
+                )
+                raise HTTPException(status_code=400, detail=UPLOAD_UNSUPPORTED_TYPE_ERROR)
+            if not upload_content_type_is_allowed(suffix, normalized_content_type):
+                log_upload_rejection(
+                    reason="content_type_mismatch",
+                    safe_name=safe_name,
+                    extension=suffix,
+                    content_type=normalized_content_type,
+                    username=username,
+                )
+                raise HTTPException(status_code=400, detail=UPLOAD_UNSUPPORTED_TYPE_ERROR)
+
+            target_path = paths["raw_dir"] / safe_name
+            size = 0
+            with target_path.open("wb") as target:
+                while True:
+                    chunk = await upload.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_FILE_SIZE_BYTES:
+                        log_upload_rejection(
+                            reason="file_too_large",
+                            safe_name=safe_name,
+                            extension=suffix,
+                            content_type=normalized_content_type,
+                            username=username,
+                        )
+                        raise HTTPException(status_code=413, detail=f"Файл {safe_name} превышает лимит 50 MB")
+                    target.write(chunk)
+
+            staged_files.append(
+                {
+                    "name": display_name,
+                    "safe_name": safe_name,
+                    "size": size,
+                    "content_type": normalized_content_type or "application/octet-stream",
+                }
+            )
+
+        request_payload = {
+            "staging_id": staging_id,
+            "username": (username or "").strip() or "unknown",
+            "created_at": int(time.time()),
+            "files": staged_files,
+        }
+        parser_payload = {
+            "staging_id": staging_id,
+            "status": "staged",
+            "updated_at": int(time.time()),
+            "files": staged_files,
+            "raw_deleted": False,
+        }
+        paths["request_path"].write_text(json.dumps(request_payload, ensure_ascii=False), encoding="utf-8")
+        paths["parser_path"].write_text(json.dumps(parser_payload, ensure_ascii=False), encoding="utf-8")
+        return {
+            "staging_id": staging_id,
+            "files": staged_files,
+        }
+    except Exception:
+        shutil.rmtree(paths["root"], ignore_errors=True)
+        raise
+    finally:
+        for upload in files:
+            await upload.close()
+
+
+def load_staged_request(staging_id: str, *, staging_root: str) -> dict[str, Any]:
+    paths = shared_staging_paths(staging_id, staging_root=staging_root)
+    if not paths["request_path"].exists():
+        raise FileNotFoundError(f"Staging request metadata not found for {staging_id}")
+    return json.loads(paths["request_path"].read_text(encoding="utf-8"))
+
+
+def extract_documents_from_staging(staged_files: list[dict[str, Any]]) -> list[dict[str, str]]:
+    extracted: list[dict[str, str]] = []
+    for file_info in staged_files:
+        text = parse_uploaded_file(file_info["path"])
+        extracted.append({"name": file_info["name"], "content": text})
+    return extracted
+
+
+def extract_documents_from_shared_staging(staging_id: str, *, staging_root: str) -> list[dict[str, str]]:
+    request_payload = load_staged_request(staging_id, staging_root=staging_root)
+    paths = shared_staging_paths(staging_id, staging_root=staging_root)
+    extracted: list[dict[str, str]] = []
+    for file_info in request_payload.get("files", []):
+        safe_name = file_info.get("safe_name")
+        if not safe_name:
+            continue
+        text = parse_uploaded_file(paths["raw_dir"] / safe_name)
+        extracted.append({"name": file_info.get("name") or safe_name, "content": text})
+    return extracted
+
+
+def prepare_parser_job_artifacts(
+    *,
+    staging_id: str,
+    message: str,
+    history: list[dict[str, Any]],
+    model_key: str,
+    model_name: str,
+    staging_root: str,
+) -> dict[str, Any]:
+    request_payload = load_staged_request(staging_id, staging_root=staging_root)
+    staged_files = request_payload.get("files", [])
+    extracted_documents = extract_documents_from_shared_staging(staging_id, staging_root=staging_root)
+    budgeted_documents = apply_document_budget(extracted_documents)
+    final_prompt = build_document_prompt(message, extracted_documents)
+    retry_prompt = build_retry_document_prompt(message, extracted_documents)
+    return {
+        "staging_id": staging_id,
+        "files": staged_files,
+        "original_doc_chars": sum(len((document.get("content") or "").strip()) for document in extracted_documents),
+        "trimmed_doc_chars": sum(len((document.get("content") or "").strip()) for document in budgeted_documents),
+        "prepared_llm_job": {
+            "job_kind": "file_chat",
+            "model_key": model_key,
+            "model_name": model_name,
+            "prompt": final_prompt,
+            "history": history,
+            "file_chat": build_file_chat_job_metadata(retry_prompt=retry_prompt, staged_files=staged_files),
+        },
+    }
+
+
+def write_parser_result_metadata(
+    staging_id: str,
+    *,
+    staging_root: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    paths = shared_staging_paths(staging_id, staging_root=staging_root)
+    existing: dict[str, Any] = {}
+    if paths["parser_path"].exists():
+        existing = json.loads(paths["parser_path"].read_text(encoding="utf-8"))
+    merged = {
+        **existing,
+        **payload,
+        "staging_id": staging_id,
+        "updated_at": int(time.time()),
+    }
+    paths["meta_dir"].mkdir(parents=True, exist_ok=True)
+    paths["parser_path"].write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
+    return merged
+
+
+def delete_staged_raw_files(staging_id: str, *, staging_root: str) -> bool:
+    paths = shared_staging_paths(staging_id, staging_root=staging_root)
+    if not paths["raw_dir"].exists():
+        return False
+    shutil.rmtree(paths["raw_dir"], ignore_errors=True)
+    return not paths["raw_dir"].exists()

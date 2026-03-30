@@ -49,12 +49,15 @@ from llm_gateway import (
     ERROR_TYPE_PARSE,
     ERROR_TYPE_VALIDATION,
     JOB_KIND_FILE_CHAT,
+    JOB_KIND_PARSE,
     LLMGateway,
     WORKLOAD_CHAT,
+    WORKLOAD_PARSE,
     apply_history_budget,
     approximate_token_count,
     elapsed_ms,
 )
+from parser_stage import stage_uploads_to_shared_root
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -498,6 +501,72 @@ async def enqueue_document_job(
     )
     await chat_store.append_message(username, "user", history_entry)
     return job_id
+
+
+async def stage_uploads_for_parser(
+    files: list[UploadFile],
+    *,
+    username: Optional[str] = None,
+) -> dict[str, Any]:
+    return await stage_uploads_to_shared_root(
+        files,
+        staging_root=settings.PARSER_STAGING_ROOT,
+        username=username,
+    )
+
+
+def build_parser_job_metadata(
+    *,
+    staged_files: list[dict[str, Any]],
+    requested_model: Optional[str],
+) -> dict[str, Any]:
+    metadata = {
+        "phase": "staged",
+        "files": [
+            {
+                "name": file_info["name"],
+                "safe_name": file_info["safe_name"],
+                "size": int(file_info["size"]),
+                "content_type": file_info["content_type"],
+            }
+            for file_info in staged_files
+        ],
+    }
+    normalized_requested_model = (requested_model or "").strip()
+    if normalized_requested_model:
+        metadata["requested_model"] = normalized_requested_model
+    return metadata
+
+
+async def enqueue_parser_job(
+    *,
+    gateway: LLMGateway,
+    username: str,
+    model_info: Dict[str, str],
+    message: str,
+    history: list[dict[str, Any]],
+    staging_id: str,
+    staged_files: list[dict[str, Any]],
+    requested_model: Optional[str] = None,
+) -> str:
+    if not settings.ENABLE_PARSER_STAGE:
+        raise RuntimeError("Parser stage is disabled")
+
+    limited_history = apply_history_budget(history)
+    return await gateway.enqueue_job(
+        username=username,
+        model_key=model_info["key"],
+        model_name=model_info["name"],
+        prompt=(message or "").strip(),
+        history=limited_history,
+        job_kind=JOB_KIND_PARSE,
+        workload_class=WORKLOAD_PARSE,
+        staging_id=staging_id,
+        parser_metadata=build_parser_job_metadata(
+            staged_files=staged_files,
+            requested_model=requested_model,
+        ),
+    )
 
 
 async def stage_uploads(
