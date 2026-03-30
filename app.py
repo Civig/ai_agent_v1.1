@@ -569,6 +569,10 @@ async def enqueue_parser_job(
     )
 
 
+def parser_public_json_timeout_seconds() -> int:
+    return settings.PARSER_JOB_TIMEOUT_SECONDS + settings.LLM_JOB_DEADLINE_SECONDS
+
+
 async def run_parser_public_job(
     *,
     gateway: LLMGateway,
@@ -594,7 +598,7 @@ async def run_parser_public_job(
         staged_files=staged_files,
         requested_model=requested_model,
     )
-    result = await wait_for_terminal_job(gateway, job_id, settings.LLM_JOB_DEADLINE_SECONDS)
+    result = await wait_for_terminal_job(gateway, job_id, parser_public_json_timeout_seconds())
     return job_id, result
 
 

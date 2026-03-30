@@ -159,7 +159,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
             app_module,
             "wait_for_terminal_job",
             AsyncMock(return_value={"status": "completed", "result": "done"}),
-        ):
+        ) as wait_mock:
             response = await app_module.api_chat_with_files(
                 request,
                 message="Summarize",
@@ -171,6 +171,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'"response":"done"', response.body)
         self.assertIn(b'"job_id":"job-1"', response.body)
+        wait_mock.assert_awaited_once_with(gateway, "job-1", app_module.settings.LLM_JOB_DEADLINE_SECONDS)
         self.assertEqual(temp_dir.cleaned, 1)
 
     async def test_file_chat_json_fallback_returns_error_payload(self):
@@ -392,7 +393,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b'"response":"done"', response.body)
         self.assertIn(b'"job_id":"root-job-1"', response.body)
         self.assertIn(b'"files":[{"name":"note.txt","size":5}]', response.body)
-        wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.settings.LLM_JOB_DEADLINE_SECONDS)
+        wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.parser_public_json_timeout_seconds())
         chat_store.append_message.assert_awaited_once()
         self.assertEqual(chat_store.append_message.await_args.args[:2], ("alice", "user"))
 
@@ -435,7 +436,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
             app_module,
             "wait_for_terminal_job",
             AsyncMock(return_value={"status": "failed", "error": "boom"}),
-        ), patch.object(
+        ) as wait_mock, patch.object(
             app_module,
             "response_requires_document_retry",
             side_effect=AssertionError("legacy app-side retry should not run for parser-root JSON path"),
@@ -454,6 +455,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertIn(b'"error":"boom"', response.body)
+        wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.parser_public_json_timeout_seconds())
         restore_mock.assert_awaited_once()
 
     async def test_file_chat_json_fallback_returns_cancelled_payload_under_public_cutover_flag(self):
@@ -495,7 +497,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
             app_module,
             "wait_for_terminal_job",
             AsyncMock(return_value={"status": "cancelled"}),
-        ), patch.object(
+        ) as wait_mock, patch.object(
             app_module,
             "restore_chat_history",
             AsyncMock(return_value=None),
@@ -510,6 +512,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertIn("Генерация была отменена".encode("utf-8"), response.body)
+        wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.parser_public_json_timeout_seconds())
         restore_mock.assert_awaited_once()
 
 
