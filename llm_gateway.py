@@ -41,6 +41,9 @@ JOB_KIND_FILE_CHAT = "file_chat"
 JOB_KIND_PARSE = "parse"
 LIFECYCLE_STAGE_PARSER_PREPARED = "parser_artifacts_prepared"
 LIFECYCLE_STAGE_CHILD_ENQUEUED = "child_enqueued"
+LIFECYCLE_STAGE_CHILD_COMPLETED = "child_completed"
+LIFECYCLE_STAGE_CHILD_FAILED = "child_failed"
+LIFECYCLE_STAGE_CHILD_CANCELLED = "child_cancelled"
 PRIORITY_P0 = "p0"
 PRIORITY_P1 = "p1"
 PRIORITY_P2 = "p2"
@@ -967,11 +970,79 @@ class LLMGateway(RedisBackedComponent):
             raise RuntimeError("Redis is required for job persistence")
         await self.redis.set(self.job_key(job["id"]), json.dumps(job, ensure_ascii=False), ex=settings.LLM_JOB_TTL_SECONDS)
 
-    async def emit_event(self, job_id: str, event: Dict[str, Any]) -> None:
+    async def _append_event(self, job_id: str, event: Dict[str, Any]) -> None:
         if self.redis is None:
             return
         await self.redis.xadd(self.events_key(job_id), {"data": json.dumps(event, ensure_ascii=False)})
         await self.redis.expire(self.events_key(job_id), settings.LLM_EVENT_STREAM_TTL_SECONDS)
+
+    async def _get_distinct_root_job_id(self, job_id: str) -> Optional[str]:
+        job = await self.get_job(job_id)
+        if not job:
+            return None
+        root_job_id = (job.get("root_job_id") or "").strip()
+        if not root_job_id or root_job_id == job_id:
+            return None
+        return root_job_id
+
+    def _build_root_mirrored_event(self, root_job_id: str, child_job_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+        mirrored = dict(event)
+        mirrored["source_job_id"] = child_job_id
+        if "job_id" in mirrored:
+            mirrored["job_id"] = root_job_id
+        return mirrored
+
+    async def emit_event(self, job_id: str, event: Dict[str, Any]) -> None:
+        await self._append_event(job_id, event)
+        if event.get("done"):
+            return
+
+        root_job_id = await self._get_distinct_root_job_id(job_id)
+        if not root_job_id:
+            return
+        await self._append_event(job_id=root_job_id, event=self._build_root_mirrored_event(root_job_id, job_id, event))
+
+    async def _synthesize_root_terminal_state(
+        self,
+        child_job: Dict[str, Any],
+        *,
+        status: str,
+        lifecycle_stage: str,
+        event_payload: Dict[str, Any],
+    ) -> None:
+        root_job_id = (child_job.get("root_job_id") or "").strip()
+        child_job_id = (child_job.get("id") or "").strip()
+        if not root_job_id or not child_job_id or root_job_id == child_job_id:
+            return
+
+        root_job = await self.get_job(root_job_id)
+        if not root_job or root_job.get("status") in TERMINAL_JOB_STATUSES:
+            return
+
+        finished_at = int(time.time())
+        root_job["status"] = status
+        root_job["finished_at"] = finished_at
+        root_job["finished_at_ms"] = current_time_ms()
+        root_job["child_job_id"] = child_job_id
+        root_job["lifecycle_stage"] = lifecycle_stage
+
+        parser_metadata = dict(root_job.get("parser_metadata") or {})
+        parser_metadata["phase"] = lifecycle_stage
+        parser_metadata["child_job_id"] = child_job_id
+        root_job["parser_metadata"] = parser_metadata or None
+
+        if status == JOB_STATUS_COMPLETED:
+            root_job["result"] = child_job.get("result")
+            root_job["error"] = None
+        elif status == JOB_STATUS_FAILED:
+            root_job["error"] = child_job.get("error") or GENERIC_CHAT_ERROR
+            root_job["result"] = None
+        elif status == JOB_STATUS_CANCELLED:
+            root_job["result"] = None
+            root_job["error"] = None
+
+        await self.save_job(root_job)
+        await self._append_event(root_job_id, self._build_root_mirrored_event(root_job_id, child_job_id, event_payload))
 
     async def stream_events(self, job_id: str) -> AsyncIterator[Dict[str, Any]]:
         if self.redis is None:
@@ -1632,27 +1703,50 @@ class LLMGateway(RedisBackedComponent):
         job["finished_at_ms"] = current_time_ms()
         job["result"] = response_text
         await self.save_job(job)
-        await self.emit_event(job_id, {"done": True})
+        terminal_event = {"done": True}
+        await self._append_event(job_id, terminal_event)
+        await self._synthesize_root_terminal_state(
+            job,
+            status=JOB_STATUS_COMPLETED,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_COMPLETED,
+            event_payload=terminal_event,
+        )
         await self._release_reserved_capacity(job)
         await self._remove_from_processing(worker_id or job.get("assigned_worker_id"), job_id)
         if self.redis is not None:
             await self.redis.zrem(self.ACTIVE_JOBS_ZSET, job_id)
 
-    async def mark_job_failed(self, job_id: str, error_text: str, worker_id: Optional[str] = None) -> None:
-        job = await self.get_job(job_id)
-        if not job:
-            return
+    async def _mark_job_failed_from_record(
+        self,
+        job: Dict[str, Any],
+        error_text: str,
+        *,
+        worker_id: Optional[str] = None,
+    ) -> None:
         finished_at = int(time.time())
         job["status"] = JOB_STATUS_FAILED
         job["finished_at"] = finished_at
         job["finished_at_ms"] = current_time_ms()
         job["error"] = error_text
         await self.save_job(job)
-        await self.emit_event(job_id, {"error": error_text, "done": True})
+        terminal_event = {"error": error_text, "done": True}
+        await self._append_event(job["id"], terminal_event)
+        await self._synthesize_root_terminal_state(
+            job,
+            status=JOB_STATUS_FAILED,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_FAILED,
+            event_payload=terminal_event,
+        )
         await self._release_reserved_capacity(job)
-        await self._remove_from_processing(worker_id or job.get("assigned_worker_id"), job_id)
+        await self._remove_from_processing(worker_id or job.get("assigned_worker_id"), job["id"])
         if self.redis is not None:
-            await self.redis.zrem(self.ACTIVE_JOBS_ZSET, job_id)
+            await self.redis.zrem(self.ACTIVE_JOBS_ZSET, job["id"])
+
+    async def mark_job_failed(self, job_id: str, error_text: str, worker_id: Optional[str] = None) -> None:
+        job = await self.get_job(job_id)
+        if not job:
+            return
+        await self._mark_job_failed_from_record(job, error_text, worker_id=worker_id)
 
     async def mark_job_cancelled(self, job_id: str, worker_id: Optional[str] = None) -> None:
         job = await self.get_job(job_id)
@@ -1663,7 +1757,14 @@ class LLMGateway(RedisBackedComponent):
         job["finished_at"] = finished_at
         job["finished_at_ms"] = current_time_ms()
         await self.save_job(job)
-        await self.emit_event(job_id, {"cancelled": True, "done": True})
+        terminal_event = {"cancelled": True, "done": True}
+        await self._append_event(job_id, terminal_event)
+        await self._synthesize_root_terminal_state(
+            job,
+            status=JOB_STATUS_CANCELLED,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_CANCELLED,
+            event_payload=terminal_event,
+        )
         await self._release_reserved_capacity(job)
         await self._remove_from_processing(worker_id or job.get("assigned_worker_id"), job_id)
         if self.redis is not None:
@@ -1690,31 +1791,28 @@ class LLMGateway(RedisBackedComponent):
                 if lease_until > now:
                     continue
                 if int(job.get("deadline_at") or 0) and now >= int(job.get("deadline_at") or 0):
-                    job["status"] = JOB_STATUS_FAILED
-                    job["error"] = DEADLINE_EXCEEDED_ERROR
-                    job["finished_at"] = now
-                    await self.save_job(job)
+                    await self._mark_job_failed_from_record(
+                        job,
+                        DEADLINE_EXCEEDED_ERROR,
+                        worker_id=job.get("assigned_worker_id"),
+                    )
                     await self.increment_metric("failed_jobs", 1)
-                    await self.observe_job_latency(job)
-                    await self.emit_event(job_id, {"error": DEADLINE_EXCEEDED_ERROR, "done": True})
-                    await self._release_reserved_capacity(job)
-                    await self._remove_from_processing(job.get("assigned_worker_id"), job_id)
-                    await self.redis.zrem(self.ACTIVE_JOBS_ZSET, job_id)
+                    await self.observe_job_latency(await self.get_job(job_id) or job)
+                    continue
+
+                retry_count = int(job.get("retry_count") or 0) + 1
+                if retry_count > int(job.get("max_retries") or settings.SCHEDULER_MAX_JOB_RETRIES):
+                    job["retry_count"] = retry_count
+                    await self._mark_job_failed_from_record(
+                        job,
+                        GENERIC_CHAT_ERROR,
+                        worker_id=job.get("assigned_worker_id"),
+                    )
                     continue
 
                 await self._release_reserved_capacity(job)
                 await self._remove_from_processing(job.get("assigned_worker_id"), job_id)
                 await self.redis.zrem(self.ACTIVE_JOBS_ZSET, job_id)
-
-                retry_count = int(job.get("retry_count") or 0) + 1
-                if retry_count > int(job.get("max_retries") or settings.SCHEDULER_MAX_JOB_RETRIES):
-                    job["status"] = JOB_STATUS_FAILED
-                    job["error"] = GENERIC_CHAT_ERROR
-                    job["finished_at"] = now
-                    job["retry_count"] = retry_count
-                    await self.save_job(job)
-                    await self.emit_event(job_id, {"error": GENERIC_CHAT_ERROR, "done": True})
-                    continue
 
                 job["retry_count"] = retry_count
                 job = await self.downgrade_job_target_kind_if_needed(job)

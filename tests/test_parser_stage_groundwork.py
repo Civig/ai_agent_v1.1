@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import types
@@ -23,9 +24,17 @@ sys.modules.setdefault("httpx", fake_httpx)
 import config as config_module
 import worker as worker_module
 from llm_gateway import (
+    DEADLINE_EXCEEDED_ERROR,
+    GENERIC_CHAT_ERROR,
     JOB_KIND_FILE_CHAT,
     JOB_KIND_PARSE,
+    JOB_STATUS_CANCELLED,
+    JOB_STATUS_COMPLETED,
+    JOB_STATUS_FAILED,
+    LIFECYCLE_STAGE_CHILD_CANCELLED,
+    LIFECYCLE_STAGE_CHILD_COMPLETED,
     LIFECYCLE_STAGE_CHILD_ENQUEUED,
+    LIFECYCLE_STAGE_CHILD_FAILED,
     LLMGateway,
     WORKLOAD_CHAT,
     WORKLOAD_PARSE,
@@ -73,6 +82,10 @@ class FakePipeline:
         self.operations.append(("expire", key, ttl))
         return self
 
+    def hincrby(self, key, field, amount):
+        self.operations.append(("hincrby", key, field, amount))
+        return self
+
     async def execute(self):
         results = []
         for operation in self.operations:
@@ -89,6 +102,9 @@ class FakePipeline:
             elif name == "expire":
                 _, key, ttl = operation
                 results.append(await self.redis.expire(key, ttl))
+            elif name == "hincrby":
+                _, key, field, amount = operation
+                results.append(await self.redis.hincrby(key, field, amount))
         self.operations.clear()
         return results
 
@@ -129,6 +145,19 @@ class FakeRedis:
         entry_id = f"{len(self.streams[key]) + 1}-0"
         self.streams[key].append((entry_id, fields))
         return entry_id
+
+    async def xread(self, streams, block=None, count=None):
+        batches = []
+        for key, last_id in streams.items():
+            entries = []
+            for entry_id, fields in self.streams.get(key, []):
+                if self._compare_stream_ids(entry_id, last_id) > 0:
+                    entries.append((entry_id, fields))
+            if count is not None:
+                entries = entries[:count]
+            if entries:
+                batches.append((key, entries))
+        return batches
 
     async def expire(self, key, ttl):
         return True
@@ -176,6 +205,22 @@ class FakeRedis:
     async def zadd(self, key, mapping):
         self.zsets[key].update(mapping)
         return len(mapping)
+
+    async def zrangebyscore(self, key, minimum, maximum):
+        items = self.zsets.get(key, {})
+        return [
+            member
+            for member, score in sorted(items.items(), key=lambda item: item[1])
+            if minimum <= score <= maximum
+        ]
+
+    @staticmethod
+    def _compare_stream_ids(left, right):
+        left_major, _, left_minor = left.partition("-")
+        right_major, _, right_minor = right.partition("-")
+        return (int(left_major), int(left_minor or 0)) > (int(right_major), int(right_minor or 0)) and 1 or (
+            (int(left_major), int(left_minor or 0)) < (int(right_major), int(right_minor or 0)) and -1 or 0
+        )
 
 
 class ConfigGroundworkTests(unittest.TestCase):
@@ -378,6 +423,411 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated["child_job_id"], "child-1")
         self.assertEqual(updated["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_ENQUEUED)
         self.assertEqual(updated["parser_metadata"]["phase"], LIFECYCLE_STAGE_CHILD_ENQUEUED)
+
+    async def test_emit_event_mirrors_child_non_terminal_events_onto_root_stream(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+
+        await gateway.emit_event(child_job_id, {"job_id": child_job_id, "token": "hello"})
+        await gateway.emit_event(child_job_id, {"result": "partial"})
+
+        child_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(child_job_id)]]
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+
+        self.assertIn({"job_id": child_job_id, "token": "hello"}, child_payloads)
+        self.assertIn({"result": "partial"}, child_payloads)
+        self.assertIn({"job_id": root_job_id, "token": "hello", "source_job_id": child_job_id}, root_payloads)
+        self.assertIn({"result": "partial", "source_job_id": child_job_id}, root_payloads)
+
+    async def test_child_completed_synthesizes_root_terminal_state_and_event(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+            parser_metadata_updates={"phase": LIFECYCLE_STAGE_CHILD_ENQUEUED},
+        )
+
+        await gateway.mark_job_completed(child_job_id, "final answer")
+
+        root_job = await gateway.get_job(root_job_id)
+        child_job = await gateway.get_job(child_job_id)
+        self.assertEqual(child_job["status"], JOB_STATUS_COMPLETED)
+        self.assertEqual(root_job["status"], JOB_STATUS_COMPLETED)
+        self.assertEqual(root_job["result"], "final answer")
+        self.assertEqual(root_job["child_job_id"], child_job_id)
+        self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_COMPLETED)
+        self.assertEqual(root_job["parser_metadata"]["phase"], LIFECYCLE_STAGE_CHILD_COMPLETED)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
+        self.assertEqual(root_payloads[-1], {"done": True, "source_job_id": child_job_id})
+
+    async def test_child_failed_synthesizes_root_failed_state(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+
+        await gateway.mark_job_failed(child_job_id, "inference failed")
+
+        root_job = await gateway.get_job(root_job_id)
+        self.assertEqual(root_job["status"], JOB_STATUS_FAILED)
+        self.assertEqual(root_job["error"], "inference failed")
+        self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_FAILED)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertEqual(root_payloads[-1], {"error": "inference failed", "done": True, "source_job_id": child_job_id})
+
+    async def test_child_cancelled_synthesizes_root_cancelled_state(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+
+        await gateway.mark_job_cancelled(child_job_id)
+
+        root_job = await gateway.get_job(root_job_id)
+        self.assertEqual(root_job["status"], JOB_STATUS_CANCELLED)
+        self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_CANCELLED)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertEqual(root_payloads[-1], {"cancelled": True, "done": True, "source_job_id": child_job_id})
+
+    async def test_stream_events_for_root_exits_on_synthesized_root_terminal_only(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+        await gateway.emit_event(child_job_id, {"token": "hello"})
+        await gateway.mark_job_completed(child_job_id, "final answer")
+
+        payloads = [payload async for payload in gateway.stream_events(root_job_id)]
+        mirrored_payloads = [payload for payload in payloads if payload.get("source_job_id") == child_job_id]
+        self.assertIn({"token": "hello", "source_job_id": child_job_id}, mirrored_payloads)
+        self.assertEqual(mirrored_payloads[-1], {"done": True, "source_job_id": child_job_id})
+        self.assertEqual(len([payload for payload in mirrored_payloads if payload.get("done")]), 1)
+
+    async def test_root_terminal_record_is_saved_before_root_done_event(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+
+        original_save_job = gateway.save_job
+        original_append_event = gateway._append_event
+        call_log = []
+
+        async def traced_save_job(job):
+            call_log.append(("save_job", job["id"], job.get("status")))
+            await original_save_job(job)
+
+        async def traced_append_event(job_id, event):
+            call_log.append(("append_event", job_id, bool(event.get("done"))))
+            await original_append_event(job_id, event)
+
+        gateway.save_job = traced_save_job
+        gateway._append_event = traced_append_event
+
+        await gateway.mark_job_completed(child_job_id, "final answer")
+
+        root_save_index = next(
+            index
+            for index, entry in enumerate(call_log)
+            if entry[0] == "save_job" and entry[1] == root_job_id and entry[2] == JOB_STATUS_COMPLETED
+        )
+        root_done_index = next(
+            index
+            for index, entry in enumerate(call_log)
+            if entry[0] == "append_event" and entry[1] == root_job_id and entry[2] is True
+        )
+        self.assertLess(root_save_index, root_done_index)
+
+    async def test_root_only_failure_before_child_enqueue_remains_unmirrored(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+
+        await gateway.mark_job_failed(root_job_id, "parser failure")
+
+        root_job = await gateway.get_job(root_job_id)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertEqual(root_job["status"], JOB_STATUS_FAILED)
+        self.assertEqual(root_payloads[-1], {"error": "parser failure", "done": True})
+        self.assertEqual(len([payload for payload in root_payloads if payload.get("source_job_id")]), 0)
+
+    async def test_non_parser_file_chat_jobs_remain_unmirrored(self):
+        gateway = self.build_gateway()
+        job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="hello",
+            history=[],
+            job_kind=JOB_KIND_FILE_CHAT,
+            workload_class=WORKLOAD_CHAT,
+            file_chat={"files": [{"name": "note.txt", "size": 5}]},
+        )
+
+        await gateway.emit_event(job_id, {"token": "hello"})
+        await gateway.mark_job_completed(job_id, "final answer")
+
+        payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(job_id)]]
+        self.assertIn({"token": "hello"}, payloads)
+        self.assertEqual(payloads[-1], {"done": True})
+
+    async def test_deadline_exceeded_fallback_synthesizes_root_failed_state(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+        child_job = await gateway.get_job(child_job_id)
+        child_job.update(
+            {
+                "status": "running",
+                "assigned_worker_id": "worker-1",
+                "lease_until": 1,
+                "deadline_at": 1,
+            }
+        )
+        await gateway.save_job(child_job)
+        await gateway.redis.zadd(gateway.ACTIVE_JOBS_ZSET, {child_job_id: 1})
+
+        recovered = await gateway.requeue_stale_jobs()
+
+        root_job = await gateway.get_job(root_job_id)
+        child_job = await gateway.get_job(child_job_id)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertEqual(recovered, 0)
+        self.assertEqual(child_job["status"], JOB_STATUS_FAILED)
+        self.assertEqual(child_job["error"], DEADLINE_EXCEEDED_ERROR)
+        self.assertEqual(root_job["status"], JOB_STATUS_FAILED)
+        self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_FAILED)
+        self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
+        self.assertEqual(root_payloads[-1], {"error": DEADLINE_EXCEEDED_ERROR, "done": True, "source_job_id": child_job_id})
+
+    async def test_retry_exhausted_fallback_synthesizes_root_failed_state(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+        child_job = await gateway.get_job(child_job_id)
+        child_job.update(
+            {
+                "status": "running",
+                "assigned_worker_id": "worker-1",
+                "lease_until": 1,
+                "deadline_at": 9999999999,
+                "retry_count": int(child_job.get("max_retries") or 0),
+            }
+        )
+        await gateway.save_job(child_job)
+        await gateway.redis.zadd(gateway.ACTIVE_JOBS_ZSET, {child_job_id: 1})
+
+        recovered = await gateway.requeue_stale_jobs()
+
+        root_job = await gateway.get_job(root_job_id)
+        child_job = await gateway.get_job(child_job_id)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertEqual(recovered, 0)
+        self.assertEqual(child_job["status"], JOB_STATUS_FAILED)
+        self.assertEqual(child_job["error"], GENERIC_CHAT_ERROR)
+        self.assertEqual(root_job["status"], JOB_STATUS_FAILED)
+        self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_FAILED)
+        self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
+        self.assertEqual(root_payloads[-1], {"error": GENERIC_CHAT_ERROR, "done": True, "source_job_id": child_job_id})
 
     def test_parser_workload_is_first_class_and_not_collapsed_to_chat(self):
         self.assertEqual(normalize_workload_class(WORKLOAD_PARSE), WORKLOAD_PARSE)
