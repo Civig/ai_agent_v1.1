@@ -5,6 +5,7 @@ import math
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Optional
 
 from fastapi import HTTPException
@@ -38,6 +39,8 @@ WORKER_POOL_PARSER = "parser"
 JOB_KIND_CHAT = "chat"
 JOB_KIND_FILE_CHAT = "file_chat"
 JOB_KIND_PARSE = "parse"
+LIFECYCLE_STAGE_PARSER_PREPARED = "parser_artifacts_prepared"
+LIFECYCLE_STAGE_CHILD_ENQUEUED = "child_enqueued"
 PRIORITY_P0 = "p0"
 PRIORITY_P1 = "p1"
 PRIORITY_P2 = "p2"
@@ -594,6 +597,18 @@ class LLMGateway(RedisBackedComponent):
     def job_lock_key(self, job_id: str) -> str:
         return f"llm:job:{job_id}:lock"
 
+    @asynccontextmanager
+    async def job_lock(self, job_id: str) -> AsyncIterator[None]:
+        if self.redis is not None and hasattr(self.redis, "lock"):
+            lock = self.redis.lock(self.job_lock_key(job_id), timeout=5)
+            async with lock:
+                yield
+            return
+        yield
+
+    def derived_child_job_id(self, root_job_id: str) -> str:
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"parser-child:{(root_job_id or '').strip()}").hex
+
     async def has_worker_for_target_kind(self, workload_class: str, target_kind: str) -> bool:
         normalized_workload = worker_pool_for_workload(workload_class)
         normalized_target_kind = normalize_target_kind(target_kind)
@@ -1021,9 +1036,18 @@ class LLMGateway(RedisBackedComponent):
         parent_job_id: Optional[str] = None,
         staging_id: Optional[str] = None,
         parser_metadata: Optional[Dict[str, Any]] = None,
+        lifecycle_stage: Optional[str] = None,
+        child_job_id: Optional[str] = None,
+        job_id_override: Optional[str] = None,
     ) -> str:
         if self.redis is None:
             raise HTTPException(status_code=503, detail="LLM control plane unavailable")
+
+        requested_job_id = (job_id_override or "").strip()
+        if requested_job_id:
+            existing_job = await self.get_job(requested_job_id)
+            if existing_job is not None:
+                return requested_job_id
 
         workload_class = normalize_workload_class(workload_class)
         priority = self._normalize_priority(workload_class, priority)
@@ -1032,7 +1056,7 @@ class LLMGateway(RedisBackedComponent):
             raise HTTPException(status_code=503, detail="LLM queue is saturated")
 
         catalog = await self.get_model_catalog()
-        job_id = uuid.uuid4().hex
+        job_id = requested_job_id or uuid.uuid4().hex
         if not catalog:
             logger.error("Refusing to enqueue job %s for user %s because no LLM models are available", job_id, username)
             raise HTTPException(status_code=503, detail="No LLM models available")
@@ -1106,6 +1130,8 @@ class LLMGateway(RedisBackedComponent):
             "parent_job_id": (parent_job_id or "").strip() or None,
             "staging_id": (staging_id or "").strip() or None,
             "parser_metadata": parser_metadata if isinstance(parser_metadata, dict) else None,
+            "lifecycle_stage": (lifecycle_stage or "").strip() or None,
+            "child_job_id": (child_job_id or "").strip() or None,
         }
         queue_key = self.pending_queue_key(workload_class, priority)
         async with self.redis.pipeline(transaction=True) as pipeline:
@@ -1115,6 +1141,109 @@ class LLMGateway(RedisBackedComponent):
             pipeline.expire(self.events_key(job_id), settings.LLM_EVENT_STREAM_TTL_SECONDS)
             await pipeline.execute()
         return job_id
+
+    async def get_linked_child_job_id(self, root_job_id: str) -> Optional[str]:
+        async with self.job_lock(root_job_id):
+            root_job = await self.get_job(root_job_id)
+            if not root_job:
+                return None
+
+            existing_child_id = (root_job.get("child_job_id") or "").strip()
+            if existing_child_id:
+                existing_child = await self.get_job(existing_child_id)
+                if existing_child is None:
+                    raise RuntimeError("Linked child job is missing")
+                return existing_child_id
+
+            derived_child_id = self.derived_child_job_id(root_job_id)
+            derived_child = await self.get_job(derived_child_id)
+            if derived_child is None:
+                return None
+
+            root_job["child_job_id"] = derived_child_id
+            await self.save_job(root_job)
+            return derived_child_id
+
+    async def enqueue_child_job_once(
+        self,
+        root_job_id: str,
+        *,
+        prepared_llm_job: Dict[str, Any],
+    ) -> tuple[str, bool]:
+        async with self.job_lock(root_job_id):
+            root_job = await self.get_job(root_job_id)
+            if not root_job:
+                raise RuntimeError("Parser root job not found")
+
+            existing_child_id = (root_job.get("child_job_id") or "").strip()
+            if existing_child_id:
+                existing_child = await self.get_job(existing_child_id)
+                if existing_child is None:
+                    raise RuntimeError("Linked child job is missing")
+                return existing_child_id, False
+
+            child_job_id = self.derived_child_job_id(root_job_id)
+            existing_child = await self.get_job(child_job_id)
+            if existing_child is None:
+                child_kind = (prepared_llm_job.get("job_kind") or "").strip().lower()
+                if child_kind != JOB_KIND_FILE_CHAT:
+                    raise RuntimeError("Prepared child job must be file_chat")
+
+                child_job_id = await self.enqueue_job(
+                    username=root_job["username"],
+                    model_key=prepared_llm_job["model_key"],
+                    model_name=prepared_llm_job["model_name"],
+                    prompt=prepared_llm_job["prompt"],
+                    history=prepared_llm_job.get("history") or [],
+                    job_kind=JOB_KIND_FILE_CHAT,
+                    file_chat=prepared_llm_job.get("file_chat"),
+                    workload_class=prepared_llm_job.get("workload_class") or WORKLOAD_CHAT,
+                    root_job_id=root_job_id,
+                    parent_job_id=root_job_id,
+                    staging_id=(prepared_llm_job.get("staging_id") or root_job.get("staging_id") or "").strip() or None,
+                    job_id_override=child_job_id,
+                )
+                created = True
+            else:
+                created = False
+
+            root_job = await self.get_job(root_job_id) or root_job
+            root_job["child_job_id"] = child_job_id
+            await self.save_job(root_job)
+            return child_job_id, created
+
+    async def mark_job_waiting_on_child(
+        self,
+        job_id: str,
+        *,
+        child_job_id: str,
+        lifecycle_stage: str,
+        parser_metadata_updates: Optional[Dict[str, Any]] = None,
+        worker_id: Optional[str] = None,
+    ) -> None:
+        job = await self.get_job(job_id)
+        if not job:
+            return
+
+        release_snapshot = dict(job)
+        merged_parser_metadata = dict(job.get("parser_metadata") or {})
+        if isinstance(parser_metadata_updates, dict):
+            merged_parser_metadata.update(parser_metadata_updates)
+        job["child_job_id"] = (child_job_id or "").strip() or None
+        job["lifecycle_stage"] = (lifecycle_stage or "").strip() or None
+        job["parser_metadata"] = merged_parser_metadata or None
+        job["assigned_target_id"] = None
+        job["assigned_worker_id"] = None
+        job["lease_until"] = None
+        job["reserved_tokens"] = 0
+        job["reserved_vram_mb"] = 0
+        job["reserved_ram_mb"] = 0
+        job["profile"] = None
+        await self.save_job(job)
+        await self._release_reserved_capacity(release_snapshot)
+        await self._remove_from_processing(worker_id or release_snapshot.get("assigned_worker_id"), job_id)
+        if self.redis is not None:
+            await self.redis.zrem(self.ACTIVE_JOBS_ZSET, job_id)
 
     async def cancel_job(self, job_id: str, username: Optional[str] = None) -> bool:
         job = await self.get_job(job_id)

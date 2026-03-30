@@ -35,6 +35,8 @@ from llm_gateway import (
     JOB_STATUS_CANCELLED,
     JOB_STATUS_COMPLETED,
     JOB_STATUS_FAILED,
+    LIFECYCLE_STAGE_CHILD_ENQUEUED,
+    LIFECYCLE_STAGE_PARSER_PREPARED,
     LLMGateway,
     WORKER_POOL_PARSER,
     compute_queue_wait_ms,
@@ -52,7 +54,6 @@ logging.basicConfig(
 logger = logging.getLogger("llm_worker")
 CANCELLED_TEXT = "Генерация остановлена"
 DOCUMENT_NO_INFORMATION_RESPONSE = "В предоставленных документах нет информации для ответа на этот вопрос."
-PARSER_STAGE_COMPLETED_TEXT = "Parser stage completed"
 DOCUMENT_RETRY_PATTERNS = (
     "не имею доступа к файлам",
     "не могу прочитать файл",
@@ -607,11 +608,43 @@ class LLMWorker:
             await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
             return
 
-        staging_id = (job.get("staging_id") or "").strip()
+        current_job = await self.gateway.get_job(job_id)
+        current_job = current_job or job
+        existing_child_job_id = await self.gateway.get_linked_child_job_id(job_id)
+        staging_id = (current_job.get("staging_id") or job.get("staging_id") or "").strip()
         if not staging_id:
             error_text = "Parser job is missing staging_id"
             logger.warning("Parser job %s failed safely: %s", job_id, error_text)
             await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+            return
+
+        if existing_child_job_id:
+            raw_deleted = await asyncio.to_thread(
+                delete_staged_raw_files,
+                staging_id,
+                staging_root=settings.PARSER_STAGING_ROOT,
+            )
+            await asyncio.to_thread(
+                write_parser_result_metadata,
+                staging_id,
+                staging_root=settings.PARSER_STAGING_ROOT,
+                payload={
+                    "status": LIFECYCLE_STAGE_CHILD_ENQUEUED,
+                    "child_job_id": existing_child_job_id,
+                    "raw_deleted": raw_deleted,
+                },
+            )
+            await self.gateway.mark_job_waiting_on_child(
+                job_id,
+                child_job_id=existing_child_job_id,
+                lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+                parser_metadata_updates={
+                    "phase": LIFECYCLE_STAGE_CHILD_ENQUEUED,
+                    "raw_deleted": raw_deleted,
+                    "child_job_id": existing_child_job_id,
+                },
+                worker_id=self.worker_id,
+            )
             return
 
         try:
@@ -619,13 +652,54 @@ class LLMWorker:
                 asyncio.to_thread(
                     prepare_parser_job_artifacts,
                     staging_id=staging_id,
-                    message=job.get("prompt") or "",
-                    history=job.get("history") or [],
-                    model_key=job.get("model_key") or "",
-                    model_name=job.get("model_name") or "",
+                    message=current_job.get("prompt") or "",
+                    history=current_job.get("history") or [],
+                    model_key=current_job.get("model_key") or "",
+                    model_name=current_job.get("model_name") or "",
                     staging_root=settings.PARSER_STAGING_ROOT,
                 ),
                 timeout=settings.PARSER_JOB_TIMEOUT_SECONDS,
+            )
+            parser_record = await asyncio.to_thread(
+                write_parser_result_metadata,
+                staging_id,
+                staging_root=settings.PARSER_STAGING_ROOT,
+                payload={
+                    "status": LIFECYCLE_STAGE_PARSER_PREPARED,
+                    "raw_deleted": False,
+                    **prepared,
+                },
+            )
+            updated_job = dict(current_job)
+            updated_job["parser_metadata"] = {
+                **(current_job.get("parser_metadata") or {}),
+                "phase": LIFECYCLE_STAGE_PARSER_PREPARED,
+                "files": prepared["files"],
+                "original_doc_chars": prepared["original_doc_chars"],
+                "trimmed_doc_chars": prepared["trimmed_doc_chars"],
+                "raw_deleted": False,
+                "artifact": "meta/parser.json",
+            }
+            updated_job["lifecycle_stage"] = LIFECYCLE_STAGE_PARSER_PREPARED
+            await self.gateway.save_job(updated_job)
+        except TimeoutError:
+            error_text = "Parser artifact preparation timed out"
+            logger.warning("Parser job %s failed: %s", job_id, error_text)
+            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+            return
+        except Exception as exc:
+            error_text = f"Parser artifact preparation failed: {str(exc) or 'unknown error'}"
+            logger.warning("Parser job %s failed: %s", job_id, error_text, exc_info=True)
+            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+            return
+
+        try:
+            child_job_id, child_created = await self.gateway.enqueue_child_job_once(
+                job_id,
+                prepared_llm_job={
+                    **prepared["prepared_llm_job"],
+                    "staging_id": staging_id,
+                },
             )
             raw_deleted = await asyncio.to_thread(
                 delete_staged_raw_files,
@@ -637,35 +711,36 @@ class LLMWorker:
                 staging_id,
                 staging_root=settings.PARSER_STAGING_ROOT,
                 payload={
-                    "status": "parsed",
+                    "status": LIFECYCLE_STAGE_CHILD_ENQUEUED,
+                    "child_job_id": child_job_id,
                     "raw_deleted": raw_deleted,
-                    **prepared,
                 },
             )
-            updated_job = dict(job)
-            updated_job["parser_metadata"] = {
-                **(job.get("parser_metadata") or {}),
-                "phase": "parsed",
-                "files": prepared["files"],
-                "original_doc_chars": prepared["original_doc_chars"],
-                "trimmed_doc_chars": prepared["trimmed_doc_chars"],
-                "raw_deleted": raw_deleted,
-                "artifact": "meta/parser.json",
-            }
-            await self.gateway.save_job(updated_job)
             logger.info(
-                "Parser job %s prepared staged documents: file_count=%s raw_deleted=%s",
+                "Parser job %s prepared staged documents: file_count=%s child_job_id=%s raw_deleted=%s",
                 job_id,
                 len(prepared["files"]),
+                child_job_id,
                 parser_record.get("raw_deleted"),
             )
-            await self.gateway.mark_job_completed(job_id, PARSER_STAGE_COMPLETED_TEXT, worker_id=self.worker_id)
-        except TimeoutError:
-            error_text = "Parser stage timed out"
-            logger.warning("Parser job %s failed: %s", job_id, error_text)
-            await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
+            await self.gateway.mark_job_waiting_on_child(
+                job_id,
+                child_job_id=child_job_id,
+                lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+                parser_metadata_updates={
+                    "phase": LIFECYCLE_STAGE_CHILD_ENQUEUED,
+                    "files": prepared["files"],
+                    "original_doc_chars": prepared["original_doc_chars"],
+                    "trimmed_doc_chars": prepared["trimmed_doc_chars"],
+                    "raw_deleted": raw_deleted,
+                    "artifact": "meta/parser.json",
+                    "child_job_id": child_job_id,
+                    "child_job_created": child_created,
+                },
+                worker_id=self.worker_id,
+            )
         except Exception as exc:
-            error_text = str(exc) or "Parser stage failed"
+            error_text = f"Parser child enqueue failed: {str(exc) or 'unknown error'}"
             logger.warning("Parser job %s failed: %s", job_id, error_text, exc_info=True)
             await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
 

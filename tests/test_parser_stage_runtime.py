@@ -29,7 +29,7 @@ sys.modules.setdefault("httpx", fake_httpx)
 import app as app_module
 import parser_stage
 import worker as worker_module
-from llm_gateway import JOB_KIND_PARSE, WORKLOAD_PARSE, WORKER_POOL_PARSER
+from llm_gateway import JOB_KIND_PARSE, LIFECYCLE_STAGE_CHILD_ENQUEUED, LIFECYCLE_STAGE_PARSER_PREPARED, WORKLOAD_PARSE, WORKER_POOL_PARSER
 
 
 class SharedStagingTests(unittest.IsolatedAsyncioTestCase):
@@ -133,7 +133,7 @@ class SharedParserExtractionTests(unittest.TestCase):
 
 
 class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_parser_worker_prepares_artifacts_and_cleans_raw_files(self):
+    async def test_parser_worker_enqueues_child_and_keeps_root_non_terminal(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER
         ), patch.object(worker_module.settings, "ENABLE_PARSER_STAGE", True), patch.object(
@@ -157,7 +157,25 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
             worker = worker_module.LLMWorker()
             worker.gateway = type("Gateway", (), {})()
             worker.gateway.is_cancel_requested = AsyncMock(return_value=False)
+            worker.gateway.get_job = AsyncMock(
+                return_value={
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                    "prompt": "Summarize",
+                    "history": [{"role": "user", "content": "Earlier"}],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                    "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                    "status": "running",
+                }
+            )
+            worker.gateway.get_linked_child_job_id = AsyncMock(return_value=None)
+            worker.gateway.enqueue_child_job_once = AsyncMock(return_value=("child-job-1", True))
             worker.gateway.save_job = AsyncMock(return_value=None)
+            worker.gateway.mark_job_waiting_on_child = AsyncMock(return_value=None)
             worker.gateway.mark_job_completed = AsyncMock(return_value=None)
             worker.gateway.mark_job_failed = AsyncMock(return_value=None)
             worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
@@ -178,13 +196,20 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
             worker.gateway.mark_job_failed.assert_not_awaited()
             worker.gateway.mark_job_cancelled.assert_not_awaited()
-            worker.gateway.mark_job_completed.assert_awaited_once()
-            self.assertEqual(worker.gateway.mark_job_completed.await_args.args[1], "Parser stage completed")
+            worker.gateway.mark_job_completed.assert_not_awaited()
+            worker.gateway.enqueue_child_job_once.assert_awaited_once()
+            worker.gateway.mark_job_waiting_on_child.assert_awaited_once()
+            self.assertEqual(
+                worker.gateway.mark_job_waiting_on_child.await_args.kwargs["lifecycle_stage"],
+                LIFECYCLE_STAGE_CHILD_ENQUEUED,
+            )
+            self.assertEqual(worker.gateway.mark_job_waiting_on_child.await_args.kwargs["child_job_id"], "child-job-1")
 
             saved_job = worker.gateway.save_job.await_args.args[0]
-            self.assertEqual(saved_job["parser_metadata"]["phase"], "parsed")
-            self.assertTrue(saved_job["parser_metadata"]["raw_deleted"])
+            self.assertEqual(saved_job["parser_metadata"]["phase"], LIFECYCLE_STAGE_PARSER_PREPARED)
+            self.assertFalse(saved_job["parser_metadata"]["raw_deleted"])
             self.assertEqual(saved_job["parser_metadata"]["artifact"], "meta/parser.json")
+            self.assertEqual(saved_job["lifecycle_stage"], LIFECYCLE_STAGE_PARSER_PREPARED)
             self.assertLess(
                 saved_job["parser_metadata"]["trimmed_doc_chars"],
                 saved_job["parser_metadata"]["original_doc_chars"],
@@ -194,11 +219,150 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(paths["raw_dir"].exists())
             self.assertTrue(paths["request_path"].exists())
             parser_payload = json.loads(paths["parser_path"].read_text(encoding="utf-8"))
-            self.assertEqual(parser_payload["status"], "parsed")
+            self.assertEqual(parser_payload["status"], LIFECYCLE_STAGE_CHILD_ENQUEUED)
             self.assertTrue(parser_payload["raw_deleted"])
+            self.assertEqual(parser_payload["child_job_id"], "child-job-1")
             self.assertEqual(parser_payload["prepared_llm_job"]["job_kind"], "file_chat")
             self.assertIn("[Документ 1: a.txt]", parser_payload["prepared_llm_job"]["prompt"])
             self.assertIn(parser_stage.DOCUMENT_TRUNCATION_MARKER, parser_payload["prepared_llm_job"]["prompt"])
+
+    async def test_parser_worker_reuses_existing_child_without_duplicate_enqueue(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER
+        ), patch.object(worker_module.settings, "ENABLE_PARSER_STAGE", True), patch.object(
+            worker_module.settings, "PARSER_STAGING_ROOT", tmp
+        ):
+            upload = UploadFile(
+                filename="a.txt",
+                file=io.BytesIO(b"A"),
+                headers=Headers({"content-type": "text/plain"}),
+            )
+            staged = await parser_stage.stage_uploads_to_shared_root([upload], staging_root=tmp, username="alice")
+            worker = worker_module.LLMWorker()
+            worker.gateway = type("Gateway", (), {})()
+            worker.gateway.is_cancel_requested = AsyncMock(return_value=False)
+            worker.gateway.get_job = AsyncMock(
+                return_value={
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                    "parser_metadata": {"phase": LIFECYCLE_STAGE_PARSER_PREPARED, "files": staged["files"]},
+                    "status": "running",
+                }
+            )
+            worker.gateway.get_linked_child_job_id = AsyncMock(return_value="child-job-1")
+            worker.gateway.enqueue_child_job_once = AsyncMock(return_value=("child-job-1", False))
+            worker.gateway.mark_job_waiting_on_child = AsyncMock(return_value=None)
+            worker.gateway.mark_job_failed = AsyncMock(return_value=None)
+            worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
+
+            await worker.process_job(
+                {
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                }
+            )
+
+            worker.gateway.enqueue_child_job_once.assert_not_awaited()
+            worker.gateway.mark_job_waiting_on_child.assert_awaited_once()
+            parser_payload = json.loads(
+                parser_stage.shared_staging_paths(staged["staging_id"], staging_root=tmp)["parser_path"].read_text(encoding="utf-8")
+            )
+            self.assertEqual(parser_payload["status"], LIFECYCLE_STAGE_CHILD_ENQUEUED)
+            self.assertEqual(parser_payload["child_job_id"], "child-job-1")
+
+    async def test_parser_artifact_preparation_failure_is_distinct(self):
+        with patch.object(worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER), patch.object(
+            worker_module.settings, "ENABLE_PARSER_STAGE", True
+        ), patch.object(worker_module, "prepare_parser_job_artifacts", side_effect=RuntimeError("parse boom")):
+            worker = worker_module.LLMWorker()
+            worker.gateway = type("Gateway", (), {})()
+            worker.gateway.is_cancel_requested = AsyncMock(return_value=False)
+            worker.gateway.get_job = AsyncMock(
+                return_value={
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": "staging-1",
+                    "prompt": "Summarize",
+                    "history": [],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                }
+            )
+            worker.gateway.get_linked_child_job_id = AsyncMock(return_value=None)
+            worker.gateway.mark_job_failed = AsyncMock(return_value=None)
+            worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
+
+            await worker.process_job(
+                {
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": "staging-1",
+                }
+            )
+
+            worker.gateway.mark_job_failed.assert_awaited_once()
+            self.assertIn("Parser artifact preparation failed", worker.gateway.mark_job_failed.await_args.args[1])
+
+    async def test_parser_child_enqueue_failure_is_distinct(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER
+        ), patch.object(worker_module.settings, "ENABLE_PARSER_STAGE", True), patch.object(
+            worker_module.settings, "PARSER_STAGING_ROOT", tmp
+        ):
+            upload = UploadFile(
+                filename="a.txt",
+                file=io.BytesIO(b"A"),
+                headers=Headers({"content-type": "text/plain"}),
+            )
+            staged = await parser_stage.stage_uploads_to_shared_root([upload], staging_root=tmp, username="alice")
+            worker = worker_module.LLMWorker()
+            worker.gateway = type("Gateway", (), {})()
+            worker.gateway.is_cancel_requested = AsyncMock(return_value=False)
+            worker.gateway.get_job = AsyncMock(
+                return_value={
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                    "prompt": "Summarize",
+                    "history": [],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                }
+            )
+            worker.gateway.get_linked_child_job_id = AsyncMock(return_value=None)
+            worker.gateway.enqueue_child_job_once = AsyncMock(side_effect=RuntimeError("queue down"))
+            worker.gateway.save_job = AsyncMock(return_value=None)
+            worker.gateway.mark_job_failed = AsyncMock(return_value=None)
+            worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
+
+            await worker.process_job(
+                {
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                    "prompt": "Summarize",
+                    "history": [],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                }
+            )
+
+            worker.gateway.mark_job_failed.assert_awaited_once()
+            self.assertIn("Parser child enqueue failed", worker.gateway.mark_job_failed.await_args.args[1])
 
 
 if __name__ == "__main__":
