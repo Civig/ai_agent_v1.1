@@ -29,7 +29,14 @@ sys.modules.setdefault("httpx", fake_httpx)
 import app as app_module
 import parser_stage
 import worker as worker_module
-from llm_gateway import JOB_KIND_PARSE, LIFECYCLE_STAGE_CHILD_ENQUEUED, LIFECYCLE_STAGE_PARSER_PREPARED, WORKLOAD_PARSE, WORKER_POOL_PARSER
+from llm_gateway import (
+    JOB_KIND_PARSE,
+    LIFECYCLE_STAGE_CHILD_ENQUEUED,
+    LIFECYCLE_STAGE_PARSER_PREPARED,
+    ParserChildEnqueueCancelled,
+    WORKLOAD_PARSE,
+    WORKER_POOL_PARSER,
+)
 
 
 class SharedStagingTests(unittest.IsolatedAsyncioTestCase):
@@ -363,6 +370,97 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
             worker.gateway.mark_job_failed.assert_awaited_once()
             self.assertIn("Parser child enqueue failed", worker.gateway.mark_job_failed.await_args.args[1])
+
+    async def test_parser_cancel_between_recheck_and_enqueue_is_cancelled_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER
+        ), patch.object(worker_module.settings, "ENABLE_PARSER_STAGE", True), patch.object(
+            worker_module.settings, "PARSER_STAGING_ROOT", tmp
+        ), patch.object(
+            worker_module.settings, "PARSER_JOB_TIMEOUT_SECONDS", 5
+        ):
+            upload = UploadFile(
+                filename="a.txt",
+                file=io.BytesIO(b"A"),
+                headers=Headers({"content-type": "text/plain"}),
+            )
+            staged = await parser_stage.stage_uploads_to_shared_root([upload], staging_root=tmp, username="alice")
+            worker = worker_module.LLMWorker()
+            worker.gateway = type("Gateway", (), {})()
+            worker.gateway.is_cancel_requested = AsyncMock(side_effect=[False, False])
+            worker.gateway.get_job = AsyncMock(
+                side_effect=[
+                    {
+                        "id": "parse-job-1",
+                        "username": "alice",
+                        "job_kind": JOB_KIND_PARSE,
+                        "workload_class": WORKLOAD_PARSE,
+                        "staging_id": staged["staging_id"],
+                        "prompt": "Summarize",
+                        "history": [],
+                        "model_key": "demo",
+                        "model_name": "demo",
+                        "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                        "status": "running",
+                    },
+                    {
+                        "id": "parse-job-1",
+                        "username": "alice",
+                        "job_kind": JOB_KIND_PARSE,
+                        "workload_class": WORKLOAD_PARSE,
+                        "staging_id": staged["staging_id"],
+                        "prompt": "Summarize",
+                        "history": [],
+                        "model_key": "demo",
+                        "model_name": "demo",
+                        "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                        "status": "running",
+                        "cancel_requested": True,
+                    },
+                    {
+                        "id": "parse-job-1",
+                        "username": "alice",
+                        "job_kind": JOB_KIND_PARSE,
+                        "workload_class": WORKLOAD_PARSE,
+                        "staging_id": staged["staging_id"],
+                        "prompt": "Summarize",
+                        "history": [],
+                        "model_key": "demo",
+                        "model_name": "demo",
+                        "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                        "status": "running",
+                        "cancel_requested": True,
+                    },
+                ]
+            )
+            worker.gateway.get_linked_child_job_id = AsyncMock(return_value=None)
+            worker.gateway.enqueue_child_job_once = AsyncMock(
+                side_effect=ParserChildEnqueueCancelled("Parser root was cancelled before child enqueue")
+            )
+            worker.gateway.save_job = AsyncMock(return_value=None)
+            worker.gateway.mark_job_waiting_on_child = AsyncMock(return_value=None)
+            worker.gateway.mark_job_failed = AsyncMock(return_value=None)
+            worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
+
+            await worker.process_job(
+                {
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                    "prompt": "Summarize",
+                    "history": [],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                    "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                }
+            )
+
+            worker.gateway.enqueue_child_job_once.assert_awaited_once()
+            worker.gateway.mark_job_waiting_on_child.assert_not_awaited()
+            worker.gateway.mark_job_failed.assert_not_awaited()
+            worker.gateway.mark_job_cancelled.assert_awaited_once_with("parse-job-1", worker_id=worker.worker_id)
 
 
 if __name__ == "__main__":

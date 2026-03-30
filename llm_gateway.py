@@ -23,6 +23,10 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+
+class ParserChildEnqueueCancelled(RuntimeError):
+    pass
+
 JOB_STATUS_QUEUED = "queued"
 JOB_STATUS_ADMITTED = "admitted"
 JOB_STATUS_RUNNING = "running"
@@ -1253,6 +1257,9 @@ class LLMGateway(RedisBackedComponent):
                     raise RuntimeError("Linked child job is missing")
                 return existing_child_id, False
 
+            if root_job.get("status") in TERMINAL_JOB_STATUSES or root_job.get("cancel_requested"):
+                raise ParserChildEnqueueCancelled("Parser root was cancelled before child enqueue")
+
             child_job_id = self.derived_child_job_id(root_job_id)
             existing_child = await self.get_job(child_job_id)
             if existing_child is None:
@@ -1338,6 +1345,9 @@ class LLMGateway(RedisBackedComponent):
             await self.mark_job_cancelled(job_id)
             return True
 
+        if await self._cancel_linked_child_if_not_running(job):
+            return True
+
         job["cancel_requested"] = True
         await self.save_job(job)
         await self.emit_event(job_id, {"job_id": job_id, "cancelling": True})
@@ -1346,6 +1356,33 @@ class LLMGateway(RedisBackedComponent):
     async def is_cancel_requested(self, job_id: str) -> bool:
         job = await self.get_job(job_id)
         return bool(job and job.get("cancel_requested"))
+
+    async def _cancel_linked_child_if_not_running(self, root_job: Dict[str, Any]) -> bool:
+        child_job_id = (root_job.get("child_job_id") or "").strip()
+        root_job_id = (root_job.get("id") or "").strip()
+        if not child_job_id or not root_job_id:
+            return False
+
+        child_job = await self.get_job(child_job_id)
+        if not child_job or child_job.get("status") in TERMINAL_JOB_STATUSES:
+            return False
+
+        child_status = child_job.get("status")
+        if child_status == JOB_STATUS_QUEUED:
+            await self.redis.lrem(self.pending_queue_key(child_job["workload_class"], child_job["priority"]), 1, child_job_id)
+            await self.mark_job_cancelled(child_job_id)
+            return True
+
+        if child_status == JOB_STATUS_ADMITTED and child_job.get("assigned_target_id"):
+            await self.redis.lrem(
+                self.dispatch_queue_key(child_job["worker_pool"], child_job["assigned_target_id"]),
+                1,
+                child_job_id,
+            )
+            await self.mark_job_cancelled(child_job_id)
+            return True
+
+        return False
 
     async def list_pending_candidates(self, scan_depth: int) -> list[tuple[str, Dict[str, Any]]]:
         if self.redis is None:

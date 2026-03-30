@@ -35,6 +35,8 @@ from llm_gateway import (
     JOB_STATUS_CANCELLED,
     JOB_STATUS_COMPLETED,
     JOB_STATUS_FAILED,
+    ParserChildEnqueueCancelled,
+    TERMINAL_JOB_STATUSES,
     LIFECYCLE_STAGE_CHILD_ENQUEUED,
     LIFECYCLE_STAGE_PARSER_PREPARED,
     LLMGateway,
@@ -693,6 +695,13 @@ class LLMWorker:
             await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
             return
 
+        latest_job = await self.gateway.get_job(job_id)
+        if latest_job and latest_job.get("status") in TERMINAL_JOB_STATUSES:
+            return
+        if await self.gateway.is_cancel_requested(job_id):
+            await self.gateway.mark_job_cancelled(job_id, worker_id=self.worker_id)
+            return
+
         try:
             child_job_id, child_created = await self.gateway.enqueue_child_job_once(
                 job_id,
@@ -739,6 +748,12 @@ class LLMWorker:
                 },
                 worker_id=self.worker_id,
             )
+        except ParserChildEnqueueCancelled:
+            latest_job = await self.gateway.get_job(job_id)
+            if latest_job and latest_job.get("status") in TERMINAL_JOB_STATUSES:
+                return
+            await self.gateway.mark_job_cancelled(job_id, worker_id=self.worker_id)
+            return
         except Exception as exc:
             error_text = f"Parser child enqueue failed: {str(exc) or 'unknown error'}"
             logger.warning("Parser job %s failed: %s", job_id, error_text, exc_info=True)

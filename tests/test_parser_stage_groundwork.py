@@ -36,6 +36,8 @@ from llm_gateway import (
     LIFECYCLE_STAGE_CHILD_ENQUEUED,
     LIFECYCLE_STAGE_CHILD_FAILED,
     LLMGateway,
+    LIFECYCLE_STAGE_PARSER_PREPARED,
+    ParserChildEnqueueCancelled,
     WORKLOAD_CHAT,
     WORKLOAD_PARSE,
     WORKER_POOL_PARSER,
@@ -529,6 +531,9 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
                 "staging_id": "staging-1",
             },
         )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
         await gateway.mark_job_waiting_on_child(
             root_job_id,
             child_job_id=child_job_id,
@@ -568,6 +573,9 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
                 "staging_id": "staging-1",
             },
         )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
         await gateway.mark_job_waiting_on_child(
             root_job_id,
             child_job_id=child_job_id,
@@ -606,6 +614,9 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
                 "staging_id": "staging-1",
             },
         )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
         await gateway.mark_job_waiting_on_child(
             root_job_id,
             child_job_id=child_job_id,
@@ -644,6 +655,9 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
                 "staging_id": "staging-1",
             },
         )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
         await gateway.mark_job_waiting_on_child(
             root_job_id,
             child_job_id=child_job_id,
@@ -744,6 +758,9 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
                 "staging_id": "staging-1",
             },
         )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
         await gateway.mark_job_waiting_on_child(
             root_job_id,
             child_job_id=child_job_id,
@@ -798,6 +815,9 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
                 "staging_id": "staging-1",
             },
         )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
         await gateway.mark_job_waiting_on_child(
             root_job_id,
             child_job_id=child_job_id,
@@ -828,6 +848,151 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_FAILED)
         self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
         self.assertEqual(root_payloads[-1], {"error": GENERIC_CHAT_ERROR, "done": True, "source_job_id": child_job_id})
+
+    async def test_root_cancel_cancels_linked_queued_child_and_synthesizes_root(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+
+        cancelled = await gateway.cancel_job(root_job_id, username="alice")
+        repeated = await gateway.cancel_job(root_job_id, username="alice")
+
+        root_job = await gateway.get_job(root_job_id)
+        child_job = await gateway.get_job(child_job_id)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertTrue(cancelled)
+        self.assertFalse(repeated)
+        self.assertEqual(child_job["status"], JOB_STATUS_CANCELLED)
+        self.assertEqual(root_job["status"], JOB_STATUS_CANCELLED)
+        self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_CANCELLED)
+        self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
+        self.assertEqual(root_payloads[-1], {"cancelled": True, "done": True, "source_job_id": child_job_id})
+
+    async def test_root_cancel_cancels_linked_admitted_child_and_synthesizes_root(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        child_job_id, _ = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        await gateway.save_job(root_job)
+        await gateway.mark_job_waiting_on_child(
+            root_job_id,
+            child_job_id=child_job_id,
+            lifecycle_stage=LIFECYCLE_STAGE_CHILD_ENQUEUED,
+        )
+        child_job = await gateway.get_job(child_job_id)
+        child_job["status"] = "admitted"
+        child_job["assigned_target_id"] = "cpu-target"
+        await gateway.save_job(child_job)
+        await gateway.redis.rpush(gateway.dispatch_queue_key(child_job["worker_pool"], "cpu-target"), child_job_id)
+
+        cancelled = await gateway.cancel_job(root_job_id, username="alice")
+
+        root_job = await gateway.get_job(root_job_id)
+        child_job = await gateway.get_job(child_job_id)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        dispatch_queue = gateway.redis.lists[gateway.dispatch_queue_key(child_job["worker_pool"], "cpu-target")]
+        self.assertTrue(cancelled)
+        self.assertEqual(dispatch_queue, [])
+        self.assertEqual(child_job["status"], JOB_STATUS_CANCELLED)
+        self.assertEqual(root_job["status"], JOB_STATUS_CANCELLED)
+        self.assertEqual(root_job["lifecycle_stage"], LIFECYCLE_STAGE_CHILD_CANCELLED)
+        self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
+        self.assertEqual(root_payloads[-1], {"cancelled": True, "done": True, "source_job_id": child_job_id})
+
+    async def test_enqueue_child_under_lock_aborts_when_root_cancel_requested(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+        root_job = await gateway.get_job(root_job_id)
+        root_job["status"] = "running"
+        root_job["lifecycle_stage"] = LIFECYCLE_STAGE_PARSER_PREPARED
+        await gateway.save_job(root_job)
+
+        cancelled = await gateway.cancel_job(root_job_id, username="alice")
+        root_job = await gateway.get_job(root_job_id)
+        self.assertTrue(cancelled)
+        self.assertTrue(root_job["cancel_requested"])
+
+        with self.assertRaises(ParserChildEnqueueCancelled):
+            await gateway.enqueue_child_job_once(
+                root_job_id,
+                prepared_llm_job={
+                    "job_kind": JOB_KIND_FILE_CHAT,
+                    "model_key": "demo-model",
+                    "model_name": "demo-model",
+                    "prompt": "grounded prompt",
+                    "history": [],
+                    "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                    "staging_id": "staging-1",
+                },
+            )
+
+        self.assertIsNone(await gateway.get_job(gateway.derived_child_job_id(root_job_id)))
+        await gateway.mark_job_cancelled(root_job_id)
+        repeated = await gateway.cancel_job(root_job_id, username="alice")
+
+        root_job = await gateway.get_job(root_job_id)
+        root_payloads = [json.loads(fields["data"]) for _, fields in gateway.redis.streams[gateway.events_key(root_job_id)]]
+        self.assertFalse(repeated)
+        self.assertEqual(root_job["status"], JOB_STATUS_CANCELLED)
+        self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
 
     def test_parser_workload_is_first_class_and_not_collapsed_to_chat(self):
         self.assertEqual(normalize_workload_class(WORKLOAD_PARSE), WORKLOAD_PARSE)
