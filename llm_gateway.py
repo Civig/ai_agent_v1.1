@@ -1335,6 +1335,9 @@ class LLMGateway(RedisBackedComponent):
         if self.redis is None:
             return False
 
+        if job.get("cancel_requested"):
+            return True
+
         if job.get("status") == JOB_STATUS_QUEUED:
             await self.redis.lrem(self.pending_queue_key(job["workload_class"], job["priority"]), 1, job_id)
             await self.mark_job_cancelled(job_id)
@@ -1345,7 +1348,7 @@ class LLMGateway(RedisBackedComponent):
             await self.mark_job_cancelled(job_id)
             return True
 
-        if await self._cancel_linked_child_if_not_running(job):
+        if await self._propagate_cancel_to_linked_child(job):
             return True
 
         job["cancel_requested"] = True
@@ -1357,7 +1360,7 @@ class LLMGateway(RedisBackedComponent):
         job = await self.get_job(job_id)
         return bool(job and job.get("cancel_requested"))
 
-    async def _cancel_linked_child_if_not_running(self, root_job: Dict[str, Any]) -> bool:
+    async def _propagate_cancel_to_linked_child(self, root_job: Dict[str, Any]) -> bool:
         child_job_id = (root_job.get("child_job_id") or "").strip()
         root_job_id = (root_job.get("id") or "").strip()
         if not child_job_id or not root_job_id:
@@ -1382,7 +1385,32 @@ class LLMGateway(RedisBackedComponent):
             await self.mark_job_cancelled(child_job_id)
             return True
 
+        if child_status == JOB_STATUS_RUNNING:
+            return await self.cancel_job(child_job_id)
+
         return False
+
+    def _is_linked_child_job(self, job: Dict[str, Any]) -> bool:
+        root_job_id = (job.get("root_job_id") or "").strip()
+        job_id = (job.get("id") or "").strip()
+        return bool(root_job_id and job_id and root_job_id != job_id)
+
+    async def _cancel_stale_requested_job(self, job: Dict[str, Any]) -> bool:
+        if not self._is_linked_child_job(job):
+            return False
+        if not job.get("cancel_requested"):
+            return False
+        if job.get("status") not in {JOB_STATUS_RUNNING, JOB_STATUS_ADMITTED}:
+            return False
+
+        if self.redis is not None and job.get("status") == JOB_STATUS_ADMITTED and job.get("assigned_target_id"):
+            await self.redis.lrem(
+                self.dispatch_queue_key(job["worker_pool"], job["assigned_target_id"]),
+                1,
+                job["id"],
+            )
+        await self.mark_job_cancelled(job["id"], worker_id=job.get("assigned_worker_id"))
+        return True
 
     async def list_pending_candidates(self, scan_depth: int) -> list[tuple[str, Dict[str, Any]]]:
         if self.redis is None:
@@ -1789,6 +1817,8 @@ class LLMGateway(RedisBackedComponent):
         job = await self.get_job(job_id)
         if not job:
             return
+        if job.get("status") in TERMINAL_JOB_STATUSES:
+            return
         finished_at = int(time.time())
         job["status"] = JOB_STATUS_CANCELLED
         job["finished_at"] = finished_at
@@ -1826,6 +1856,8 @@ class LLMGateway(RedisBackedComponent):
                     continue
                 lease_until = int(job.get("lease_until") or 0)
                 if lease_until > now:
+                    continue
+                if await self._cancel_stale_requested_job(job):
                     continue
                 if int(job.get("deadline_at") or 0) and now >= int(job.get("deadline_at") or 0):
                     await self._mark_job_failed_from_record(
