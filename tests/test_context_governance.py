@@ -74,6 +74,9 @@ class ContextGovernanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         gateway.enqueue_job.assert_awaited_once()
         self.assertEqual(gateway.enqueue_job.await_args.kwargs["history"], expected_history)
+        self.assertEqual(gateway.enqueue_job.await_args.kwargs["thread_id"], app_module.DEFAULT_CHAT_THREAD_ID)
+        self.assertEqual(chat_store.get_history.await_args.kwargs["thread_id"], app_module.DEFAULT_CHAT_THREAD_ID)
+        self.assertEqual(chat_store.append_message.await_args.kwargs["thread_id"], app_module.DEFAULT_CHAT_THREAD_ID)
 
     def test_prepare_ollama_messages_trims_history_before_user_prompt(self):
         history = [

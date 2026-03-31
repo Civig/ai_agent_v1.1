@@ -116,6 +116,7 @@ class SharedStagingTests(unittest.IsolatedAsyncioTestCase):
             job_id = await app_module.enqueue_parser_job(
                 gateway=gateway,
                 username="alice",
+                thread_id="thread-1",
                 model_info={"key": "demo", "name": "demo"},
                 message="Summarize",
                 history=[{"role": "user", "content": "Earlier"}],
@@ -135,6 +136,7 @@ class SharedStagingTests(unittest.IsolatedAsyncioTestCase):
         kwargs = gateway.enqueue_job.await_args.kwargs
         self.assertEqual(kwargs["job_kind"], JOB_KIND_PARSE)
         self.assertEqual(kwargs["workload_class"], WORKLOAD_PARSE)
+        self.assertEqual(kwargs["thread_id"], "thread-1")
         self.assertEqual(kwargs["staging_id"], "staging-1")
         serialized = json.dumps(kwargs["parser_metadata"], ensure_ascii=False)
         self.assertIn("abc123-note.txt", serialized)
@@ -205,6 +207,7 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 return_value={
                     "id": "parse-job-1",
                     "username": "alice",
+                    "thread_id": "thread-parser",
                     "job_kind": JOB_KIND_PARSE,
                     "workload_class": WORKLOAD_PARSE,
                     "staging_id": staged["staging_id"],
@@ -229,6 +232,7 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "id": "parse-job-1",
                         "username": "alice",
+                        "thread_id": "thread-parser",
                         "job_kind": JOB_KIND_PARSE,
                         "workload_class": WORKLOAD_PARSE,
                         "staging_id": staged["staging_id"],
@@ -268,6 +272,10 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(parser_payload["raw_deleted"])
             self.assertEqual(parser_payload["child_job_id"], "child-job-1")
             self.assertEqual(parser_payload["prepared_llm_job"]["job_kind"], "file_chat")
+            self.assertEqual(
+                worker.gateway.enqueue_child_job_once.await_args.kwargs["prepared_llm_job"]["thread_id"],
+                "thread-parser",
+            )
             self.assertEqual(
                 parser_payload["prepared_llm_job"]["file_chat"]["doc_chars"],
                 saved_job["parser_metadata"]["trimmed_doc_chars"],

@@ -23,6 +23,7 @@ from config import settings
 from llm_gateway import (
     AsyncChatStore,
     DEADLINE_EXCEEDED_ERROR,
+    DEFAULT_CHAT_THREAD_ID,
     classify_observability_error,
     ERROR_TYPE_CANCELLED,
     ERROR_TYPE_INFERENCE_TIMEOUT,
@@ -91,6 +92,20 @@ DOCUMENT_NO_INFO_PATTERNS = (
     "не представлена",
     "не представлен",
 )
+
+
+def resolve_job_thread_id(job: Dict[str, Any]) -> str:
+    normalized = (job.get("thread_id") or "").strip()
+    if normalized:
+        return normalized
+
+    file_chat = job.get("file_chat")
+    if isinstance(file_chat, dict):
+        file_chat_thread_id = (file_chat.get("thread_id") or "").strip()
+        if file_chat_thread_id:
+            return file_chat_thread_id
+
+    return DEFAULT_CHAT_THREAD_ID
 
 
 class NoLLMModelsAvailableError(RuntimeError):
@@ -755,6 +770,7 @@ class LLMWorker:
                 prepared_llm_job={
                     **prepared["prepared_llm_job"],
                     "staging_id": staging_id,
+                    "thread_id": resolve_job_thread_id(current_job or job),
                 },
             )
             raw_deleted = await asyncio.to_thread(
@@ -813,6 +829,7 @@ class LLMWorker:
 
         job_id = job["id"]
         username = job["username"]
+        thread_id = resolve_job_thread_id(job)
         model_name = job["model_name"]
         deadline_at = int(job.get("deadline_at") or 0)
         assistant_text = ""
@@ -833,7 +850,7 @@ class LLMWorker:
                 len(job.get("history") or []),
             )
             if await self.gateway.is_cancel_requested(job_id):
-                await self.chat_store.append_message(username, "assistant", CANCELLED_TEXT)
+                await self.chat_store.append_message(username, "assistant", CANCELLED_TEXT, thread_id=thread_id)
                 await self.gateway.mark_job_cancelled(job_id, worker_id=self.worker_id)
                 return
 
@@ -854,13 +871,13 @@ class LLMWorker:
                     deadline_at=deadline_at,
                     emit_tokens=True,
                 )
-            await self.chat_store.append_message(username, "assistant", assistant_text)
+            await self.chat_store.append_message(username, "assistant", assistant_text, thread_id=thread_id)
             await self.gateway.mark_job_completed(job_id, assistant_text, worker_id=self.worker_id)
             terminal_status = JOB_STATUS_COMPLETED
             error_type = ERROR_TYPE_NONE
             logger.info("Completed LLM job %s in %.2fs", job_id, time.perf_counter() - started_at)
         except JobCancelledByUser:
-            await self.chat_store.append_message(username, "assistant", CANCELLED_TEXT)
+            await self.chat_store.append_message(username, "assistant", CANCELLED_TEXT, thread_id=thread_id)
             await self.gateway.mark_job_cancelled(job_id, worker_id=self.worker_id)
             terminal_status = JOB_STATUS_CANCELLED
             error_type = classify_observability_error(
@@ -878,7 +895,7 @@ class LLMWorker:
             )
         except OllamaModelNotFoundError as exc:
             logger.error("LLM job %s failed: %s", job_id, exc)
-            await self.chat_store.append_message(username, "assistant", str(exc))
+            await self.chat_store.append_message(username, "assistant", str(exc), thread_id=thread_id)
             await self.gateway.mark_job_failed(job_id, str(exc), worker_id=self.worker_id)
             terminal_status = JOB_STATUS_FAILED
             error_type = classify_observability_error(
@@ -887,7 +904,7 @@ class LLMWorker:
             )
         except NoLLMModelsAvailableError as exc:
             logger.error("LLM job %s failed: %s", job_id, exc)
-            await self.chat_store.append_message(username, "assistant", str(exc))
+            await self.chat_store.append_message(username, "assistant", str(exc), thread_id=thread_id)
             await self.gateway.mark_job_failed(job_id, str(exc), worker_id=self.worker_id)
             terminal_status = JOB_STATUS_FAILED
             error_type = classify_observability_error(
@@ -896,7 +913,7 @@ class LLMWorker:
             )
         except TimeoutError:
             logger.warning("LLM job %s timed out", job_id)
-            await self.chat_store.append_message(username, "assistant", GENERIC_CHAT_ERROR)
+            await self.chat_store.append_message(username, "assistant", GENERIC_CHAT_ERROR, thread_id=thread_id)
             await self.gateway.mark_job_failed(job_id, GENERIC_CHAT_ERROR, worker_id=self.worker_id)
             terminal_status = JOB_STATUS_FAILED
             error_type = classify_observability_error(
@@ -906,7 +923,7 @@ class LLMWorker:
             )
         except Exception:
             logger.exception("LLM job %s failed", job_id)
-            await self.chat_store.append_message(username, "assistant", GENERIC_CHAT_ERROR)
+            await self.chat_store.append_message(username, "assistant", GENERIC_CHAT_ERROR, thread_id=thread_id)
             await self.gateway.mark_job_failed(job_id, GENERIC_CHAT_ERROR, worker_id=self.worker_id)
             terminal_status = JOB_STATUS_FAILED
             error_type = classify_observability_error(

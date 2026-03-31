@@ -118,6 +118,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
                 request,
                 message="Summarize",
                 model=None,
+                thread_id="thread-files",
                 files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
                 current_user={"username": "alice", "model_key": "demo", "model": "demo"},
             )
@@ -165,6 +166,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
                 request,
                 message="Summarize",
                 model=None,
+                thread_id="thread-files",
                 files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
                 current_user={"username": "alice", "model_key": "demo", "model": "demo"},
             )
@@ -212,6 +214,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
                 request,
                 message="Summarize",
                 model=None,
+                thread_id="thread-files",
                 files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
                 current_user={"username": "alice", "model_key": "demo", "model": "demo"},
             )
@@ -267,6 +270,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
                 request,
                 message="Summarize",
                 model=None,
+                thread_id="thread-files",
                 files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
                 current_user={"username": "alice", "model_key": "demo", "model": "demo"},
             )
@@ -274,6 +278,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(response, StreamingResponse)
         chunks = await self.collect_stream_chunks(response)
         enqueue_parser_mock.assert_awaited_once()
+        self.assertEqual(enqueue_parser_mock.await_args.kwargs["thread_id"], "thread-files")
         self.assertEqual(seen_stream_job_ids, ["root-job-1"])
         self.assertIn('"job_id": "root-job-1"', chunks[0])
         self.assertTrue(any('"source_job_id": "child-1"' in chunk for chunk in chunks[1:]))
@@ -282,6 +287,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat_store.append_message.await_args.args[:2], ("alice", "user"))
         self.assertIn("Summarize", chat_store.append_message.await_args.args[2])
         self.assertIn("note.txt", chat_store.append_message.await_args.args[2])
+        self.assertEqual(chat_store.append_message.await_args.kwargs["thread_id"], "thread-files")
 
     async def test_file_chat_sse_cancel_uses_root_job_id_under_public_cutover_flag(self):
         gateway = self.build_gateway()
@@ -325,6 +331,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
                 request,
                 message="Summarize",
                 model=None,
+                thread_id="thread-files",
                 files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
                 current_user={"username": "alice", "model_key": "demo", "model": "demo"},
             )
@@ -387,6 +394,7 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
                     request,
                     message="Summarize",
                     model=None,
+                    thread_id="thread-files",
                     files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
                     current_user={"username": "alice", "model_key": "demo", "model": "demo"},
                 )
@@ -398,6 +406,8 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.parser_public_json_timeout_seconds())
         chat_store.append_message.assert_awaited_once()
         self.assertEqual(chat_store.append_message.await_args.args[:2], ("alice", "user"))
+        self.assertEqual(chat_store.get_history.await_args.kwargs["thread_id"], "thread-files")
+        self.assertEqual(chat_store.append_message.await_args.kwargs["thread_id"], "thread-files")
         joined_logs = "\n".join(captured.output)
         self.assertIn("file_parse_observability", joined_logs)
         self.assertIn("job_kind=parse", joined_logs)

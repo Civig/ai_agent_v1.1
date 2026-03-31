@@ -2,6 +2,8 @@ function createId(prefix) {
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const DEFAULT_THREAD_ID = "default";
+
 function normalizeAttachment(attachment) {
     return {
         id: attachment.id || createId("attachment"),
@@ -45,12 +47,12 @@ function buildThreadTitle(messages) {
 }
 
 export class ThreadStore {
-    constructor({ initialMessages = [] } = {}) {
+    constructor({ initialMessages = [], initialThreadId = DEFAULT_THREAD_ID } = {}) {
         this.listeners = new Set();
         this.threads = [];
         this.activeThreadId = null;
         this.liveThreadId = null;
-        this.bootstrap(initialMessages);
+        this.bootstrap(initialMessages, initialThreadId);
     }
 
     subscribe(listener) {
@@ -58,7 +60,7 @@ export class ThreadStore {
         return () => this.listeners.delete(listener);
     }
 
-    bootstrap(initialMessages) {
+    bootstrap(initialMessages, initialThreadId = DEFAULT_THREAD_ID) {
         const normalizedMessages = [];
         let lastUserMessageId = null;
 
@@ -69,6 +71,7 @@ export class ThreadStore {
         }
 
         const initialThread = this.createThreadRecord({
+            id: initialThreadId || DEFAULT_THREAD_ID,
             mode: "live",
             messages: normalizedMessages,
         });
@@ -235,9 +238,9 @@ export class ThreadStore {
         ) || null;
     }
 
-    createThreadRecord({ mode, messages }) {
+    createThreadRecord({ id = null, mode, messages }) {
         return {
-            id: createId("thread"),
+            id: id || createId("thread"),
             title: buildThreadTitle(messages),
             mode,
             createdAt: Date.now(),

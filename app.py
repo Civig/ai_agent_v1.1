@@ -44,6 +44,7 @@ from llm_gateway import (
     AsyncChatStore,
     AsyncRateLimiter,
     classify_observability_error,
+    DEFAULT_CHAT_THREAD_ID,
     ERROR_TYPE_INTERNAL,
     ERROR_TYPE_NONE,
     ERROR_TYPE_PARSE,
@@ -148,6 +149,11 @@ extract_documents_from_staging = parser_stage.extract_documents_from_staging
 class PromptRequest(BaseModel):
     prompt: str
     model: Optional[str] = None
+    thread_id: Optional[str] = None
+
+
+class ThreadScopedRequest(BaseModel):
+    thread_id: Optional[str] = None
 
 
 class MarkdownRequest(BaseModel):
@@ -196,6 +202,11 @@ def render_markdown(text: str) -> str:
     return bleach.clean(html, tags=allowed_tags, attributes=allowed_attributes, strip=True)
 
 
+def normalize_chat_thread_id(thread_id: Optional[str]) -> str:
+    normalized = thread_id.strip() if isinstance(thread_id, str) else ""
+    return normalized or DEFAULT_CHAT_THREAD_ID
+
+
 def response_requires_document_retry(response_text: str) -> bool:
     normalized = (response_text or "").strip().lower()
     if not normalized:
@@ -215,13 +226,18 @@ def normalize_document_response(response_text: str) -> str:
     return normalized
 
 
-async def restore_chat_history(chat_store: AsyncChatStore, username: str, history: list[dict[str, Any]]) -> None:
-    await chat_store.clear_history(username)
+async def restore_chat_history(
+    chat_store: AsyncChatStore,
+    username: str,
+    thread_id: str,
+    history: list[dict[str, Any]],
+) -> None:
+    await chat_store.clear_history(username, thread_id=thread_id)
     for message in history:
         role = message.get("role")
         content = (message.get("content") or "").strip()
         if role in {"user", "assistant"} and content:
-            await chat_store.append_message(username, role, content)
+            await chat_store.append_message(username, role, content, thread_id=thread_id)
 
 
 async def run_document_job(
@@ -229,6 +245,7 @@ async def run_document_job(
     gateway: LLMGateway,
     chat_store: AsyncChatStore,
     username: str,
+    thread_id: str,
     model_info: Dict[str, str],
     prompt: str,
     history: list[dict[str, Any]],
@@ -239,6 +256,7 @@ async def run_document_job(
         gateway=gateway,
         chat_store=chat_store,
         username=username,
+        thread_id=thread_id,
         model_info=model_info,
         prompt=prompt,
         history=history,
@@ -254,6 +272,7 @@ async def enqueue_document_job(
     gateway: LLMGateway,
     chat_store: AsyncChatStore,
     username: str,
+    thread_id: str,
     model_info: Dict[str, str],
     prompt: str,
     history: list[dict[str, Any]],
@@ -263,6 +282,7 @@ async def enqueue_document_job(
     limited_history = apply_history_budget(history)
     job_id = await gateway.enqueue_job(
         username=username,
+        thread_id=thread_id,
         model_key=model_info["key"],
         model_name=model_info["name"],
         prompt=prompt,
@@ -270,7 +290,7 @@ async def enqueue_document_job(
         job_kind=JOB_KIND_FILE_CHAT,
         file_chat=file_chat,
     )
-    await chat_store.append_message(username, "user", history_entry)
+    await chat_store.append_message(username, "user", history_entry, thread_id=thread_id)
     return job_id
 
 
@@ -313,6 +333,7 @@ async def enqueue_parser_job(
     *,
     gateway: LLMGateway,
     username: str,
+    thread_id: str,
     model_info: Dict[str, str],
     message: str,
     history: list[dict[str, Any]],
@@ -326,6 +347,7 @@ async def enqueue_parser_job(
     limited_history = apply_history_budget(history)
     return await gateway.enqueue_job(
         username=username,
+        thread_id=thread_id,
         model_key=model_info["key"],
         model_name=model_info["name"],
         prompt=(message or "").strip(),
@@ -349,6 +371,7 @@ async def run_parser_public_job(
     gateway: LLMGateway,
     chat_store: AsyncChatStore,
     username: str,
+    thread_id: str,
     model_info: Dict[str, str],
     message: str,
     history: list[dict[str, Any]],
@@ -361,6 +384,7 @@ async def run_parser_public_job(
         gateway=gateway,
         chat_store=chat_store,
         username=username,
+        thread_id=thread_id,
         model_info=model_info,
         message=message,
         history=history,
@@ -378,6 +402,7 @@ async def enqueue_parser_public_job(
     gateway: LLMGateway,
     chat_store: AsyncChatStore,
     username: str,
+    thread_id: str,
     model_info: Dict[str, str],
     message: str,
     history: list[dict[str, Any]],
@@ -389,6 +414,7 @@ async def enqueue_parser_public_job(
     job_id = await enqueue_parser_job(
         gateway=gateway,
         username=username,
+        thread_id=thread_id,
         model_info=model_info,
         message=message,
         history=history,
@@ -396,7 +422,7 @@ async def enqueue_parser_public_job(
         staged_files=staged_files,
         requested_model=requested_model,
     )
-    await chat_store.append_message(username, "user", history_entry)
+    await chat_store.append_message(username, "user", history_entry, thread_id=thread_id)
     return job_id
 
 
@@ -451,11 +477,13 @@ def build_file_chat_job_metadata(
     retry_prompt: Optional[str],
     staged_files: list[dict[str, Any]],
     doc_chars: int = 0,
+    thread_id: Optional[str] = None,
 ) -> dict[str, Any]:
     return {
         "retry_prompt": (retry_prompt or "").strip() or None,
         "suppress_token_stream": True,
         "doc_chars": max(0, int(doc_chars)),
+        "thread_id": normalize_chat_thread_id(thread_id),
         "files": [
             {
                 "name": file_info["name"],
@@ -1120,7 +1148,11 @@ async def logout(request: Request, current_user: Optional[Dict[str, Any]] = Depe
 
 
 @app.get("/chat", response_class=HTMLResponse)
-async def chat_page(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_required)):
+async def chat_page(
+    request: Request,
+    thread_id: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user_required),
+):
     available_models = await request.app.state.llm_gateway.get_model_catalog()
     try:
         model_info = await resolve_runtime_model(current_user, available_models, request.app.state.llm_gateway)
@@ -1133,7 +1165,8 @@ async def chat_page(request: Request, current_user: Dict[str, Any] = Depends(get
         "model_key": model_info["key"],
         "model_description": model_info["description"],
     }
-    history = await request.app.state.chat_store.get_history(current_user["username"])
+    resolved_thread_id = normalize_chat_thread_id(thread_id)
+    history = await request.app.state.chat_store.get_history(current_user["username"], thread_id=resolved_thread_id)
     messages = prepare_messages(history)
     return templates.TemplateResponse(
         request,
@@ -1146,6 +1179,7 @@ async def chat_page(request: Request, current_user: Dict[str, Any] = Depends(get
             "model_description": model_info["description"],
             "current_user": current_user,
             "is_authenticated": True,
+            "thread_id": resolved_thread_id,
         },
     )
 
@@ -1287,6 +1321,7 @@ async def api_chat(request: Request, current_user: Dict[str, Any] = Depends(get_
 
     prompt = filter_prompt_injection(payload.prompt.strip())
     requested_model = (payload.model or "").strip() or None
+    thread_id = normalize_chat_thread_id(payload.thread_id)
     if not prompt:
         return JSONResponse({"error": "Пустой запрос"}, status_code=400)
 
@@ -1323,7 +1358,7 @@ async def api_chat(request: Request, current_user: Dict[str, Any] = Depends(get_
         len(prompt),
         0,
     )
-    original_history = await chat_store.get_history(username)
+    original_history = await chat_store.get_history(username, thread_id=thread_id)
     history = apply_history_budget(original_history)
     logger.info(
         "Context governance for user %s: original_history_count=%s trimmed_history_count=%s budget_applied=%s",
@@ -1334,12 +1369,13 @@ async def api_chat(request: Request, current_user: Dict[str, Any] = Depends(get_
     )
     job_id = await gateway.enqueue_job(
         username=username,
+        thread_id=thread_id,
         model_key=model_info["key"],
         model_name=model_info["name"],
         prompt=prompt,
         history=history,
     )
-    await chat_store.append_message(username, "user", prompt)
+    await chat_store.append_message(username, "user", prompt, thread_id=thread_id)
 
     async def event_stream():
         try:
@@ -1366,6 +1402,7 @@ async def api_chat_with_files(
     request: Request,
     message: str = Form(""),
     model: Optional[str] = Form(None),
+    thread_id: Optional[str] = Form(None),
     files: list[UploadFile] = File(...),
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ):
@@ -1374,6 +1411,7 @@ async def api_chat_with_files(
 
     prompt = filter_prompt_injection(message.strip())
     requested_model = (model or "").strip() or None
+    thread_id = normalize_chat_thread_id(thread_id)
 
     gateway: LLMGateway = request.app.state.llm_gateway
     chat_store: AsyncChatStore = request.app.state.chat_store
@@ -1416,7 +1454,7 @@ async def api_chat_with_files(
             staged_request = await stage_uploads_for_parser(files, username=username)
             staging_ms = elapsed_ms(staging_started)
             staged_files = list(staged_request.get("files") or [])
-            original_history = await chat_store.get_history(username)
+            original_history = await chat_store.get_history(username, thread_id=thread_id)
             history = apply_history_budget(original_history)
             history_entry = (
                 f"{prompt or 'Пользователь не уточнил задачу'}\n\n"
@@ -1445,6 +1483,7 @@ async def api_chat_with_files(
                     gateway=gateway,
                     chat_store=chat_store,
                     username=username,
+                    thread_id=thread_id,
                     model_info=model_info,
                     message=prompt,
                     history=history,
@@ -1477,6 +1516,7 @@ async def api_chat_with_files(
                 gateway=gateway,
                 chat_store=chat_store,
                 username=username,
+                thread_id=thread_id,
                 model_info=model_info,
                 message=prompt,
                 history=history,
@@ -1496,12 +1536,12 @@ async def api_chat_with_files(
                     }
                 )
             if status == "failed":
-                await restore_chat_history(chat_store, username, history)
+                await restore_chat_history(chat_store, username, thread_id, history)
                 return JSONResponse({"error": result.get("error") or "Сервис временно недоступен"}, status_code=503)
             if status == "cancelled":
-                await restore_chat_history(chat_store, username, history)
+                await restore_chat_history(chat_store, username, thread_id, history)
                 return JSONResponse({"error": "Генерация была отменена"}, status_code=409)
-            await restore_chat_history(chat_store, username, history)
+            await restore_chat_history(chat_store, username, thread_id, history)
             return JSONResponse({"error": "Истекло время ожидания ответа модели"}, status_code=504)
 
         temp_dir, staged_files = await stage_uploads(files, username=username)
@@ -1522,7 +1562,7 @@ async def api_chat_with_files(
                 for document in extracted_documents
             ],
         )
-        original_history = await chat_store.get_history(username)
+        original_history = await chat_store.get_history(username, thread_id=thread_id)
         history = apply_history_budget(original_history)
         original_doc_chars = sum(len((document.get("content") or "").strip()) for document in extracted_documents)
         trimmed_doc_chars = sum(len((document.get("content") or "").strip()) for document in budgeted_documents)
@@ -1569,6 +1609,7 @@ async def api_chat_with_files(
             retry_prompt=retry_prompt,
             staged_files=staged_files,
             doc_chars=trimmed_doc_chars,
+            thread_id=thread_id,
         )
         temp_dir.cleanup()
         temp_dir = None
@@ -1577,6 +1618,7 @@ async def api_chat_with_files(
                 gateway=gateway,
                 chat_store=chat_store,
                 username=username,
+                thread_id=thread_id,
                 model_info=model_info,
                 prompt=final_prompt,
                 history=history,
@@ -1607,6 +1649,7 @@ async def api_chat_with_files(
             gateway=gateway,
             chat_store=chat_store,
             username=username,
+            thread_id=thread_id,
             model_info=model_info,
             prompt=final_prompt,
             history=history,
@@ -1622,12 +1665,13 @@ async def api_chat_with_files(
                     username,
                     job_id,
                 )
-                await restore_chat_history(chat_store, username, history)
+                await restore_chat_history(chat_store, username, thread_id, history)
                 retry_prompt = build_retry_document_prompt(prompt, budgeted_documents)
                 retry_job_id, retry_result = await run_document_job(
                     gateway=gateway,
                     chat_store=chat_store,
                     username=username,
+                    thread_id=thread_id,
                     model_info=model_info,
                     prompt=retry_prompt,
                     history=history,
@@ -1638,7 +1682,7 @@ async def api_chat_with_files(
                     response_text = (retry_result.get("result") or "").strip()
                     job_id = retry_job_id
                 else:
-                    await restore_chat_history(chat_store, username, history)
+                    await restore_chat_history(chat_store, username, thread_id, history)
                     return JSONResponse({"error": retry_result.get("error") or "Сервис временно недоступен"}, status_code=503)
 
             if response_requires_document_retry(response_text):
@@ -1648,9 +1692,9 @@ async def api_chat_with_files(
                     job_id,
                 )
                 response_text = DOCUMENT_NO_INFORMATION_RESPONSE
-                await restore_chat_history(chat_store, username, history)
-                await chat_store.append_message(username, "user", history_entry)
-                await chat_store.append_message(username, "assistant", response_text)
+                await restore_chat_history(chat_store, username, thread_id, history)
+                await chat_store.append_message(username, "user", history_entry, thread_id=thread_id)
+                await chat_store.append_message(username, "assistant", response_text, thread_id=thread_id)
 
             response_text = normalize_document_response(response_text)
             return JSONResponse(
@@ -1661,12 +1705,12 @@ async def api_chat_with_files(
                 }
             )
         if status == "failed":
-            await restore_chat_history(chat_store, username, history)
+            await restore_chat_history(chat_store, username, thread_id, history)
             return JSONResponse({"error": result.get("error") or "Сервис временно недоступен"}, status_code=503)
         if status == "cancelled":
-            await restore_chat_history(chat_store, username, history)
+            await restore_chat_history(chat_store, username, thread_id, history)
             return JSONResponse({"error": "Генерация была отменена"}, status_code=409)
-        await restore_chat_history(chat_store, username, history)
+        await restore_chat_history(chat_store, username, thread_id, history)
         return JSONResponse({"error": "Истекло время ожидания ответа модели"}, status_code=504)
     except HTTPException:
         log_file_parse_observability(
@@ -1737,8 +1781,16 @@ async def cancel_chat(job_id: str, request: Request, current_user: Dict[str, Any
 @app.post("/api/chat/clear")
 async def clear_chat(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_required)):
     enforce_csrf(request)
-    await request.app.state.chat_store.clear_history(current_user["username"])
-    return JSONResponse({"ok": True})
+    requested_thread_id: Optional[str] = request.query_params.get("thread_id")
+    if requested_thread_id is None:
+        try:
+            payload = ThreadScopedRequest(**await request.json())
+        except Exception:
+            payload = ThreadScopedRequest()
+        requested_thread_id = payload.thread_id
+    thread_id = normalize_chat_thread_id(requested_thread_id)
+    await request.app.state.chat_store.clear_history(current_user["username"], thread_id=thread_id)
+    return JSONResponse({"ok": True, "thread_id": thread_id})
 
 
 @app.post("/api/render-markdown")

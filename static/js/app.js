@@ -71,7 +71,10 @@ class CorporateAIApp {
             authLabel: "Kerberos / Active Directory",
             environmentLabel: deriveEnvironmentLabel(bootstrapData.host),
         });
-        this.threadStore = new ThreadStore({ initialMessages: bootstrapData.messages || [] });
+        this.threadStore = new ThreadStore({
+            initialMessages: bootstrapData.messages || [],
+            initialThreadId: bootstrapData.threadId || "default",
+        });
         this.streamController = new StreamController(this.apiClient);
         this.renderer = new ChatRenderer(this.elements);
         this.modelSelector = new ModelSelector(this.elements.modelSelect);
@@ -91,6 +94,7 @@ class CorporateAIApp {
 
         this.bindEvents();
         this.renderLayout();
+        this.syncThreadUrl();
         await this.loadModels();
         this.elements.promptInput.focus();
     }
@@ -142,6 +146,7 @@ class CorporateAIApp {
                 return;
             }
             this.threadStore.setActiveThread(target.dataset.threadId);
+            this.syncThreadUrl();
             this.renderLayout();
         });
 
@@ -308,6 +313,7 @@ class CorporateAIApp {
             await this.streamController.start({
                 prompt,
                 model: selectedModel,
+                threadId: targetThreadId,
                 onJob: (jobId) => {
                     this.chatStore.setStatus(ChatLifecycle.STREAMING, {
                         activeJobId: jobId,
@@ -391,6 +397,7 @@ class CorporateAIApp {
     async sendMessageWithFiles({ prompt, model, attachments, onJob, onToken, onResult, onDone, onError, onCancelled }) {
         const formData = new FormData();
         formData.append("message", prompt);
+        formData.append("thread_id", this.threadStore.liveThreadId || "default");
         if (model) {
             formData.append("model", model);
         }
@@ -423,10 +430,6 @@ class CorporateAIApp {
         }
 
         try {
-            await this.apiClient.requestJSON("/api/chat/clear", {
-                method: "POST",
-                timeout: 15000,
-            });
             this.threadStore.startNewThread();
             this.chatStore.clearAttachments();
             this.chatStore.setUploadingDocuments(false);
@@ -438,8 +441,9 @@ class CorporateAIApp {
             });
             this.elements.promptInput.value = "";
             this.autoResize();
+            this.syncThreadUrl();
             this.renderLayout();
-            this.renderer.showNotification("Создан новый чат. Серверный контекст сброшен.", "info");
+            this.renderer.showNotification("Создан новый чат.", "info");
         } catch (error) {
             const message = error instanceof APIError ? error.message : "Не удалось создать новый чат";
             this.renderer.showNotification(message, "error");
@@ -455,6 +459,10 @@ class CorporateAIApp {
         try {
             await this.apiClient.requestJSON("/api/chat/clear", {
                 method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ thread_id: this.threadStore.liveThreadId || "default" }),
                 timeout: 15000,
             });
             this.threadStore.clearLiveThreadMessages();
@@ -468,6 +476,7 @@ class CorporateAIApp {
             });
             this.elements.promptInput.value = "";
             this.autoResize();
+            this.syncThreadUrl();
             this.renderLayout();
             this.renderer.showNotification("Активный чат очищен и серверный контекст сброшен.", "info");
         } catch (error) {
@@ -584,6 +593,7 @@ class CorporateAIApp {
         this.renderThreads();
         this.renderActiveThread();
         this.renderChrome();
+        this.syncThreadUrl();
     }
 
     renderThreads() {
@@ -646,6 +656,13 @@ class CorporateAIApp {
 
     redirectToLogin() {
         window.location.href = "/login";
+    }
+
+    syncThreadUrl() {
+        const threadId = this.threadStore.activeThreadId || this.threadStore.liveThreadId || "default";
+        const url = new URL(window.location.href);
+        url.searchParams.set("thread_id", threadId);
+        window.history.replaceState({}, "", url);
     }
 }
 

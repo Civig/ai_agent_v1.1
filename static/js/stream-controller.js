@@ -10,6 +10,7 @@ export class StreamController {
         url = "/api/chat",
         prompt,
         model,
+        threadId = null,
         body = null,
         headers = {},
         timeout = 300000,
@@ -34,7 +35,7 @@ export class StreamController {
             let requestBody = body;
             if (requestBody === null) {
                 requestHeaders.set("Content-Type", "application/json");
-                requestBody = JSON.stringify({ prompt, model });
+                requestBody = JSON.stringify({ prompt, model, thread_id: threadId || undefined });
             }
             if (!requestHeaders.has("Accept")) {
                 requestHeaders.set("Accept", "text/event-stream");
