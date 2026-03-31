@@ -1,10 +1,11 @@
 import asyncio
 import io
 import os
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
@@ -514,6 +515,39 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Генерация была отменена".encode("utf-8"), response.body)
         wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.parser_public_json_timeout_seconds())
         restore_mock.assert_awaited_once()
+
+    async def test_file_chat_parser_public_cutover_rejects_too_many_files_before_enqueue(self):
+        gateway = self.build_gateway()
+        chat_store = self.build_chat_store()
+        request = self.build_request(gateway, chat_store)
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app_module.settings, "ENABLE_PARSER_STAGE", True), patch.object(
+            app_module.settings, "ENABLE_PARSER_PUBLIC_CUTOVER", True
+        ), patch.object(
+            app_module.settings, "PARSER_STAGING_ROOT", tmp
+        ), patch.object(
+            app_module, "enforce_csrf", return_value=None
+        ), patch.object(
+            app_module,
+            "resolve_runtime_model",
+            AsyncMock(return_value={"key": "demo", "name": "demo"}),
+        ), patch.object(
+            app_module,
+            "enqueue_parser_job",
+            AsyncMock(side_effect=AssertionError("enqueue_parser_job should not be called when limits fail")),
+        ):
+            files = [UploadFile(filename=f"{index}.txt", file=io.BytesIO(b"x")) for index in range(app_module.MAX_UPLOAD_FILES + 1)]
+            with self.assertRaises(HTTPException) as error:
+                await app_module.api_chat_with_files(
+                    request,
+                    message="Summarize",
+                    model=None,
+                    files=files,
+                    current_user={"username": "alice", "model_key": "demo", "model": "demo"},
+                )
+
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn(str(app_module.MAX_UPLOAD_FILES), error.exception.detail)
 
 
 if __name__ == "__main__":

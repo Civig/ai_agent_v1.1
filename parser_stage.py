@@ -11,10 +11,13 @@ from xml.etree import ElementTree
 
 from fastapi import HTTPException, UploadFile
 
+from config import settings
+
 logger = logging.getLogger("app")
 
-MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024
-MAX_UPLOAD_FILES = 10
+MAX_UPLOAD_FILE_SIZE_BYTES = settings.FILE_PROCESSING_MAX_FILE_SIZE_BYTES
+MAX_UPLOAD_TOTAL_SIZE_BYTES = settings.FILE_PROCESSING_MAX_TOTAL_SIZE_BYTES
+MAX_UPLOAD_FILES = settings.FILE_PROCESSING_MAX_FILES
 GENERIC_UPLOAD_CONTENT_TYPES = {"", "application/octet-stream"}
 ALLOWED_UPLOAD_MIME_TYPES: dict[str, set[str]] = {
     ".txt": {"text/plain"},
@@ -24,10 +27,11 @@ ALLOWED_UPLOAD_MIME_TYPES: dict[str, set[str]] = {
     ".jpg": {"image/jpeg"},
     ".jpeg": {"image/jpeg"},
 }
-MAX_DOCUMENT_CHARS = 12_000
+MAX_DOCUMENT_CHARS = settings.FILE_PROCESSING_MAX_DOCUMENT_CHARS
 MAX_PARSED_DOCUMENT_CHARS = MAX_DOCUMENT_CHARS
-MAX_PDF_PAGES = 20
-IMAGE_OCR_MAX_DIMENSION = 2000
+MAX_PDF_PAGES = settings.FILE_PROCESSING_MAX_PDF_PAGES
+IMAGE_OCR_MAX_DIMENSION = settings.FILE_PROCESSING_IMAGE_MAX_DIMENSION
+IMAGE_OCR_TIMEOUT_SECONDS = settings.FILE_PROCESSING_OCR_TIMEOUT_SECONDS
 DOCUMENT_TRUNCATION_MARKER = "[DOCUMENT_TRUNCATED]"
 UPLOAD_UNSUPPORTED_TYPE_ERROR = "Поддерживаются только TXT, PDF, DOCX, PNG, JPG и JPEG."
 DOCUMENT_NO_INFORMATION_RESPONSE = "В предоставленных документах нет информации для ответа на этот вопрос."
@@ -81,17 +85,59 @@ def log_upload_rejection(
     )
 
 
+def _max_size_megabytes(size_bytes: int) -> int:
+    return max(1, size_bytes // (1024 * 1024))
+
+
+def upload_file_too_large_detail(filename: str) -> str:
+    return f"Файл {filename} превышает лимит {_max_size_megabytes(MAX_UPLOAD_FILE_SIZE_BYTES)} MB"
+
+
+def upload_total_size_exceeded_detail() -> str:
+    return (
+        "Суммарный размер файлов превышает лимит "
+        f"{_max_size_megabytes(MAX_UPLOAD_TOTAL_SIZE_BYTES)} MB"
+    )
+
+
+def pdf_page_limit_exceeded_detail(page_count: int) -> str:
+    return f"PDF-документ превышает лимит страниц: {page_count}. Максимум: {MAX_PDF_PAGES}"
+
+
+def image_dimension_limit_exceeded_detail(width: int, height: int) -> str:
+    return (
+        f"Изображение превышает лимит размера: {width}x{height}. "
+        f"Максимум: {IMAGE_OCR_MAX_DIMENSION}px"
+    )
+
+
+def ocr_timeout_exceeded_detail() -> str:
+    return f"OCR превысил лимит времени {IMAGE_OCR_TIMEOUT_SECONDS:g} сек"
+
+
+def trim_document_content(content: str) -> str:
+    normalized = (content or "").strip()
+    if len(normalized) <= MAX_PARSED_DOCUMENT_CHARS:
+        return normalized
+
+    marker = f"\n{DOCUMENT_TRUNCATION_MARKER}"
+    snippet_limit = max(0, MAX_PARSED_DOCUMENT_CHARS - len(marker))
+    snippet = normalized[:snippet_limit].rstrip()
+    return f"{snippet}{marker}" if snippet else DOCUMENT_TRUNCATION_MARKER
+
+
 def extract_text_from_txt(path: Path) -> str:
     chunks = []
     consumed = 0
+    hard_limit = MAX_PARSED_DOCUMENT_CHARS + 1
     with path.open("r", encoding="utf-8", errors="ignore") as handle:
-        while consumed < MAX_PARSED_DOCUMENT_CHARS:
-            chunk = handle.read(min(4096, MAX_PARSED_DOCUMENT_CHARS - consumed))
+        while consumed < hard_limit:
+            chunk = handle.read(min(4096, hard_limit - consumed))
             if not chunk:
                 break
             chunks.append(chunk)
             consumed += len(chunk)
-    return "".join(chunks)
+    return trim_document_content("".join(chunks))
 
 
 def extract_text_from_docx(path: Path) -> str:
@@ -99,12 +145,18 @@ def extract_text_from_docx(path: Path) -> str:
         xml_bytes = archive.read("word/document.xml")
     root = ElementTree.fromstring(xml_bytes)
     text_chunks = []
+    consumed = 0
+    hard_limit = MAX_PARSED_DOCUMENT_CHARS + 1
     for node in root.iter():
         if node.tag.endswith("}t") and node.text:
-            text_chunks.append(node.text)
+            if consumed >= hard_limit:
+                continue
+            chunk = node.text[: hard_limit - consumed]
+            text_chunks.append(chunk)
+            consumed += len(chunk)
         elif node.tag.endswith("}p"):
             text_chunks.append("\n")
-    return "".join(text_chunks).strip()
+    return trim_document_content("".join(text_chunks))
 
 
 def extract_text_from_pdf(path: Path) -> str:
@@ -112,15 +164,20 @@ def extract_text_from_pdf(path: Path) -> str:
         from pypdf import PdfReader  # type: ignore
 
         reader = PdfReader(str(path))
-        return "\n".join((page.extract_text() or "") for page in reader.pages[:MAX_PDF_PAGES]).strip()
+        page_count = len(reader.pages)
+        if page_count > MAX_PDF_PAGES:
+            raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
+        return trim_document_content("\n".join((page.extract_text() or "") for page in reader.pages))
     except ImportError:
         try:
             import fitz  # type: ignore
 
             document = fitz.open(path)
             try:
-                page_count = min(len(document), MAX_PDF_PAGES)
-                return "\n".join(document[index].get_text() for index in range(page_count)).strip()
+                page_count = len(document)
+                if page_count > MAX_PDF_PAGES:
+                    raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
+                return trim_document_content("\n".join(document[index].get_text() for index in range(page_count)))
             finally:
                 document.close()
         except ImportError as exc:
@@ -135,8 +192,15 @@ def extract_text_from_image(path: Path) -> str:
         raise RuntimeError("OCR parser unavailable on server") from exc
 
     with Image.open(path) as image:
-        image.thumbnail((IMAGE_OCR_MAX_DIMENSION, IMAGE_OCR_MAX_DIMENSION))
-        return pytesseract.image_to_string(image).strip()
+        width, height = image.size
+        if max(width, height) > IMAGE_OCR_MAX_DIMENSION:
+            raise RuntimeError(image_dimension_limit_exceeded_detail(width, height))
+        try:
+            return trim_document_content(pytesseract.image_to_string(image, timeout=IMAGE_OCR_TIMEOUT_SECONDS))
+        except RuntimeError as exc:
+            if "timeout" in str(exc).lower():
+                raise RuntimeError(ocr_timeout_exceeded_detail()) from exc
+            raise
 
 
 def parse_uploaded_file(path: Path) -> str:
@@ -294,36 +358,20 @@ def build_file_chat_job_metadata(
     }
 
 
-def shared_staging_paths(staging_id: str, *, staging_root: str) -> dict[str, Path]:
-    safe_staging_id = re.sub(r"[^a-zA-Z0-9_-]+", "", staging_id or "").strip() or "staging"
-    root = Path(staging_root) / "staging" / safe_staging_id
-    meta_dir = root / "meta"
-    return {
-        "root": root,
-        "raw_dir": root / "raw",
-        "meta_dir": meta_dir,
-        "request_path": meta_dir / "request.json",
-        "parser_path": meta_dir / "parser.json",
-    }
-
-
-async def stage_uploads_to_shared_root(
+async def stage_uploads_to_directory(
     files: list[UploadFile],
     *,
-    staging_root: str,
+    target_dir: Path,
     username: Optional[str] = None,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
     if not files:
         raise HTTPException(status_code=400, detail="Не выбраны файлы")
     if len(files) > MAX_UPLOAD_FILES:
         raise HTTPException(status_code=400, detail=f"Максимум файлов за запрос: {MAX_UPLOAD_FILES}")
 
-    staging_id = uuid.uuid4().hex
-    paths = shared_staging_paths(staging_id, staging_root=staging_root)
     staged_files: list[dict[str, Any]] = []
+    total_size = 0
     try:
-        paths["raw_dir"].mkdir(parents=True, exist_ok=False)
-        paths["meta_dir"].mkdir(parents=True, exist_ok=True)
         for upload in files:
             safe_name = sanitize_upload_filename(upload.filename or "upload.bin")
             display_name = Path(upload.filename or safe_name).name or safe_name
@@ -348,7 +396,7 @@ async def stage_uploads_to_shared_root(
                 )
                 raise HTTPException(status_code=400, detail=UPLOAD_UNSUPPORTED_TYPE_ERROR)
 
-            target_path = paths["raw_dir"] / safe_name
+            target_path = target_dir / safe_name
             size = 0
             with target_path.open("wb") as target:
                 while True:
@@ -364,17 +412,69 @@ async def stage_uploads_to_shared_root(
                             content_type=normalized_content_type,
                             username=username,
                         )
-                        raise HTTPException(status_code=413, detail=f"Файл {safe_name} превышает лимит 50 MB")
+                        raise HTTPException(status_code=413, detail=upload_file_too_large_detail(safe_name))
+                    total_size += len(chunk)
+                    if total_size > MAX_UPLOAD_TOTAL_SIZE_BYTES:
+                        log_upload_rejection(
+                            reason="total_request_too_large",
+                            safe_name=safe_name,
+                            extension=suffix,
+                            content_type=normalized_content_type,
+                            username=username,
+                        )
+                        raise HTTPException(status_code=413, detail=upload_total_size_exceeded_detail())
                     target.write(chunk)
 
             staged_files.append(
                 {
                     "name": display_name,
                     "safe_name": safe_name,
+                    "path": target_path,
                     "size": size,
                     "content_type": normalized_content_type or "application/octet-stream",
                 }
             )
+    finally:
+        for upload in files:
+            await upload.close()
+
+    return staged_files
+
+
+def shared_staging_paths(staging_id: str, *, staging_root: str) -> dict[str, Path]:
+    safe_staging_id = re.sub(r"[^a-zA-Z0-9_-]+", "", staging_id or "").strip() or "staging"
+    root = Path(staging_root) / "staging" / safe_staging_id
+    meta_dir = root / "meta"
+    return {
+        "root": root,
+        "raw_dir": root / "raw",
+        "meta_dir": meta_dir,
+        "request_path": meta_dir / "request.json",
+        "parser_path": meta_dir / "parser.json",
+    }
+
+
+async def stage_uploads_to_shared_root(
+    files: list[UploadFile],
+    *,
+    staging_root: str,
+    username: Optional[str] = None,
+) -> dict[str, Any]:
+    staging_id = uuid.uuid4().hex
+    paths = shared_staging_paths(staging_id, staging_root=staging_root)
+    try:
+        paths["raw_dir"].mkdir(parents=True, exist_ok=False)
+        paths["meta_dir"].mkdir(parents=True, exist_ok=True)
+        staged_files_with_paths = await stage_uploads_to_directory(files, target_dir=paths["raw_dir"], username=username)
+        staged_files = [
+            {
+                "name": file_info["name"],
+                "safe_name": file_info["safe_name"],
+                "size": file_info["size"],
+                "content_type": file_info["content_type"],
+            }
+            for file_info in staged_files_with_paths
+        ]
 
         request_payload = {
             "staging_id": staging_id,
@@ -398,9 +498,6 @@ async def stage_uploads_to_shared_root(
     except Exception:
         shutil.rmtree(paths["root"], ignore_errors=True)
         raise
-    finally:
-        for upload in files:
-            await upload.close()
 
 
 def load_staged_request(staging_id: str, *, staging_root: str) -> dict[str, Any]:

@@ -8,7 +8,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from starlette.datastructures import Headers
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
@@ -70,6 +70,43 @@ class SharedStagingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request_payload["files"][0]["safe_name"], file_info["safe_name"])
             self.assertEqual(parser_payload["status"], "staged")
             self.assertFalse(parser_payload["raw_deleted"])
+
+    async def test_shared_staging_rejects_too_many_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uploads = [UploadFile(filename=f"{index}.txt", file=io.BytesIO(b"x")) for index in range(parser_stage.MAX_UPLOAD_FILES + 1)]
+
+            with self.assertRaises(HTTPException) as error:
+                await parser_stage.stage_uploads_to_shared_root(uploads, staging_root=tmp, username="alice")
+
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn(str(parser_stage.MAX_UPLOAD_FILES), error.exception.detail)
+
+    async def test_shared_staging_rejects_oversized_file(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(parser_stage, "MAX_UPLOAD_FILE_SIZE_BYTES", 4):
+            upload = UploadFile(
+                filename="big.txt",
+                file=io.BytesIO(b"12345"),
+                headers=Headers({"content-type": "text/plain"}),
+            )
+
+            with self.assertRaises(HTTPException) as error:
+                await parser_stage.stage_uploads_to_shared_root([upload], staging_root=tmp, username="alice")
+
+        self.assertEqual(error.exception.status_code, 413)
+        self.assertIn("превышает лимит", error.exception.detail)
+
+    async def test_shared_staging_rejects_total_request_size_limit(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(parser_stage, "MAX_UPLOAD_TOTAL_SIZE_BYTES", 8):
+            uploads = [
+                UploadFile(filename="a.txt", file=io.BytesIO(b"12345"), headers=Headers({"content-type": "text/plain"})),
+                UploadFile(filename="b.txt", file=io.BytesIO(b"67890"), headers=Headers({"content-type": "text/plain"})),
+            ]
+
+            with self.assertRaises(HTTPException) as error:
+                await parser_stage.stage_uploads_to_shared_root(uploads, staging_root=tmp, username="alice")
+
+        self.assertEqual(error.exception.status_code, 413)
+        self.assertIn("Суммарный размер файлов", error.exception.detail)
 
     async def test_enqueue_parser_job_uses_safe_queue_payload_only(self):
         gateway = type("Gateway", (), {})()

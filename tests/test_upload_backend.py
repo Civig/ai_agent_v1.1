@@ -1,6 +1,7 @@
 import asyncio
 import builtins
 import io
+import os
 import sys
 import tempfile
 import types
@@ -11,13 +12,20 @@ from unittest import mock
 from fastapi import HTTPException, UploadFile
 from starlette.datastructures import Headers
 
+os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
+os.environ.setdefault("COOKIE_SECURE", "false")
+
+import parser_stage
 from app import (
     DOCUMENT_NO_INFORMATION_RESPONSE,
     DOCUMENT_TRUNCATION_MARKER,
     IMAGE_OCR_MAX_DIMENSION,
+    IMAGE_OCR_TIMEOUT_SECONDS,
     MAX_DOCUMENT_CHARS,
     MAX_PARSED_DOCUMENT_CHARS,
     MAX_PDF_PAGES,
+    MAX_UPLOAD_FILES,
+    MAX_UPLOAD_TOTAL_SIZE_BYTES,
     apply_document_budget,
     build_document_prompt,
     extract_text_from_image,
@@ -116,8 +124,30 @@ class UploadBackendTests(unittest.TestCase):
             handle.seek(0)
             upload = UploadFile(filename="big.txt", file=handle)
             with self.assertRaises(HTTPException) as error:
-                asyncio.run(stage_uploads([upload]))
+                    asyncio.run(stage_uploads([upload]))
         self.assertEqual(error.exception.status_code, 413)
+
+    def test_stage_uploads_rejects_too_many_files(self):
+        uploads = [UploadFile(filename=f"{index}.txt", file=io.BytesIO(b"x")) for index in range(MAX_UPLOAD_FILES + 1)]
+
+        with self.assertRaises(HTTPException) as error:
+            asyncio.run(stage_uploads(uploads))
+
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn(str(MAX_UPLOAD_FILES), error.exception.detail)
+
+    def test_stage_uploads_rejects_total_request_size_limit(self):
+        uploads = [
+            UploadFile(filename="a.txt", file=io.BytesIO(b"12345")),
+            UploadFile(filename="b.txt", file=io.BytesIO(b"67890")),
+        ]
+
+        with mock.patch.object(parser_stage, "MAX_UPLOAD_TOTAL_SIZE_BYTES", 8):
+            with self.assertRaises(HTTPException) as error:
+                asyncio.run(stage_uploads(uploads))
+
+        self.assertEqual(error.exception.status_code, 413)
+        self.assertIn("Суммарный размер файлов", error.exception.detail)
 
     def test_stage_uploads_accepts_supported_extension_and_content_type_pairs(self):
         cases = [
@@ -250,7 +280,7 @@ class UploadBackendTests(unittest.TestCase):
         self.assertIn("original_doc_chars=1200", joined_logs)
         self.assertIn("trimmed_doc_chars=800", joined_logs)
 
-    def test_extract_text_from_pdf_limits_page_count(self):
+    def test_extract_text_from_pdf_rejects_page_count_over_limit(self):
         class FakePage:
             def __init__(self, index):
                 self.index = index
@@ -260,7 +290,7 @@ class UploadBackendTests(unittest.TestCase):
 
         class FakeDocument:
             def __len__(self):
-                return 100
+                return MAX_PDF_PAGES + 1
 
             def __getitem__(self, index):
                 return FakePage(index)
@@ -278,10 +308,10 @@ class UploadBackendTests(unittest.TestCase):
             return original_import(name, globals, locals, fromlist, level)
 
         with mock.patch("builtins.__import__", side_effect=fake_import):
-            text = extract_text_from_pdf(Path("/tmp/fake.pdf"))
-        self.assertIn("page-0", text)
-        self.assertIn(f"page-{MAX_PDF_PAGES - 1}", text)
-        self.assertNotIn(f"page-{MAX_PDF_PAGES}", text)
+            with self.assertRaises(RuntimeError) as error:
+                extract_text_from_pdf(Path("/tmp/fake.pdf"))
+
+        self.assertIn(str(MAX_PDF_PAGES), str(error.exception))
 
     def test_extract_text_from_pdf_uses_pypdf_when_available(self):
         class FakePage:
@@ -363,12 +393,11 @@ class UploadBackendTests(unittest.TestCase):
 
         self.assertEqual(str(error.exception), "PDF parser unavailable on server")
 
-    def test_extract_text_from_image_applies_thumbnail_before_ocr(self):
+    def test_extract_text_from_image_passes_timeout_to_ocr(self):
         calls = {}
 
         class FakeImage:
-            def thumbnail(self, size):
-                calls["thumbnail"] = size
+            size = (800, 600)
 
             def __enter__(self):
                 return self
@@ -377,7 +406,12 @@ class UploadBackendTests(unittest.TestCase):
                 return False
 
         fake_image_module = types.SimpleNamespace(open=lambda path: FakeImage())
-        fake_pytesseract = types.SimpleNamespace(image_to_string=lambda image: "ocr text")
+
+        def fake_image_to_string(image, *, timeout):
+            calls["timeout"] = timeout
+            return "ocr text"
+
+        fake_pytesseract = types.SimpleNamespace(image_to_string=fake_image_to_string)
 
         with mock.patch.dict(
             sys.modules,
@@ -390,7 +424,63 @@ class UploadBackendTests(unittest.TestCase):
             text = extract_text_from_image(Path("/tmp/fake.png"))
 
         self.assertEqual(text, "ocr text")
-        self.assertEqual(calls["thumbnail"], (IMAGE_OCR_MAX_DIMENSION, IMAGE_OCR_MAX_DIMENSION))
+        self.assertEqual(calls["timeout"], IMAGE_OCR_TIMEOUT_SECONDS)
+
+    def test_extract_text_from_image_rejects_oversized_dimensions(self):
+        class FakeImage:
+            size = (IMAGE_OCR_MAX_DIMENSION + 1, 900)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_image_module = types.SimpleNamespace(open=lambda path: FakeImage())
+        fake_pytesseract = types.SimpleNamespace(image_to_string=lambda image, *, timeout: "ocr text")
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "pytesseract": fake_pytesseract,
+                "PIL": types.SimpleNamespace(Image=fake_image_module),
+                "PIL.Image": fake_image_module,
+            },
+        ):
+            with self.assertRaises(RuntimeError) as error:
+                extract_text_from_image(Path("/tmp/fake.png"))
+
+        self.assertIn(str(IMAGE_OCR_MAX_DIMENSION), str(error.exception))
+
+    def test_extract_text_from_image_maps_timeout_to_controlled_error(self):
+        class FakeImage:
+            size = (800, 600)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_image_module = types.SimpleNamespace(open=lambda path: FakeImage())
+
+        def fake_image_to_string(image, *, timeout):
+            raise RuntimeError("Tesseract process timeout")
+
+        fake_pytesseract = types.SimpleNamespace(image_to_string=fake_image_to_string)
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "pytesseract": fake_pytesseract,
+                "PIL": types.SimpleNamespace(Image=fake_image_module),
+                "PIL.Image": fake_image_module,
+            },
+        ):
+            with self.assertRaises(RuntimeError) as error:
+                extract_text_from_image(Path("/tmp/fake.png"))
+
+        self.assertIn(str(IMAGE_OCR_TIMEOUT_SECONDS).rstrip("0").rstrip("."), str(error.exception))
 
 
 if __name__ == "__main__":

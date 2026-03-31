@@ -57,7 +57,7 @@ from llm_gateway import (
     approximate_token_count,
     elapsed_ms,
 )
-from parser_stage import stage_uploads_to_shared_root
+import parser_stage
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -71,24 +71,19 @@ LOGIN_RATE_LIMIT_ERROR = "Слишком много попыток входа. �
 AUTH_BACKEND_UNAVAILABLE_ERROR = "Сервис аутентификации временно недоступен."
 NO_LLM_MODELS_AVAILABLE_ERROR = "No LLM models available"
 LLM_MODELS_UNAVAILABLE_DESCRIPTION = "LLM runtime unavailable"
-MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024
-MAX_UPLOAD_FILES = 10
-GENERIC_UPLOAD_CONTENT_TYPES = {"", "application/octet-stream"}
-ALLOWED_UPLOAD_MIME_TYPES: dict[str, set[str]] = {
-    ".txt": {"text/plain"},
-    ".pdf": {"application/pdf"},
-    ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
-    ".png": {"image/png"},
-    ".jpg": {"image/jpeg"},
-    ".jpeg": {"image/jpeg"},
-}
-MAX_DOCUMENT_CHARS = 12_000
-MAX_PARSED_DOCUMENT_CHARS = MAX_DOCUMENT_CHARS
-MAX_PDF_PAGES = 20
-IMAGE_OCR_MAX_DIMENSION = 2000
+MAX_UPLOAD_FILE_SIZE_BYTES = parser_stage.MAX_UPLOAD_FILE_SIZE_BYTES
+MAX_UPLOAD_TOTAL_SIZE_BYTES = parser_stage.MAX_UPLOAD_TOTAL_SIZE_BYTES
+MAX_UPLOAD_FILES = parser_stage.MAX_UPLOAD_FILES
+GENERIC_UPLOAD_CONTENT_TYPES = parser_stage.GENERIC_UPLOAD_CONTENT_TYPES
+ALLOWED_UPLOAD_MIME_TYPES = parser_stage.ALLOWED_UPLOAD_MIME_TYPES
+MAX_DOCUMENT_CHARS = parser_stage.MAX_DOCUMENT_CHARS
+MAX_PARSED_DOCUMENT_CHARS = parser_stage.MAX_PARSED_DOCUMENT_CHARS
+MAX_PDF_PAGES = parser_stage.MAX_PDF_PAGES
+IMAGE_OCR_MAX_DIMENSION = parser_stage.IMAGE_OCR_MAX_DIMENSION
+IMAGE_OCR_TIMEOUT_SECONDS = parser_stage.IMAGE_OCR_TIMEOUT_SECONDS
 DOCUMENT_TRUNCATION_MARKER = "[DOCUMENT_TRUNCATED]"
-UPLOAD_UNSUPPORTED_TYPE_ERROR = "Поддерживаются только TXT, PDF, DOCX, PNG, JPG и JPEG."
-DOCUMENT_NO_INFORMATION_RESPONSE = "В предоставленных документах нет информации для ответа на этот вопрос."
+UPLOAD_UNSUPPORTED_TYPE_ERROR = parser_stage.UPLOAD_UNSUPPORTED_TYPE_ERROR
+DOCUMENT_NO_INFORMATION_RESPONSE = parser_stage.DOCUMENT_NO_INFORMATION_RESPONSE
 DOCUMENT_UNCLEAR_REQUEST_RESPONSE = (
     "Я вижу, что вы загрузили документ. Хотите, чтобы я:\n"
     "- сделал краткое содержание\n"
@@ -133,6 +128,21 @@ RESERVED_AUTH_PROXY_HEADERS = frozenset(
         "x-authenticated-groups",
     }
 )
+
+sanitize_upload_filename = parser_stage.sanitize_upload_filename
+detect_extension = parser_stage.detect_extension
+normalize_upload_content_type = parser_stage.normalize_upload_content_type
+upload_content_type_is_allowed = parser_stage.upload_content_type_is_allowed
+log_upload_rejection = parser_stage.log_upload_rejection
+extract_text_from_txt = parser_stage.extract_text_from_txt
+extract_text_from_docx = parser_stage.extract_text_from_docx
+extract_text_from_pdf = parser_stage.extract_text_from_pdf
+extract_text_from_image = parser_stage.extract_text_from_image
+parse_uploaded_file = parser_stage.parse_uploaded_file
+apply_document_budget = parser_stage.apply_document_budget
+build_document_prompt = parser_stage.build_document_prompt
+build_retry_document_prompt = parser_stage.build_retry_document_prompt
+extract_documents_from_staging = parser_stage.extract_documents_from_staging
 
 
 class PromptRequest(BaseModel):
@@ -184,245 +194,6 @@ def render_markdown(text: str) -> str:
     ]
     allowed_attributes = {"a": ["href", "title", "rel", "target"], "code": ["class"], "pre": ["class"]}
     return bleach.clean(html, tags=allowed_tags, attributes=allowed_attributes, strip=True)
-
-
-def sanitize_upload_filename(filename: str) -> str:
-    candidate = Path(filename or "upload.bin").name
-    extension = Path(candidate).suffix.lower()
-    stem = Path(candidate).stem
-    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or "upload"
-    safe_extension = re.sub(r"[^a-z0-9.]+", "", extension) or ".bin"
-    safe_stem = safe_stem[:80]
-    return f"{uuid.uuid4().hex[:12]}-{safe_stem}{safe_extension}"
-
-
-def detect_extension(filename: str) -> str:
-    return Path(filename).suffix.lower()
-
-
-def normalize_upload_content_type(content_type: Optional[str]) -> str:
-    return (content_type or "").split(";", 1)[0].strip().lower()
-
-
-def upload_content_type_is_allowed(extension: str, content_type: Optional[str]) -> bool:
-    allowed_content_types = ALLOWED_UPLOAD_MIME_TYPES.get(extension)
-    if not allowed_content_types:
-        return False
-
-    normalized_content_type = normalize_upload_content_type(content_type)
-    if normalized_content_type in GENERIC_UPLOAD_CONTENT_TYPES:
-        return True
-
-    return normalized_content_type in allowed_content_types
-
-
-def log_upload_rejection(
-    *,
-    reason: str,
-    safe_name: str,
-    extension: str,
-    content_type: Optional[str],
-    username: Optional[str],
-) -> None:
-    logger.warning(
-        "upload_rejected reason=%s filename=%s extension=%s content_type=%s username=%s",
-        reason,
-        safe_name,
-        extension,
-        normalize_upload_content_type(content_type) or "application/octet-stream",
-        (username or "").strip() or "unknown",
-    )
-
-
-def extract_text_from_txt(path: Path) -> str:
-    chunks = []
-    consumed = 0
-    with path.open("r", encoding="utf-8", errors="ignore") as handle:
-        while consumed < MAX_PARSED_DOCUMENT_CHARS:
-            chunk = handle.read(min(4096, MAX_PARSED_DOCUMENT_CHARS - consumed))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            consumed += len(chunk)
-    return "".join(chunks)
-
-
-def extract_text_from_docx(path: Path) -> str:
-    with zipfile.ZipFile(path) as archive:
-        xml_bytes = archive.read("word/document.xml")
-    root = ElementTree.fromstring(xml_bytes)
-    text_chunks = []
-    for node in root.iter():
-        if node.tag.endswith("}t") and node.text:
-            text_chunks.append(node.text)
-        elif node.tag.endswith("}p"):
-            text_chunks.append("\n")
-    return "".join(text_chunks).strip()
-
-
-def extract_text_from_pdf(path: Path) -> str:
-    try:
-        from pypdf import PdfReader  # type: ignore
-
-        reader = PdfReader(str(path))
-        return "\n".join((page.extract_text() or "") for page in reader.pages[:MAX_PDF_PAGES]).strip()
-    except ImportError:
-        try:
-            import fitz  # type: ignore
-
-            document = fitz.open(path)
-            try:
-                page_count = min(len(document), MAX_PDF_PAGES)
-                return "\n".join(document[index].get_text() for index in range(page_count)).strip()
-            finally:
-                document.close()
-        except ImportError as exc:
-            raise RuntimeError("PDF parser unavailable on server") from exc
-
-
-def extract_text_from_image(path: Path) -> str:
-    try:
-        import pytesseract  # type: ignore
-        from PIL import Image  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError("OCR parser unavailable on server") from exc
-
-    with Image.open(path) as image:
-        image.thumbnail((IMAGE_OCR_MAX_DIMENSION, IMAGE_OCR_MAX_DIMENSION))
-        return pytesseract.image_to_string(image).strip()
-
-
-def parse_uploaded_file(path: Path) -> str:
-    extension = detect_extension(path.name)
-    if extension == ".txt":
-        return extract_text_from_txt(path)
-    if extension == ".docx":
-        return extract_text_from_docx(path)
-    if extension == ".pdf":
-        return extract_text_from_pdf(path)
-    if extension in {".png", ".jpg", ".jpeg"}:
-        return extract_text_from_image(path)
-    raise ValueError(UPLOAD_UNSUPPORTED_TYPE_ERROR)
-
-
-def build_document_prompt(message: str, extracted_documents: list[dict[str, str]]) -> str:
-    return _build_document_prompt(message, extracted_documents, force_documents=False)
-
-
-def apply_document_budget(extracted_documents: list[dict[str, str]]) -> list[dict[str, str]]:
-    budgeted_documents: list[dict[str, str]] = []
-    consumed_chars = 0
-
-    for document in extracted_documents:
-        name = (document.get("name") or "").strip() or "document"
-        content = (document.get("content") or "").strip()
-        if not content:
-            continue
-
-        remaining = MAX_DOCUMENT_CHARS - consumed_chars
-        if remaining <= 0:
-            budgeted_documents.append({"name": name, "content": DOCUMENT_TRUNCATION_MARKER})
-            continue
-
-        if len(content) > remaining:
-            marker = f"\n{DOCUMENT_TRUNCATION_MARKER}"
-            snippet_limit = max(0, remaining - len(marker))
-            snippet = content[:snippet_limit].rstrip()
-            content = f"{snippet}{marker}" if snippet else DOCUMENT_TRUNCATION_MARKER
-
-        consumed_chars += len(content)
-        budgeted_documents.append({"name": name, "content": content})
-
-    return budgeted_documents
-
-
-def _build_document_prompt(
-    message: str,
-    extracted_documents: list[dict[str, str]],
-    *,
-    force_documents: bool,
-) -> str:
-    document_chunks = []
-    budgeted_documents = apply_document_budget(extracted_documents)
-
-    for index, document in enumerate(budgeted_documents, start=1):
-        content = document["content"].strip()
-        if not content:
-            continue
-        document_chunks.append(f"[Документ {index}: {document['name']}]\n{content}")
-
-    if not document_chunks:
-        raise ValueError("Не удалось извлечь текст из выбранных файлов")
-
-    document_block = "\n\n".join(document_chunks)
-    request_text = message.strip() or "Пользователь не уточнил задачу"
-    extra_guard = ""
-    if force_documents:
-        extra_guard = (
-            "\n# ДОПОЛНИТЕЛЬНОЕ ТРЕБОВАНИЕ\n"
-            "Текст документов уже передан тебе ниже. "
-            "Нельзя говорить, что у тебя нет доступа к файлам, документам или вложениям. "
-            "Если фактов недостаточно, верни только точную фразу:\n"
-            f"\"{DOCUMENT_NO_INFORMATION_RESPONSE}\"\n"
-        )
-
-    return f"""
-Ты — корпоративный AI-ассистент.
-
----
-
-# КРИТИЧЕСКОЕ ПРАВИЛО
-
-Ты НЕ имеешь права выдумывать информацию.
-
----
-
-# РАБОТА С ДОКУМЕНТАМИ
-
-- Документы уже загружены.
-- Их текст приведён ниже.
-- Блок ДОКУМЕНТЫ ниже — это уже извлечённое буквальное содержимое файлов.
-- Это твой ЕДИНСТВЕННЫЙ источник данных.
-- Отвечай как корпоративный аналитик: кратко, точно, по существу.
-
----
-
-# ЗАПРЕЩЕНО
-
-- говорить, что у тебя нет доступа к файлам
-- игнорировать документы
-- придумывать факты, цифры, даты, имена, выводы
-- дополнять ответ предположениями
-- использовать фразы вроде "скорее всего", если этого нет в тексте
-
----
-
-# ЕСЛИ ДАННЫХ НЕТ
-
-Ответь ровно так:
-"{DOCUMENT_NO_INFORMATION_RESPONSE}"
-
----
-
-# ПОВЕДЕНИЕ
-
-- Если вопрос пользователя конкретный: ответь только по документам.
-- Если пользователь спрашивает "что в файле", "что в документе" или просит показать содержимое, передай содержание прямо по тексту документа без выдумок.
-- Если запрос пустой или неясный: предложи один из вариантов действий кратким списком.
-- Если документы противоречат друг другу: прямо укажи на противоречие и не делай догадок.
-{extra_guard}
----
-
-# ДОКУМЕНТЫ
-
-{document_block}
-
----
-
-# ЗАПРОС ПОЛЬЗОВАТЕЛЯ
-
-{request_text}
-""".strip()
 
 
 def response_requires_document_retry(response_text: str) -> bool:
@@ -508,7 +279,7 @@ async def stage_uploads_for_parser(
     *,
     username: Optional[str] = None,
 ) -> dict[str, Any]:
-    return await stage_uploads_to_shared_root(
+    return await parser_stage.stage_uploads_to_shared_root(
         files,
         staging_root=settings.PARSER_STAGING_ROOT,
         username=username,
@@ -634,82 +405,18 @@ async def stage_uploads(
     *,
     username: Optional[str] = None,
 ) -> tuple[tempfile.TemporaryDirectory[str], list[dict[str, Any]]]:
-    if not files:
-        raise HTTPException(status_code=400, detail="Не выбраны файлы")
-    if len(files) > MAX_UPLOAD_FILES:
-        raise HTTPException(status_code=400, detail=f"Максимум файлов за запрос: {MAX_UPLOAD_FILES}")
-
     temp_dir = tempfile.TemporaryDirectory(prefix="ai-agent-upload-")
-    staged_files: list[dict[str, Any]] = []
     try:
-        for upload in files:
-            safe_name = sanitize_upload_filename(upload.filename or "upload.bin")
-            display_name = Path(upload.filename or safe_name).name or safe_name
-            suffix = detect_extension(safe_name)
-            normalized_content_type = normalize_upload_content_type(upload.content_type)
-            if suffix not in ALLOWED_UPLOAD_MIME_TYPES:
-                log_upload_rejection(
-                    reason="unsupported_extension",
-                    safe_name=safe_name,
-                    extension=suffix or "<none>",
-                    content_type=normalized_content_type,
-                    username=username,
-                )
-                raise HTTPException(status_code=400, detail=UPLOAD_UNSUPPORTED_TYPE_ERROR)
-            if not upload_content_type_is_allowed(suffix, normalized_content_type):
-                log_upload_rejection(
-                    reason="content_type_mismatch",
-                    safe_name=safe_name,
-                    extension=suffix,
-                    content_type=normalized_content_type,
-                    username=username,
-                )
-                raise HTTPException(status_code=400, detail=UPLOAD_UNSUPPORTED_TYPE_ERROR)
-
-            target_path = Path(temp_dir.name) / safe_name
-            size = 0
-            with target_path.open("wb") as target:
-                while True:
-                    chunk = await upload.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    size += len(chunk)
-                    if size > MAX_UPLOAD_FILE_SIZE_BYTES:
-                        log_upload_rejection(
-                            reason="file_too_large",
-                            safe_name=safe_name,
-                            extension=suffix,
-                            content_type=normalized_content_type,
-                            username=username,
-                        )
-                        raise HTTPException(status_code=413, detail=f"Файл {safe_name} превышает лимит 50 MB")
-                    target.write(chunk)
-
-            staged_files.append(
-                {
-                    "name": display_name,
-                    "safe_name": safe_name,
-                    "path": target_path,
-                    "size": size,
-                    "content_type": normalized_content_type or "application/octet-stream",
-                }
-            )
+        staged_files = await parser_stage.stage_uploads_to_directory(
+            files,
+            target_dir=Path(temp_dir.name),
+            username=username,
+        )
     except Exception:
         temp_dir.cleanup()
         raise
-    finally:
-        for upload in files:
-            await upload.close()
 
     return temp_dir, staged_files
-
-
-def extract_documents_from_staging(staged_files: list[dict[str, Any]]) -> list[dict[str, str]]:
-    extracted: list[dict[str, str]] = []
-    for file_info in staged_files:
-        text = parse_uploaded_file(file_info["path"])
-        extracted.append({"name": file_info["name"], "content": text})
-    return extracted
 
 
 def log_file_parse_observability(
@@ -1825,7 +1532,7 @@ async def api_chat_with_files(
             trimmed_doc_chars,
             "yes" if history != original_history or trimmed_doc_chars != original_doc_chars else "no",
         )
-        final_prompt = _build_document_prompt(prompt, budgeted_documents, force_documents=False)
+        final_prompt = build_document_prompt(prompt, budgeted_documents)
         logger.info(
             "Document final prompt for user %s: chars=%s approx_tokens=%s file_count=%s",
             username,
@@ -1843,7 +1550,7 @@ async def api_chat_with_files(
             f"{prompt or 'Пользователь не уточнил задачу'}\n\n"
             f"[Вложения: {', '.join(file_info['name'] for file_info in staged_files)}]"
         )
-        retry_prompt = _build_document_prompt(prompt, budgeted_documents, force_documents=True)
+        retry_prompt = build_retry_document_prompt(prompt, budgeted_documents)
         file_chat_metadata = build_file_chat_job_metadata(
             retry_prompt=retry_prompt,
             staged_files=staged_files,
@@ -1901,7 +1608,7 @@ async def api_chat_with_files(
                     job_id,
                 )
                 await restore_chat_history(chat_store, username, history)
-                retry_prompt = _build_document_prompt(prompt, budgeted_documents, force_documents=True)
+                retry_prompt = build_retry_document_prompt(prompt, budgeted_documents)
                 retry_job_id, retry_result = await run_document_job(
                     gateway=gateway,
                     chat_store=chat_store,
