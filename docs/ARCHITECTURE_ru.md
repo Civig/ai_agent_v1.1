@@ -55,13 +55,13 @@ FastAPI-приложение отвечает за:
 - canonical identity normalization для `DOMAIN\\user`, `user@REALM` и plain username
 - model selection и runtime model resolution через явный folder-based policy catalog (`model_policies/`)
 - приём обычных chat requests
-- staging upload и document parsing
+- staging upload, parser jobs и document processing
 - health endpoints
 - SSE event streaming в браузер
 
-Для file-chat app выполняет staging upload и text extraction до постановки job в очередь. Model inference выполняется worker'ами, а не прямо внутри request handler.
+Для file-chat baseline fresh install использует parser-stage path: `app` выполняет валидацию и controlled staging, ставит parser root job в очередь, `worker-parser` готовит grounded document artifacts, а downstream worker выполняет inference. Legacy app-side parsing path остаётся только fallback-веткой при выключенном parser public cutover.
 
-Целевой redesign parser-stage, который выносит тяжёлую file processing логику из request path, описан отдельно в [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md).
+Текущая parser-stage архитектура и её design rationale описаны в [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md).
 
 Основной app не выполняет raw Kerberos/SPNEGO negotiation напрямую. Вместо этого он принимает trusted identity headers только на выделенном SSO entry path и только при включённом trusted proxy mode. Password login остаётся доступным fallback auth source.
 
@@ -90,6 +90,17 @@ Worker'ы:
 - публикуют job events и terminal status
 
 Сейчас в репозитории используется одна worker-реализация, которая конфигурируется через environment variables под разные workloads.
+
+### `worker-parser`
+
+`worker-parser` — это выделенный parser pool для root file-chat jobs. Он:
+
+- читает raw uploads из shared parser staging
+- выполняет TXT/DOCX/PDF/image extraction
+- применяет parser-side limits и budgets
+- пишет parser-stage observability
+- ставит downstream LLM child job в очередь
+- очищает raw staged files, когда они больше не нужны
 
 ### `worker-gpu`
 
@@ -144,13 +155,17 @@ Ollama — локальный inference runtime. Приложение ожида
 ### File-chat path
 
 1. браузер отправляет файлы и пользовательский запрос в `app`
-2. app staging'ит uploads во временную директорию
-3. safe filename handling и upload validation выполняются до parsing
-4. из поддерживаемых типов файлов извлекается document text
-5. document context governance ограничивает слишком большой document payload
-6. file-aware job ставится в тот же queue/worker lifecycle
-7. worker выполняет grounded inference через обычный model path
-8. временные upload artifacts очищаются
+2. app валидирует число файлов, размер файла, суммарный размер, extension и content-type
+3. если включён parser public cutover, app пишет uploads в shared parser staging и ставит parser root job в очередь
+4. `worker-parser` извлекает document text из поддерживаемых типов, применяет parser-side limits, trims document context и ставит downstream LLM child job
+5. обычный worker выполняет grounded inference через стандартный model path
+6. root/child terminal state зеркалируется обратно в browser-facing file-chat contract
+7. raw staged artifacts очищаются по правилам parser lifecycle
+
+Legacy fallback:
+
+- при выключенном parser public cutover app сохраняет старый request-local staging/parsing path
+- non-file chat никогда не использует parser path
 
 Важные свойства:
 
@@ -194,7 +209,7 @@ Job state хранится в Redis и включает:
 
 ### Uploaded files
 
-Загруженные файлы staging'ятся временно для parsing. Durable attachment store в репозитории не реализован.
+Загруженные файлы staging'ятся временно для parsing. Parser path использует shared staging root, смонтированный в `app` и `worker-parser`; durable attachment store в репозитории не реализован.
 
 ## Context governance
 
@@ -232,10 +247,12 @@ Job state хранится в Redis и включает:
 
 Текущие примеры:
 
+- timing приёма upload/file request
 - parse timing
 - queue wait timing
 - inference timing
 - total job timing
+- `file_count` и `doc_chars`
 - routing target
 - нормализованный `error_type`
 
@@ -250,8 +267,10 @@ Job state хранится в Redis и включает:
 - proxy-terminated AD SSO с password fallback
 - queue/scheduler/worker control plane
 - обычный SSE chat
-- async file chat через queue/worker path
+- async file chat через parser root jobs и downstream queue/worker inference
 - PDF/text/docx/image document extraction
+- выделенный `worker-parser` и shared parser staging
+- file-processing limits, budgets и controlled failures на malformed/heavy files
 - CPU/GPU routing readiness с CPU fallback
 - Redis-backed chat history и job state
 - baseline upload validation и structured observability logs
@@ -260,7 +279,6 @@ Job state хранится в Redis и включает:
 
 - выделенная persistent database для chat history
 - HA Redis / Sentinel profile
-- redesign parser-stage с выносом тяжёлого file parsing из app request path; см. [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md)
 - packaged external monitoring stack
 - antivirus или sandbox-based file scanning
 - standalone RAG subsystem

@@ -248,6 +248,7 @@ docker compose exec -T ollama ollama pull phi3:mini
 - content-type mismatch
 - file too large
 - too many files in one request
+- total file size exceeds the request budget
 
 ### How to check
 
@@ -259,14 +260,14 @@ docker compose logs --tail=200 app | grep upload_rejected
 
 - use a supported type: `txt`, `pdf`, `docx`, `png`, `jpg`, `jpeg`
 - ensure browser/content-type matches the extension
-- reduce file size or file count
+- reduce file size, file count, or total uploaded payload size
 
 ## PDF Parsing Issue
 
 ### Symptom
 
 - PDF uploads are accepted but file chat fails
-- app logs show PDF parser-related failure
+- `app` or `worker-parser` logs show PDF parser-related failure
 
 ### Probable cause
 
@@ -277,15 +278,15 @@ docker compose logs --tail=200 app | grep upload_rejected
 ### How to check
 
 ```bash
-docker compose logs --tail=200 app
+docker compose logs --tail=200 app worker-parser
 ```
 
-Look for file-parse failures around PDF requests.
+Look for `file_parse_observability` and parse failures around PDF requests.
 
 ### How to fix
 
 ```bash
-docker compose up -d --build app worker-chat worker-siem worker-batch
+docker compose up -d --build app worker-parser worker-chat worker-siem worker-batch
 ```
 
 If the issue is file-specific, test with a simpler PDF first.

@@ -2,9 +2,9 @@
 
 ## Scope
 
-This document is the canonical design for moving heavy file parsing outside the app request path.
+This document is the canonical parser-stage design and current architecture note for the file-chat path.
 
-It is based on the current implemented file-chat flow confirmed in P3.1 from:
+It is based on the implemented file-chat flow currently present in the repository.
 
 - `app.py`
 - `llm_gateway.py`
@@ -12,22 +12,24 @@ It is based on the current implemented file-chat flow confirmed in P3.1 from:
 - `tests/test_upload_backend.py`
 - `tests/test_file_chat_async_queue.py`
 
-This is a target design document. It does not describe an already implemented parser stage.
+The parser-stage path described here is now implemented as the current fresh-install baseline. Historical option-evaluation sections remain for design rationale, but they no longer describe a future-only target.
 
 ## Current State Summary
 
 Current file-chat behavior:
 
 1. `app` receives multipart uploads on `/api/chat_with_files`
-2. `app` validates count, extension, content type, and file size
-3. `app` stages raw files in a temporary directory
-4. `app` parses TXT, DOCX, PDF, and image uploads before queue
-5. `app` applies document-budget trimming before queue
-6. `app` builds the grounded document prompt before queue
-7. `app` enqueues a file-chat job that already contains prompt text
-8. `app` cleans temporary upload artifacts
+2. `app` validates file count, per-file size, total size, extension, and content type
+3. `app` writes raw uploads into controlled shared staging
+4. `app` enqueues a parser root job
+5. `worker-parser` parses TXT, DOCX, PDF, and image uploads
+6. `worker-parser` applies document-budget trimming and writes parser metadata
+7. `worker-parser` enqueues the downstream LLM child job
+8. regular LLM workers perform inference
+9. root/child lifecycle is mirrored back to the public file-chat contract
+10. parser-owned raw artifacts are cleaned after they are no longer needed
 
-Current queue boundary is therefore late: parsing, OCR, PDF extraction, and document trimming all happen before the LLM job is queued.
+Legacy fallback still exists, but only when parser public cutover is disabled.
 
 ## Problem Statement
 

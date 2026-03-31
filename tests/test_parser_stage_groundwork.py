@@ -1128,13 +1128,14 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
                 "job_kind": JOB_KIND_PARSE,
                 "workload_class": WORKLOAD_PARSE,
                 "target_kind": "cpu",
-                "parser_metadata": {"files": [{"name": "a.txt"}]},
+                "parser_metadata": {"files": [{"name": "a.txt"}], "trimmed_doc_chars": 77},
             }
         )
 
         self.assertEqual(fields["job_kind"], JOB_KIND_PARSE)
         self.assertEqual(fields["workload_class"], WORKLOAD_PARSE)
         self.assertEqual(fields["file_count"], 1)
+        self.assertEqual(fields["doc_chars"], 77)
 
 
 class WorkerGroundworkTests(unittest.IsolatedAsyncioTestCase):

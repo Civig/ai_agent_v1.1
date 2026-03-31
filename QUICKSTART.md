@@ -46,6 +46,8 @@ curl -k -fsS https://127.0.0.1/health/live
 curl -k -fsS https://127.0.0.1/health/ready
 ```
 
+On a fresh install, the parser file-chat path is enabled by default. Make sure the Compose stack includes `worker-parser` together with `app`, `scheduler`, and `worker-chat`.
+
 ## Next Reading
 
 - [docs/INDEX.md](docs/INDEX.md)

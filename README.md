@@ -13,6 +13,7 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 - optional trusted reverse-proxy SSO path
 - Redis-backed scheduler, workers, rate limiting, and session state
 - Ollama as the local inference runtime
+- parser-based file-chat path with dedicated `worker-parser` and shared staging
 - Russian-first operator docs with synced English documents
 
 ## Reading Order

@@ -138,6 +138,8 @@ Compose stack реально включает:
 
 `install.sh` пишет `.env` сам. Для fresh install он сразу включает новый parser file path через `ENABLE_PARSER_STAGE=true` и `ENABLE_PARSER_PUBLIC_CUTOVER=true`. Если `.env` уже существует и в нём эти значения заданы явно, installer их сохраняет.
 
+Тот же file-processing baseline теперь явно показывает в `.env.example` parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout.
+
 Пример model-access mapping для пилотного AD-стенда может выглядеть так:
 
 ```dotenv

@@ -138,6 +138,8 @@ Key environment groups include:
 
 The installer writes `.env` for you. On a fresh install it enables the new parser file path out of the box with `ENABLE_PARSER_STAGE=true` and `ENABLE_PARSER_PUBLIC_CUTOVER=true`. If `.env` already exists and those values are set explicitly, the installer keeps them.
 
+The same file-processing baseline also exposes explicit parser/file-chat limits in `.env.example`, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout.
+
 Model access examples for a pilot AD deployment might look like:
 
 ```dotenv

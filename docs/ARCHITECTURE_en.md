@@ -55,13 +55,13 @@ The FastAPI application handles:
 - canonical identity normalization for `DOMAIN\\user`, `user@REALM`, and plain usernames
 - model selection and runtime model resolution through an explicit folder-based policy catalog (`model_policies/`)
 - regular chat request intake
-- file upload staging and document parsing
+- file upload staging, parser jobs, and document processing
 - health endpoints
 - SSE event streaming to the browser
 
-For file chat, the app performs upload staging and text extraction before the job is queued. Model inference is executed by workers, not directly in the request handler.
+For file chat, the fresh-install baseline uses a parser-stage path: `app` performs validation and controlled staging, enqueues a parser root job, `worker-parser` prepares grounded document artifacts, and a downstream worker performs inference. The legacy app-side parsing path remains as a fallback only when the parser public cutover is disabled.
 
-The target parser-stage redesign for moving heavy file processing out of the request path is documented separately in [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md).
+The parser-stage architecture and its design rationale are documented in [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md).
 
 The main app does not perform raw Kerberos/SPNEGO negotiation. Instead, it accepts trusted identity headers only on the dedicated SSO entry path and only when trusted proxy mode is enabled. Password login remains available as a fallback auth source.
 
@@ -90,6 +90,17 @@ Workers:
 - emit job events and terminal job status
 
 The repository currently uses one worker implementation with workload-specific configuration via environment variables.
+
+### `worker-parser`
+
+`worker-parser` is the dedicated parser pool for file-chat root jobs. It:
+
+- reads raw uploads from the shared parser staging area
+- performs TXT/DOCX/PDF/image extraction
+- enforces parser-side file-processing limits and budgets
+- emits parser-stage observability
+- enqueues the downstream LLM child job
+- cleans raw staged files when they are no longer needed
 
 ### `worker-gpu`
 
@@ -144,13 +155,17 @@ Ollama is the local inference runtime. The application expects at least one mode
 ### File-chat path
 
 1. the browser uploads files and a user request to `app`
-2. the app stages uploads in a temporary directory
-3. safe filename handling and upload validation run before parsing
-4. document text is extracted from supported file types
-5. document context governance trims oversized document payloads
-6. a file-aware job is enqueued into the same queue/worker lifecycle
-7. the worker performs grounded inference through the regular model path
-8. temporary upload artifacts are cleaned up
+2. the app validates file count, file size, total size, extension, and content-type
+3. if parser public cutover is enabled, the app writes uploads into the shared parser staging area and enqueues a parser root job
+4. `worker-parser` extracts document text from supported file types, enforces parser-side limits, applies document trimming, and enqueues the downstream LLM child job
+5. a regular worker performs grounded inference through the standard model path
+6. root/child terminal state is mirrored back to the browser-facing file-chat contract
+7. raw staged artifacts are cleaned according to parser lifecycle rules
+
+Legacy fallback:
+
+- when parser public cutover is disabled, the app keeps the older request-local staging and parsing path
+- non-file chat never uses the parser path
 
 Important characteristics:
 
@@ -194,7 +209,7 @@ Job state is stored in Redis and includes:
 
 ### Uploaded files
 
-Uploaded files are staged temporarily for parsing. The repository does not implement a durable attachment store.
+Uploaded files are staged temporarily for parsing. The parser path uses a shared staging root mounted into `app` and `worker-parser`; the repository does not implement a durable attachment store.
 
 ## Context Governance
 
@@ -232,10 +247,12 @@ The repository now exposes a baseline observability model through:
 
 Current examples include:
 
+- upload receive timing
 - parse timing
 - queue wait timing
 - inference timing
 - total job timing
+- file count and document character counts
 - routing target
 - normalized error types
 
@@ -250,8 +267,10 @@ No full metrics stack is packaged in the repository.
 - proxy-terminated AD SSO with password fallback
 - queue/scheduler/worker control plane
 - regular SSE chat
-- async file chat through the queue/worker path
+- async file chat through parser root jobs plus downstream queue/worker inference
 - PDF/text/docx/image document extraction
+- dedicated `worker-parser` service with shared parser staging
+- file-processing limits, budgets, and malformed/heavy-file controlled failures
 - CPU/GPU routing readiness with CPU fallback
 - Redis-backed chat history and job state
 - baseline upload validation and structured observability logs
@@ -260,7 +279,6 @@ No full metrics stack is packaged in the repository.
 
 - dedicated persistent database for chat history
 - HA Redis / Sentinel profile
-- parser-stage redesign that moves heavy file parsing outside the app request path; see [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md)
 - packaged external monitoring stack
 - antivirus or sandbox-based file scanning
 - standalone RAG subsystem

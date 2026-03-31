@@ -5,9 +5,11 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
 os.environ.setdefault("COOKIE_SECURE", "false")
 
 from llm_gateway import (
+    JOB_KIND_PARSE,
     JOB_KIND_FILE_CHAT,
     JOB_STATUS_CANCELLED,
     WORKLOAD_CHAT,
+    WORKLOAD_PARSE,
     classify_observability_error,
     compute_queue_wait_ms,
     compute_total_job_ms,
@@ -50,6 +52,26 @@ class ObservabilityBaselineTests(unittest.TestCase):
         self.assertEqual(fields["doc_chars"], 800)
         self.assertEqual(fields["prompt_chars"], 5)
         self.assertEqual(fields["history_messages"], 1)
+
+    def test_extract_job_observability_fields_supports_parser_jobs(self):
+        fields = extract_job_observability_fields(
+            {
+                "id": "parse-123",
+                "username": "alice",
+                "job_kind": JOB_KIND_PARSE,
+                "workload_class": WORKLOAD_PARSE,
+                "target_kind": "cpu",
+                "parser_metadata": {
+                    "files": [{"name": "a.txt"}],
+                    "trimmed_doc_chars": 321,
+                },
+            }
+        )
+
+        self.assertEqual(fields["job_kind"], JOB_KIND_PARSE)
+        self.assertEqual(fields["workload_class"], WORKLOAD_PARSE)
+        self.assertEqual(fields["file_count"], 1)
+        self.assertEqual(fields["doc_chars"], 321)
 
     def test_classify_observability_error_maps_validation_and_parse_errors(self):
         self.assertEqual(

@@ -15,6 +15,7 @@ Legacy helper files могут оставаться в репозитории д
 - optional trusted reverse-proxy SSO path
 - Redis-backed session, rate-limit и job state
 - Ollama как локальный inference runtime
+- parser-based file-chat path с отдельным `worker-parser` и shared staging
 - русскоязычный набор operator docs с синхронизированными английскими версиями
 
 ## Поддерживаемый baseline развёртывания
