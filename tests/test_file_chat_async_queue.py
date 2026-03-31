@@ -12,6 +12,8 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
 os.environ.setdefault("COOKIE_SECURE", "false")
 
 import app as app_module
+from llm_gateway import AsyncChatStore
+from tests.test_chat_thread_backend import FakeRedis
 
 
 class DummyTempDir:
@@ -80,6 +82,15 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         chat_store.append_message = AsyncMock(return_value=None)
         chat_store.clear_history = AsyncMock(return_value=None)
         return chat_store
+
+    def build_real_chat_store(self):
+        chat_store = AsyncChatStore("redis://test")
+        chat_store.redis = FakeRedis()
+        return chat_store
+
+    async def seed_history(self, chat_store, username, thread_id, messages):
+        for role, content in messages:
+            await chat_store.append_message(username, role, content, thread_id=thread_id)
 
     async def test_file_chat_sse_branch_enqueues_without_waiting(self):
         gateway = self.build_gateway()
@@ -531,6 +542,181 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Генерация была отменена".encode("utf-8"), response.body)
         wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.parser_public_json_timeout_seconds())
         restore_mock.assert_awaited_once()
+
+    async def test_file_chat_failed_restore_keeps_neighbor_thread_intact(self):
+        gateway = self.build_gateway()
+        chat_store = self.build_real_chat_store()
+        request = self.build_request(gateway, chat_store)
+        temp_dir = DummyTempDir()
+        thread_a_history = [("user", "thread-a-user"), ("assistant", "thread-a-assistant")]
+        thread_b_history = [("user", "thread-b-user"), ("assistant", "thread-b-assistant")]
+        await self.seed_history(chat_store, "alice", "thread-a", thread_a_history)
+        await self.seed_history(chat_store, "alice", "thread-b", thread_b_history)
+
+        with patch.object(app_module.settings, "ENABLE_PARSER_PUBLIC_CUTOVER", False), patch.object(
+            app_module, "enforce_csrf", return_value=None
+        ), patch.object(
+            app_module,
+            "resolve_runtime_model",
+            AsyncMock(return_value={"key": "demo", "name": "demo"}),
+        ), patch.object(
+            app_module,
+            "stage_uploads",
+            AsyncMock(return_value=(temp_dir, [{"name": "note.txt", "size": 5}])),
+        ), patch.object(
+            app_module,
+            "extract_documents_from_staging",
+            return_value=[{"name": "note.txt", "content": "hello"}],
+        ), patch.object(
+            app_module,
+            "enqueue_document_job",
+            AsyncMock(return_value="job-1"),
+        ), patch.object(
+            app_module,
+            "enqueue_parser_job",
+            AsyncMock(side_effect=AssertionError("enqueue_parser_job should not be called for legacy path")),
+        ), patch.object(
+            app_module,
+            "wait_for_terminal_job",
+            AsyncMock(return_value={"status": "failed", "error": "boom"}),
+        ):
+            response = await app_module.api_chat_with_files(
+                request,
+                message="Summarize",
+                model=None,
+                thread_id="thread-a",
+                files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
+                current_user={"username": "alice", "model_key": "demo", "model": "demo"},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            await chat_store.get_history("alice", thread_id="thread-a"),
+            [{"role": role, "content": content} for role, content in thread_a_history],
+        )
+        self.assertEqual(
+            await chat_store.get_history("alice", thread_id="thread-b"),
+            [{"role": role, "content": content} for role, content in thread_b_history],
+        )
+
+    async def test_file_chat_cancelled_restore_keeps_neighbor_thread_intact(self):
+        gateway = self.build_gateway()
+        chat_store = self.build_real_chat_store()
+        request = self.build_request(gateway, chat_store)
+        temp_dir = DummyTempDir()
+        thread_a_history = [("user", "thread-a-user"), ("assistant", "thread-a-assistant")]
+        thread_b_history = [("user", "thread-b-user"), ("assistant", "thread-b-assistant")]
+        await self.seed_history(chat_store, "alice", "thread-a", thread_a_history)
+        await self.seed_history(chat_store, "alice", "thread-b", thread_b_history)
+
+        with patch.object(app_module.settings, "ENABLE_PARSER_PUBLIC_CUTOVER", False), patch.object(
+            app_module, "enforce_csrf", return_value=None
+        ), patch.object(
+            app_module,
+            "resolve_runtime_model",
+            AsyncMock(return_value={"key": "demo", "name": "demo"}),
+        ), patch.object(
+            app_module,
+            "stage_uploads",
+            AsyncMock(return_value=(temp_dir, [{"name": "note.txt", "size": 5}])),
+        ), patch.object(
+            app_module,
+            "extract_documents_from_staging",
+            return_value=[{"name": "note.txt", "content": "hello"}],
+        ), patch.object(
+            app_module,
+            "enqueue_document_job",
+            AsyncMock(return_value="job-1"),
+        ), patch.object(
+            app_module,
+            "enqueue_parser_job",
+            AsyncMock(side_effect=AssertionError("enqueue_parser_job should not be called for legacy path")),
+        ), patch.object(
+            app_module,
+            "wait_for_terminal_job",
+            AsyncMock(return_value={"status": "cancelled"}),
+        ):
+            response = await app_module.api_chat_with_files(
+                request,
+                message="Summarize",
+                model=None,
+                thread_id="thread-a",
+                files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
+                current_user={"username": "alice", "model_key": "demo", "model": "demo"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            await chat_store.get_history("alice", thread_id="thread-a"),
+            [{"role": role, "content": content} for role, content in thread_a_history],
+        )
+        self.assertEqual(
+            await chat_store.get_history("alice", thread_id="thread-b"),
+            [{"role": role, "content": content} for role, content in thread_b_history],
+        )
+
+    async def test_parser_public_timeout_restore_keeps_neighbor_thread_intact(self):
+        gateway = self.build_gateway()
+        chat_store = self.build_real_chat_store()
+        request = self.build_request(gateway, chat_store)
+        thread_a_history = [("user", "thread-a-user"), ("assistant", "thread-a-assistant")]
+        thread_b_history = [("user", "thread-b-user"), ("assistant", "thread-b-assistant")]
+        await self.seed_history(chat_store, "alice", "thread-a", thread_a_history)
+        await self.seed_history(chat_store, "alice", "thread-b", thread_b_history)
+
+        with patch.object(app_module.settings, "ENABLE_PARSER_STAGE", True), patch.object(
+            app_module.settings, "ENABLE_PARSER_PUBLIC_CUTOVER", True
+        ), patch.object(app_module, "enforce_csrf", return_value=None), patch.object(
+            app_module,
+            "resolve_runtime_model",
+            AsyncMock(return_value={"key": "demo", "name": "demo"}),
+        ), patch.object(
+            app_module,
+            "stage_uploads_for_parser",
+            AsyncMock(
+                return_value={
+                    "staging_id": "staging-1",
+                    "files": [
+                        {
+                            "name": "note.txt",
+                            "safe_name": "safe-note.txt",
+                            "size": 5,
+                            "content_type": "text/plain",
+                        }
+                    ],
+                }
+            ),
+        ), patch.object(
+            app_module,
+            "enqueue_parser_job",
+            AsyncMock(return_value="root-job-1"),
+        ), patch.object(
+            app_module,
+            "enqueue_document_job",
+            AsyncMock(side_effect=AssertionError("enqueue_document_job should not be called for parser public cutover")),
+        ), patch.object(
+            app_module,
+            "wait_for_terminal_job",
+            AsyncMock(return_value={"status": "timeout"}),
+        ):
+            response = await app_module.api_chat_with_files(
+                request,
+                message="Summarize",
+                model=None,
+                thread_id="thread-a",
+                files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
+                current_user={"username": "alice", "model_key": "demo", "model": "demo"},
+            )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(
+            await chat_store.get_history("alice", thread_id="thread-a"),
+            [{"role": role, "content": content} for role, content in thread_a_history],
+        )
+        self.assertEqual(
+            await chat_store.get_history("alice", thread_id="thread-b"),
+            [{"role": role, "content": content} for role, content in thread_b_history],
+        )
 
     async def test_file_chat_parser_public_cutover_rejects_too_many_files_before_enqueue(self):
         gateway = self.build_gateway()

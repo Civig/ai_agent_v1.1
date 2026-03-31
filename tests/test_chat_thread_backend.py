@@ -259,6 +259,25 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
             [DEFAULT_CHAT_THREAD_ID],
         )
 
+    async def test_restore_chat_history_restores_only_requested_thread(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        await store.append_message("alice", "user", "thread-a-original-user", thread_id="thread-a")
+        await store.append_message("alice", "assistant", "thread-a-original-assistant", thread_id="thread-a")
+        await store.append_message("alice", "user", "thread-b-user", thread_id="thread-b")
+        snapshot = await store.get_history("alice", thread_id="thread-a")
+
+        await store.append_message("alice", "user", "thread-a-transient-user", thread_id="thread-a")
+        await store.append_message("alice", "assistant", "thread-a-transient-assistant", thread_id="thread-a")
+
+        await app_module.restore_chat_history(store, "alice", "thread-a", snapshot)
+
+        self.assertEqual(await store.get_history("alice", thread_id="thread-a"), snapshot)
+        self.assertEqual(
+            await store.get_history("alice", thread_id="thread-b"),
+            [{"role": "user", "content": "thread-b-user"}],
+        )
+
     async def test_clear_history_keeps_requested_thread_in_registry_by_default(self):
         store = AsyncChatStore("redis://test")
         store.redis = FakeRedis()
@@ -291,6 +310,29 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
             [thread["thread_id"] for thread in await store.list_threads("alice")],
             ["thread-b"],
         )
+
+    async def test_restore_chat_history_restores_only_requested_thread(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        original_thread_a = [
+            {"role": "user", "content": "thread-a-user"},
+            {"role": "assistant", "content": "thread-a-assistant"},
+        ]
+        original_thread_b = [
+            {"role": "user", "content": "thread-b-user"},
+            {"role": "assistant", "content": "thread-b-assistant"},
+        ]
+
+        for message in original_thread_a:
+            await store.append_message("alice", message["role"], message["content"], thread_id="thread-a")
+        for message in original_thread_b:
+            await store.append_message("alice", message["role"], message["content"], thread_id="thread-b")
+
+        await store.append_message("alice", "user", "transient-file-request", thread_id="thread-a")
+        await app_module.restore_chat_history(store, "alice", "thread-a", original_thread_a)
+
+        self.assertEqual(await store.get_history("alice", thread_id="thread-a"), original_thread_a)
+        self.assertEqual(await store.get_history("alice", thread_id="thread-b"), original_thread_b)
 
 
 class ChatThreadBackendContractTests(unittest.IsolatedAsyncioTestCase):
