@@ -207,6 +207,43 @@ def normalize_chat_thread_id(thread_id: Optional[str]) -> str:
     return normalized or DEFAULT_CHAT_THREAD_ID
 
 
+def serialize_thread_summary(thread: dict[str, Any]) -> dict[str, Any]:
+    updated_at_seconds = max(0, int(thread.get("updated_at") or 0))
+    return {
+        "id": normalize_chat_thread_id(thread.get("thread_id")),
+        "title": (thread.get("title") or "Новый чат").strip() or "Новый чат",
+        "updatedAt": updated_at_seconds * 1000,
+        "messageCount": max(0, int(thread.get("message_count") or 0)),
+    }
+
+
+async def load_thread_summaries(chat_store: AsyncChatStore, username: str) -> list[dict[str, Any]]:
+    threads = [serialize_thread_summary(thread) for thread in await chat_store.list_threads(username)]
+    if threads:
+        return threads
+
+    await chat_store.create_thread(username, thread_id=DEFAULT_CHAT_THREAD_ID)
+    return [serialize_thread_summary(thread) for thread in await chat_store.list_threads(username)]
+
+
+def resolve_active_thread_id(thread_id: Optional[str], threads: list[dict[str, Any]]) -> str:
+    requested_thread_id = normalize_chat_thread_id(thread_id)
+    known_thread_ids = {thread["id"] for thread in threads}
+    if requested_thread_id in known_thread_ids:
+        return requested_thread_id
+    if threads:
+        return threads[0]["id"]
+    return DEFAULT_CHAT_THREAD_ID
+
+
+def find_thread_summary(threads: list[dict[str, Any]], thread_id: Optional[str]) -> Optional[dict[str, Any]]:
+    normalized_thread_id = normalize_chat_thread_id(thread_id)
+    for thread in threads:
+        if thread["id"] == normalized_thread_id:
+            return thread
+    return None
+
+
 def response_requires_document_retry(response_text: str) -> bool:
     normalized = (response_text or "").strip().lower()
     if not normalized:
@@ -1165,7 +1202,9 @@ async def chat_page(
         "model_key": model_info["key"],
         "model_description": model_info["description"],
     }
-    resolved_thread_id = normalize_chat_thread_id(thread_id)
+    chat_store = request.app.state.chat_store
+    threads = await load_thread_summaries(chat_store, current_user["username"])
+    resolved_thread_id = resolve_active_thread_id(thread_id, threads)
     history = await request.app.state.chat_store.get_history(current_user["username"], thread_id=resolved_thread_id)
     messages = prepare_messages(history)
     return templates.TemplateResponse(
@@ -1180,6 +1219,7 @@ async def chat_page(
             "current_user": current_user,
             "is_authenticated": True,
             "thread_id": resolved_thread_id,
+            "threads": threads,
         },
     )
 
@@ -1207,6 +1247,60 @@ async def get_available_models(request: Request, current_user: Dict[str, Any] = 
         for key, model_info in get_allowed_models_for_user(current_user, live_models).items()
     ]
     return JSONResponse(models)
+
+
+@app.get("/api/threads")
+async def get_chat_threads(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_required),
+):
+    threads = await load_thread_summaries(request.app.state.chat_store, current_user["username"])
+    active_thread_id = resolve_active_thread_id(request.query_params.get("thread_id"), threads)
+    return JSONResponse({"threads": threads, "active_thread_id": active_thread_id})
+
+
+@app.post("/api/threads")
+async def create_chat_thread(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_required),
+):
+    enforce_csrf(request)
+    chat_store = request.app.state.chat_store
+    created_thread_id = await chat_store.create_thread(
+        current_user["username"],
+        thread_id=f"thread-{uuid.uuid4().hex}",
+    )
+    threads = await load_thread_summaries(chat_store, current_user["username"])
+    thread = find_thread_summary(threads, created_thread_id)
+    return JSONResponse(
+        {
+            "thread": thread,
+            "threads": threads,
+            "active_thread_id": created_thread_id,
+        }
+    )
+
+
+@app.get("/api/threads/{thread_id}/messages")
+async def get_chat_thread_messages(
+    thread_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_required),
+):
+    chat_store = request.app.state.chat_store
+    threads = await load_thread_summaries(chat_store, current_user["username"])
+    thread = find_thread_summary(threads, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    history = await chat_store.get_history(current_user["username"], thread_id=thread["id"])
+    return JSONResponse(
+        {
+            "thread": thread,
+            "messages": prepare_messages(history),
+            "thread_id": thread["id"],
+        }
+    )
 
 
 @app.post("/api/switch-model")

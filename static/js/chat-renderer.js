@@ -78,7 +78,7 @@ export class ChatRenderer {
             const meta = createElement(
                 "span",
                 "thread-meta",
-                thread.id === liveThreadId ? "Активный серверный контекст" : `Снимок • ${formatTimestamp(thread.updatedAt)}`,
+                thread.id === liveThreadId ? "Активный серверный контекст" : `Серверный диалог • ${formatTimestamp(thread.updatedAt)}`,
             );
 
             button.append(title, meta);

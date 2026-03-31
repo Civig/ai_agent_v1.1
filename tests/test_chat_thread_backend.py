@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -142,6 +143,10 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
             [thread["thread_id"] for thread in await store.list_threads("alice")],
             ["thread-b", "thread-a"],
         )
+        self.assertEqual(
+            [thread["message_count"] for thread in await store.list_threads("alice")],
+            [1, 1],
+        )
 
     async def test_chat_page_bootstraps_file_chat_history_for_requested_thread_only(self):
         store = AsyncChatStore("redis://test")
@@ -254,7 +259,7 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
             [DEFAULT_CHAT_THREAD_ID],
         )
 
-    async def test_clear_history_removes_only_requested_thread_from_registry(self):
+    async def test_clear_history_keeps_requested_thread_in_registry_by_default(self):
         store = AsyncChatStore("redis://test")
         store.redis = FakeRedis()
         await store.append_message("alice", "user", "thread-a-1", thread_id="thread-a")
@@ -268,6 +273,20 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
             await store.get_history("alice", thread_id="thread-b"),
             [{"role": "user", "content": "thread-b-1"}],
         )
+        self.assertCountEqual(
+            [thread["thread_id"] for thread in await store.list_threads("alice")],
+            ["thread-a", "thread-b"],
+        )
+
+    async def test_clear_history_can_remove_thread_from_registry_when_requested(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        await store.append_message("alice", "user", "thread-a-1", thread_id="thread-a")
+        await store.append_message("alice", "user", "thread-b-1", thread_id="thread-b")
+
+        await store.clear_history("alice", thread_id="thread-a", preserve_thread=False)
+
+        self.assertEqual(await store.get_history("alice", thread_id="thread-a"), [])
         self.assertEqual(
             [thread["thread_id"] for thread in await store.list_threads("alice")],
             ["thread-b"],
@@ -342,6 +361,12 @@ class ChatThreadBackendContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_page_bootstraps_requested_thread_history(self):
         chat_store = type("ChatStore", (), {})()
+        chat_store.list_threads = AsyncMock(
+            return_value=[
+                {"thread_id": "thread-page", "updated_at": 10, "title": "Тред страницы", "message_count": 1},
+                {"thread_id": "thread-else", "updated_at": 5, "title": "Другой тред", "message_count": 0},
+            ]
+        )
         chat_store.get_history = AsyncMock(return_value=[{"role": "user", "content": "thread message"}])
         gateway = type("Gateway", (), {"get_model_catalog": AsyncMock(return_value={"demo": {"name": "demo"}})})()
         request = self.build_request(query_params={"thread_id": "thread-page"}, chat_store=chat_store, gateway=gateway)
@@ -362,8 +387,37 @@ class ChatThreadBackendContractTests(unittest.IsolatedAsyncioTestCase):
             result = await app_module.chat_page(request, thread_id="thread-page", current_user={"username": "alice"})
 
         self.assertEqual(result["thread_id"], "thread-page")
+        self.assertEqual(
+            result["threads"],
+            [
+                {"id": "thread-page", "title": "Тред страницы", "updatedAt": 10000, "messageCount": 1},
+                {"id": "thread-else", "title": "Другой тред", "updatedAt": 5000, "messageCount": 0},
+            ],
+        )
         self.assertEqual(captured["name"], "chat.html")
+        chat_store.list_threads.assert_awaited_once_with("alice")
         chat_store.get_history.assert_awaited_once_with("alice", thread_id="thread-page")
+
+    async def test_chat_page_creates_real_default_thread_when_server_has_no_threads(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        gateway = type("Gateway", (), {"get_model_catalog": AsyncMock(return_value={"demo": {"name": "demo"}})})()
+        request = self.build_request(query_params={}, chat_store=store, gateway=gateway)
+
+        with patch.object(
+            app_module,
+            "resolve_runtime_model",
+            AsyncMock(return_value={"key": "demo", "name": "demo", "description": "demo"}),
+        ), patch.object(
+            app_module.templates,
+            "TemplateResponse",
+            side_effect=lambda req, name, context: context,
+        ):
+            result = await app_module.chat_page(request, current_user={"username": "alice"})
+
+        self.assertEqual(result["thread_id"], DEFAULT_CHAT_THREAD_ID)
+        self.assertEqual(result["threads"][0]["id"], DEFAULT_CHAT_THREAD_ID)
+        self.assertEqual([thread["thread_id"] for thread in await store.list_threads("alice")], [DEFAULT_CHAT_THREAD_ID])
 
     async def test_api_chat_uses_deterministic_default_thread_when_missing(self):
         gateway = type("Gateway", (), {})()
@@ -388,6 +442,60 @@ class ChatThreadBackendContractTests(unittest.IsolatedAsyncioTestCase):
         chat_store.get_history.assert_awaited_once_with("alice", thread_id=DEFAULT_CHAT_THREAD_ID)
         chat_store.append_message.assert_awaited_once_with("alice", "user", "hello", thread_id=DEFAULT_CHAT_THREAD_ID)
         self.assertEqual(gateway.enqueue_job.await_args.kwargs["thread_id"], DEFAULT_CHAT_THREAD_ID)
+
+    async def test_api_threads_returns_backend_truth_with_active_thread(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        await store.append_message("alice", "user", "thread-a-1", thread_id="thread-a")
+        await store.create_thread("alice", thread_id="thread-empty")
+
+        request = self.build_request(query_params={"thread_id": "thread-empty"}, chat_store=store, gateway=None)
+        response = await app_module.get_chat_threads(request, current_user={"username": "alice"})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["active_thread_id"], "thread-empty")
+        self.assertCountEqual(
+            [thread["id"] for thread in payload["threads"]],
+            ["thread-a", "thread-empty"],
+        )
+
+    async def test_create_chat_thread_creates_real_server_thread_entity(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        request = self.build_request(chat_store=store, gateway=None)
+
+        with patch.object(app_module, "enforce_csrf", return_value=None):
+            response = await app_module.create_chat_thread(request, current_user={"username": "alice"})
+
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["thread"]["id"].startswith("thread-"))
+        self.assertEqual(payload["active_thread_id"], payload["thread"]["id"])
+        self.assertEqual(
+            [thread["thread_id"] for thread in await store.list_threads("alice")],
+            [payload["thread"]["id"]],
+        )
+
+    async def test_api_thread_messages_returns_requested_thread_history(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        await store.append_message("alice", "user", "thread-a-user", thread_id="thread-a")
+        await store.append_message("alice", "assistant", "thread-a-assistant", thread_id="thread-a")
+        await store.append_message("alice", "user", "thread-b-user", thread_id="thread-b")
+
+        request = self.build_request(chat_store=store, gateway=None)
+        response = await app_module.get_chat_thread_messages("thread-a", request, current_user={"username": "alice"})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["thread"]["id"], "thread-a")
+        self.assertEqual(
+            [message["content"] for message in payload["messages"]],
+            ["thread-a-user", "thread-a-assistant"],
+        )
+        self.assertEqual(payload["thread_id"], "thread-a")
 
 
 if __name__ == "__main__":

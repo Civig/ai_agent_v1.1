@@ -27,13 +27,26 @@ function normalizeMessage(message, lastUserMessageId = null) {
         attachments: Array.isArray(message.attachments)
             ? message.attachments.map(normalizeAttachment)
             : [],
-        state: message.state || (role === "assistant" ? "done" : "done"),
+        state: message.state || "done",
     };
 
     return {
         message: normalized,
         lastUserMessageId: role === "user" ? normalized.id : lastUserMessageId,
     };
+}
+
+function normalizeMessages(messages) {
+    const normalizedMessages = [];
+    let lastUserMessageId = null;
+
+    for (const rawMessage of messages || []) {
+        const normalized = normalizeMessage(rawMessage, lastUserMessageId);
+        normalizedMessages.push(normalized.message);
+        lastUserMessageId = normalized.lastUserMessageId;
+    }
+
+    return normalizedMessages;
 }
 
 function buildThreadTitle(messages) {
@@ -46,13 +59,26 @@ function buildThreadTitle(messages) {
     return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
 }
 
+function normalizeThreadSummary(thread) {
+    const normalizedId = String(thread?.id || DEFAULT_THREAD_ID).trim() || DEFAULT_THREAD_ID;
+    const normalizedUpdatedAt = Number(thread?.updatedAt || Date.now());
+    return {
+        id: normalizedId,
+        title: String(thread?.title || "Новый чат").trim() || "Новый чат",
+        updatedAt: Number.isFinite(normalizedUpdatedAt) && normalizedUpdatedAt > 0
+            ? normalizedUpdatedAt
+            : Date.now(),
+        messageCount: Math.max(0, Number(thread?.messageCount || 0)),
+    };
+}
+
 export class ThreadStore {
-    constructor({ initialMessages = [], initialThreadId = DEFAULT_THREAD_ID } = {}) {
+    constructor({ initialThreads = [], initialMessages = [], initialThreadId = DEFAULT_THREAD_ID } = {}) {
         this.listeners = new Set();
         this.threads = [];
         this.activeThreadId = null;
         this.liveThreadId = null;
-        this.bootstrap(initialMessages, initialThreadId);
+        this.bootstrap(initialThreads, initialMessages, initialThreadId);
     }
 
     subscribe(listener) {
@@ -60,25 +86,18 @@ export class ThreadStore {
         return () => this.listeners.delete(listener);
     }
 
-    bootstrap(initialMessages, initialThreadId = DEFAULT_THREAD_ID) {
-        const normalizedMessages = [];
-        let lastUserMessageId = null;
+    bootstrap(initialThreads = [], initialMessages = [], initialThreadId = DEFAULT_THREAD_ID) {
+        const normalizedThreads = Array.isArray(initialThreads) && initialThreads.length
+            ? initialThreads.map((thread) => this.createThreadRecord(thread))
+            : [this.createThreadRecord({ id: initialThreadId || DEFAULT_THREAD_ID })];
+        const resolvedThreadId = this.resolveThreadId(initialThreadId, normalizedThreads);
+        const resolvedMessages = normalizeMessages(initialMessages);
 
-        for (const rawMessage of initialMessages) {
-            const normalized = normalizeMessage(rawMessage, lastUserMessageId);
-            normalizedMessages.push(normalized.message);
-            lastUserMessageId = normalized.lastUserMessageId;
-        }
-
-        const initialThread = this.createThreadRecord({
-            id: initialThreadId || DEFAULT_THREAD_ID,
-            mode: "live",
-            messages: normalizedMessages,
-        });
-
-        this.threads = [initialThread];
-        this.activeThreadId = initialThread.id;
-        this.liveThreadId = initialThread.id;
+        this.threads = normalizedThreads;
+        this.setThreadMessages(resolvedThreadId, resolvedMessages, { emit: false });
+        this.activeThreadId = resolvedThreadId;
+        this.liveThreadId = resolvedThreadId;
+        this.sortThreads();
     }
 
     getState() {
@@ -108,36 +127,64 @@ export class ThreadStore {
     }
 
     isReadonlyThread(threadId = this.activeThreadId) {
-        return threadId !== this.liveThreadId;
+        return !Boolean(this.findThread(threadId));
     }
 
     setActiveThread(threadId) {
-        if (!this.findThread(threadId)) {
+        const resolvedThreadId = this.resolveThreadId(threadId, this.threads);
+        if (!this.findThread(resolvedThreadId)) {
             return;
         }
-        this.activeThreadId = threadId;
+        this.activeThreadId = resolvedThreadId;
+        this.liveThreadId = resolvedThreadId;
         this.emit();
     }
 
-    startNewThread() {
-        const liveThread = this.getLiveThread();
-        if (liveThread && liveThread.messages.length === 0) {
-            this.activeThreadId = liveThread.id;
-            this.emit();
-            return liveThread;
+    replaceThreads(threads, activeThreadId = this.activeThreadId) {
+        const existingById = new Map(this.threads.map((thread) => [thread.id, thread]));
+        this.threads = (threads || []).map((threadSummary) => {
+            const normalized = normalizeThreadSummary(threadSummary);
+            const existing = existingById.get(normalized.id);
+            return this.createThreadRecord({
+                ...normalized,
+                messages: existing?.messages || [],
+            });
+        });
+        if (!this.threads.length) {
+            this.threads = [this.createThreadRecord({ id: DEFAULT_THREAD_ID })];
         }
-
-        if (liveThread) {
-            liveThread.mode = "snapshot";
-            liveThread.updatedAt = Date.now();
-        }
-
-        const thread = this.createThreadRecord({ mode: "live", messages: [] });
-        this.threads.unshift(thread);
-        this.activeThreadId = thread.id;
-        this.liveThreadId = thread.id;
+        const resolvedThreadId = this.resolveThreadId(activeThreadId, this.threads);
+        this.activeThreadId = resolvedThreadId;
+        this.liveThreadId = resolvedThreadId;
+        this.sortThreads();
         this.emit();
-        return thread;
+    }
+
+    attachServerThread(threadSummary, messages = null) {
+        const normalized = normalizeThreadSummary(threadSummary);
+        const hasServerMessages = Array.isArray(messages);
+        const normalizedMessages = hasServerMessages ? normalizeMessages(messages) : [];
+        const existing = this.findThread(normalized.id);
+
+        if (existing) {
+            existing.title = normalized.title;
+            existing.updatedAt = normalized.updatedAt;
+            existing.messageCount = normalized.messageCount;
+            if (hasServerMessages) {
+                existing.messages = normalizedMessages;
+            }
+        } else {
+            this.threads.unshift(this.createThreadRecord({
+                ...normalized,
+                messages: hasServerMessages ? normalizedMessages : [],
+            }));
+        }
+
+        this.activeThreadId = normalized.id;
+        this.liveThreadId = normalized.id;
+        this.sortThreads();
+        this.emit();
+        return this.findThread(normalized.id);
     }
 
     clearLiveThreadMessages() {
@@ -149,8 +196,28 @@ export class ThreadStore {
         liveThread.messages = [];
         liveThread.title = "Новый чат";
         liveThread.updatedAt = Date.now();
+        liveThread.messageCount = 0;
         this.activeThreadId = liveThread.id;
+        this.liveThreadId = liveThread.id;
+        this.sortThreads();
         this.emit();
+    }
+
+    setThreadMessages(threadId, messages, { emit = true } = {}) {
+        const thread = this.findThread(threadId);
+        if (!thread) {
+            return null;
+        }
+
+        thread.messages = normalizeMessages(messages);
+        thread.title = buildThreadTitle(thread.messages);
+        thread.messageCount = thread.messages.length;
+        thread.updatedAt = Date.now();
+        if (emit) {
+            this.sortThreads();
+            this.emit();
+        }
+        return thread;
     }
 
     appendUserMessage(content, attachments = []) {
@@ -172,7 +239,10 @@ export class ThreadStore {
         liveThread.messages.push(message);
         liveThread.title = buildThreadTitle(liveThread.messages);
         liveThread.updatedAt = Date.now();
+        liveThread.messageCount = liveThread.messages.length;
         this.activeThreadId = liveThread.id;
+        this.liveThreadId = liveThread.id;
+        this.sortThreads();
         this.emit();
         return message;
     }
@@ -195,7 +265,10 @@ export class ThreadStore {
 
         liveThread.messages.push(message);
         liveThread.updatedAt = Date.now();
+        liveThread.messageCount = liveThread.messages.length;
         this.activeThreadId = liveThread.id;
+        this.liveThreadId = liveThread.id;
+        this.sortThreads();
         this.emit();
         return message;
     }
@@ -210,7 +283,10 @@ export class ThreadStore {
         message.content = payload.content || "";
         message.html = payload.html || "";
         message.state = payload.state || "done";
+        thread.title = buildThreadTitle(thread.messages);
         thread.updatedAt = Date.now();
+        thread.messageCount = thread.messages.length;
+        this.sortThreads();
         this.emit();
         return message;
     }
@@ -238,15 +314,37 @@ export class ThreadStore {
         ) || null;
     }
 
-    createThreadRecord({ id = null, mode, messages }) {
+    createThreadRecord(thread) {
+        const normalized = normalizeThreadSummary(thread);
+        const messages = normalizeMessages(thread?.messages || []);
         return {
-            id: id || createId("thread"),
-            title: buildThreadTitle(messages),
-            mode,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            messages: [...messages],
+            id: normalized.id,
+            title: messages.length ? buildThreadTitle(messages) : normalized.title,
+            createdAt: Number(thread?.createdAt || normalized.updatedAt || Date.now()),
+            updatedAt: normalized.updatedAt,
+            messageCount: messages.length || normalized.messageCount,
+            messages,
         };
+    }
+
+    resolveThreadId(threadId, threads = this.threads) {
+        const normalizedThreadId = String(threadId || DEFAULT_THREAD_ID).trim() || DEFAULT_THREAD_ID;
+        if (threads.some((thread) => thread.id === normalizedThreadId)) {
+            return normalizedThreadId;
+        }
+        if (threads.length) {
+            return threads[0].id;
+        }
+        return DEFAULT_THREAD_ID;
+    }
+
+    sortThreads() {
+        this.threads.sort((left, right) => {
+            if (right.updatedAt !== left.updatedAt) {
+                return right.updatedAt - left.updatedAt;
+            }
+            return left.id.localeCompare(right.id);
+        });
     }
 
     emit() {

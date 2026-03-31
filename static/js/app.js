@@ -72,6 +72,7 @@ class CorporateAIApp {
             environmentLabel: deriveEnvironmentLabel(bootstrapData.host),
         });
         this.threadStore = new ThreadStore({
+            initialThreads: bootstrapData.threads || [],
             initialMessages: bootstrapData.messages || [],
             initialThreadId: bootstrapData.threadId || "default",
         });
@@ -145,9 +146,7 @@ class CorporateAIApp {
                 this.renderer.showNotification("Во время генерации поток нельзя переключить. Сначала остановите ответ или дождитесь завершения.", "warning");
                 return;
             }
-            this.threadStore.setActiveThread(target.dataset.threadId);
-            this.syncThreadUrl();
-            this.renderLayout();
+            this.handleThreadSelection(target.dataset.threadId);
         });
 
         this.elements.chatInner?.addEventListener("click", (event) => {
@@ -220,7 +219,7 @@ class CorporateAIApp {
 
         const attachments = promptOverride === null ? chatState.attachments : [];
         const hasAttachments = attachments.length > 0;
-        const targetThreadId = this.threadStore.liveThreadId;
+        const targetThreadId = activeThread.id;
         const userMessage = this.threadStore.appendUserMessage(prompt, attachments);
         const assistantMessage = this.threadStore.appendAssistantPlaceholder(userMessage.id);
 
@@ -397,7 +396,7 @@ class CorporateAIApp {
     async sendMessageWithFiles({ prompt, model, attachments, onJob, onToken, onResult, onDone, onError, onCancelled }) {
         const formData = new FormData();
         formData.append("message", prompt);
-        formData.append("thread_id", this.threadStore.liveThreadId || "default");
+        formData.append("thread_id", this.threadStore.activeThreadId || "default");
         if (model) {
             formData.append("model", model);
         }
@@ -430,7 +429,16 @@ class CorporateAIApp {
         }
 
         try {
-            this.threadStore.startNewThread();
+            const activeThread = this.threadStore.getActiveThread();
+            if (activeThread && activeThread.messages.length === 0) {
+                this.threadStore.setActiveThread(activeThread.id);
+            } else {
+                const payload = await this.apiClient.requestJSON("/api/threads", {
+                    method: "POST",
+                    timeout: 15000,
+                });
+                this.threadStore.replaceThreads(payload?.threads || [], payload?.active_thread_id || payload?.thread?.id || "default");
+            }
             this.chatStore.clearAttachments();
             this.chatStore.setUploadingDocuments(false);
             this.chatStore.setStatus(ChatLifecycle.IDLE, {
@@ -451,18 +459,13 @@ class CorporateAIApp {
     }
 
     async handleClearActiveThread() {
-        if (this.threadStore.isReadonlyThread()) {
-            this.renderer.showNotification("Сохранённый снимок нельзя очистить на сервере. Переключитесь на активный чат.", "warning");
-            return;
-        }
-
         try {
             await this.apiClient.requestJSON("/api/chat/clear", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ thread_id: this.threadStore.liveThreadId || "default" }),
+                body: JSON.stringify({ thread_id: this.threadStore.activeThreadId || "default" }),
                 timeout: 15000,
             });
             this.threadStore.clearLiveThreadMessages();
@@ -481,6 +484,34 @@ class CorporateAIApp {
             this.renderer.showNotification("Активный чат очищен и серверный контекст сброшен.", "info");
         } catch (error) {
             const message = error instanceof APIError ? error.message : "Не удалось очистить активный чат";
+            this.renderer.showNotification(message, "error");
+        }
+    }
+
+    async handleThreadSelection(threadId) {
+        try {
+            const payload = await this.apiClient.requestJSON(`/api/threads/${encodeURIComponent(threadId)}/messages`, {
+                method: "GET",
+                timeout: 15000,
+            });
+            if (payload?.thread) {
+                this.threadStore.attachServerThread(payload.thread, payload.messages || []);
+            } else {
+                this.threadStore.setThreadMessages(threadId, payload?.messages || []);
+                this.threadStore.setActiveThread(threadId);
+            }
+            this.chatStore.clearAttachments();
+            this.chatStore.setUploadingDocuments(false);
+            this.chatStore.setStatus(ChatLifecycle.IDLE, {
+                error: null,
+                activeJobId: null,
+                pendingUserMessageId: null,
+                pendingAssistantMessageId: null,
+            });
+            this.syncThreadUrl();
+            this.renderLayout();
+        } catch (error) {
+            const message = error instanceof APIError ? error.message : "Не удалось загрузить диалог";
             this.renderer.showNotification(message, "error");
         }
     }

@@ -573,6 +573,17 @@ class AsyncChatStore(RedisBackedComponent):
         except Exception:
             return 0
 
+    @staticmethod
+    def build_thread_title(history: list[dict[str, Any]]) -> str:
+        for message in history:
+            if message.get("role") != "user":
+                continue
+            content = " ".join((message.get("content") or "").strip().split())
+            if not content:
+                continue
+            return f"{content[:48]}..." if len(content) > 48 else content
+        return "Новый чат"
+
     async def _touch_thread_registry(self, username: str, thread_id: str, *, updated_at: int = 0) -> None:
         if self.redis is None:
             raise RuntimeError("Redis chat store is unavailable")
@@ -656,6 +667,14 @@ class AsyncChatStore(RedisBackedComponent):
             await pipeline.execute()
         await self._touch_thread_registry(username, normalized_thread_id, updated_at=message["created_at"])
 
+    async def create_thread(self, username: str, *, thread_id: Optional[str] = None) -> str:
+        if self.redis is None:
+            raise RuntimeError("Redis chat store is unavailable")
+
+        normalized_thread_id = self.normalize_thread_id(thread_id)
+        await self._touch_thread_registry(username, normalized_thread_id, updated_at=int(time.time()))
+        return normalized_thread_id
+
     async def get_history(self, username: str, *, thread_id: Optional[str] = None) -> list[dict[str, Any]]:
         if self.redis is None:
             raise RuntimeError("Redis chat store is unavailable")
@@ -673,7 +692,13 @@ class AsyncChatStore(RedisBackedComponent):
             )
         return history
 
-    async def clear_history(self, username: str, *, thread_id: Optional[str] = None) -> None:
+    async def clear_history(
+        self,
+        username: str,
+        *,
+        thread_id: Optional[str] = None,
+        preserve_thread: bool = True,
+    ) -> None:
         if self.redis is None:
             raise RuntimeError("Redis chat store is unavailable")
         normalized_thread_id = self.normalize_thread_id(thread_id)
@@ -681,6 +706,9 @@ class AsyncChatStore(RedisBackedComponent):
             await self.redis.delete(self.history_key(username, normalized_thread_id), self.legacy_history_key(username))
         else:
             await self.redis.delete(self.history_key(username, normalized_thread_id))
+        if preserve_thread:
+            await self._touch_thread_registry(username, normalized_thread_id, updated_at=int(time.time()))
+            return
         await self._remove_from_thread_registry(username, normalized_thread_id)
 
     async def list_threads(self, username: str) -> list[dict[str, Any]]:
@@ -692,7 +720,15 @@ class AsyncChatStore(RedisBackedComponent):
         threads: list[dict[str, Any]] = []
         for member, score in members:
             thread_id = member.decode("utf-8") if isinstance(member, bytes) else str(member)
-            threads.append({"thread_id": thread_id, "updated_at": int(score)})
+            history = await self.get_history(username, thread_id=thread_id)
+            threads.append(
+                {
+                    "thread_id": thread_id,
+                    "updated_at": int(score),
+                    "title": self.build_thread_title(history),
+                    "message_count": len(history),
+                }
+            )
         return threads
 
 
