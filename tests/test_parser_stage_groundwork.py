@@ -507,6 +507,38 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([payload for payload in root_payloads if payload.get("done")]), 1)
         self.assertEqual(root_payloads[-1], {"done": True, "source_job_id": child_job_id})
 
+    async def test_enqueue_child_job_once_preserves_prepared_thread_id(self):
+        gateway = self.build_gateway()
+        root_job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="summarize",
+            history=[],
+            thread_id="thread-file-a",
+            job_kind=JOB_KIND_PARSE,
+            workload_class=WORKLOAD_PARSE,
+            staging_id="staging-1",
+        )
+
+        child_job_id, created = await gateway.enqueue_child_job_once(
+            root_job_id,
+            prepared_llm_job={
+                "job_kind": JOB_KIND_FILE_CHAT,
+                "model_key": "demo-model",
+                "model_name": "demo-model",
+                "prompt": "grounded prompt",
+                "history": [],
+                "thread_id": "thread-file-a",
+                "file_chat": {"files": [{"name": "note.txt", "size": 5}]},
+                "staging_id": "staging-1",
+            },
+        )
+
+        child_job = await gateway.get_job(child_job_id)
+        self.assertTrue(created)
+        self.assertEqual(child_job["thread_id"], "thread-file-a")
+
     async def test_child_failed_synthesizes_root_failed_state(self):
         gateway = self.build_gateway()
         root_job_id = await gateway.enqueue_job(

@@ -1352,6 +1352,7 @@ class LLMGateway(RedisBackedComponent):
                     model_name=prepared_llm_job["model_name"],
                     prompt=prepared_llm_job["prompt"],
                     history=prepared_llm_job.get("history") or [],
+                    thread_id=prepared_llm_job.get("thread_id"),
                     job_kind=JOB_KIND_FILE_CHAT,
                     file_chat=prepared_llm_job.get("file_chat"),
                     workload_class=prepared_llm_job.get("workload_class") or WORKLOAD_CHAT,

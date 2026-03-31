@@ -96,6 +96,65 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([message["content"] for message in history_a], ["thread-a-1"])
         self.assertEqual([message["content"] for message in history_b], ["thread-b-1"])
 
+    async def test_chat_page_bootstraps_file_chat_history_for_requested_thread_only(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        await store.append_message("alice", "user", "Summarize\n\n[Вложения: note-a.txt]", thread_id="thread-a")
+        await store.append_message("alice", "assistant", "Ответ по документу A", thread_id="thread-a")
+        await store.append_message("alice", "user", "Summarize\n\n[Вложения: note-b.txt]", thread_id="thread-b")
+        await store.append_message("alice", "assistant", "Ответ по документу B", thread_id="thread-b")
+
+        gateway = type("Gateway", (), {"get_model_catalog": AsyncMock(return_value={"demo": {"name": "demo"}})})()
+        request = type(
+            "Req",
+            (),
+            {
+                "query_params": {"thread_id": "thread-a"},
+                "app": type(
+                    "App",
+                    (),
+                    {
+                        "state": type(
+                            "State",
+                            (),
+                            {
+                                "chat_store": store,
+                                "llm_gateway": gateway,
+                                "rate_limiter": type("Limiter", (), {"check": AsyncMock(return_value=None)})(),
+                            },
+                        )()
+                    },
+                )(),
+            },
+        )()
+
+        captured = {}
+
+        def fake_template_response(req, name, context):
+            captured["request"] = req
+            captured["name"] = name
+            captured["context"] = context
+            return context
+
+        with patch.object(
+            app_module,
+            "resolve_runtime_model",
+            AsyncMock(return_value={"key": "demo", "name": "demo", "description": "demo"}),
+        ), patch.object(
+            app_module.templates,
+            "TemplateResponse",
+            side_effect=fake_template_response,
+        ):
+            result = await app_module.chat_page(request, thread_id="thread-a", current_user={"username": "alice"})
+
+        self.assertEqual(result["thread_id"], "thread-a")
+        self.assertEqual([message["role"] for message in result["messages"]], ["user", "assistant"])
+        self.assertEqual(
+            [message["content"] for message in result["messages"]],
+            ["Summarize\n\n[Вложения: note-a.txt]", "Ответ по документу A"],
+        )
+        self.assertEqual(captured["name"], "chat.html")
+
     async def test_default_thread_reads_legacy_bucket_and_migrates_on_append(self):
         store = AsyncChatStore("redis://test")
         store.redis = FakeRedis()
