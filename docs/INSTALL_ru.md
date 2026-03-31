@@ -133,7 +133,7 @@ Compose stack реально включает:
   - `APP_PORT`
   - `LOG_LEVEL`
 
-`install.sh` пишет `.env` сам. При ручной установке нужно стартовать с `.env.example`.
+`install.sh` пишет `.env` сам. Для fresh install он сразу включает новый parser file path через `ENABLE_PARSER_STAGE=true` и `ENABLE_PARSER_PUBLIC_CUTOVER=true`. Если `.env` уже существует и в нём эти значения заданы явно, installer их сохраняет.
 
 Пример model-access mapping для пилотного AD-стенда может выглядеть так:
 
@@ -199,7 +199,7 @@ INSTALL_MODE=gpu ./install.sh
    - JWT secret
 10. проверяет, что LDAP/KDC hostnames разрешаются на хосте, если не задан явный AD IP override
 11. если SSO включён, проверяет наличие требуемого HTTP service keytab в `deploy/sso/`
-12. пишет `.env`, включая `GPU_ENABLED=true|false`, exact-match group mappings для модельных категорий и SSO-related flags
+12. пишет `.env`, включая `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, exact-match group mappings для модельных категорий и SSO-related flags
 13. генерирует `deploy/krb5.conf`
 14. при необходимости пишет installer-managed `docker-compose.override.yml`
 15. подготавливает host-side директорию для Ollama models

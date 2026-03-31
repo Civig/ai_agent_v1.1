@@ -133,7 +133,7 @@ Key environment groups include:
   - `APP_PORT`
   - `LOG_LEVEL`
 
-The installer writes `.env` for you. Manual operators should start from `.env.example`.
+The installer writes `.env` for you. On a fresh install it enables the new parser file path out of the box with `ENABLE_PARSER_STAGE=true` and `ENABLE_PARSER_PUBLIC_CUTOVER=true`. If `.env` already exists and those values are set explicitly, the installer keeps them.
 
 Model access examples for a pilot AD deployment might look like:
 
@@ -199,7 +199,7 @@ INSTALL_MODE=gpu ./install.sh
    - JWT secret
 10. validates that the LDAP/KDC hostnames resolve on the host, unless an explicit AD IP override was provided
 11. if SSO is enabled, validates that the required HTTP service keytab is present under `deploy/sso/`
-12. writes `.env`, including `GPU_ENABLED=true|false`, exact-match model access group mappings, and SSO-related flags
+12. writes `.env`, including `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, exact-match model access group mappings, and SSO-related flags
 13. writes `deploy/krb5.conf`
 14. optionally writes installer-managed `docker-compose.override.yml`
 15. ensures the host-side Ollama model directory exists

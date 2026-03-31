@@ -1373,7 +1373,7 @@ write_env_file() {
     local env_file="${ROOT_DIR}/.env"
     local backup_file=""
     local temp_file preserved_file regex
-    local gpu_enabled_value redis_url_value
+    local gpu_enabled_value redis_url_value parser_stage_value parser_public_cutover_value
     local managed_keys=(
         LDAP_SERVER LDAP_DOMAIN LDAP_BASE_DN LDAP_NETBIOS_DOMAIN
         KERBEROS_REALM KERBEROS_KDC
@@ -1382,6 +1382,7 @@ write_env_file() {
         SSO_ENABLED SSO_LOGIN_PATH SSO_SERVICE_PRINCIPAL SSO_KEYTAB_PATH
         MODEL_POLICY_DIR MODEL_ACCESS_CODING_GROUPS MODEL_ACCESS_ADMIN_GROUPS
         OLLAMA_URL DEFAULT_MODEL AUTO_START_OLLAMA GPU_ENABLED
+        ENABLE_PARSER_STAGE ENABLE_PARSER_PUBLIC_CUTOVER
         REDIS_URL REDIS_PASSWORD RATE_LIMIT_REQUESTS RATE_LIMIT_WINDOW_SECONDS
         LOGIN_RATE_LIMIT_REQUESTS LOGIN_RATE_LIMIT_WINDOW_SECONDS
         APP_HOST APP_PORT APP_RELOAD LOG_LEVEL DEBUG_LOAD_ENABLED
@@ -1392,6 +1393,10 @@ write_env_file() {
     preserved_file="$(mktemp)"
     gpu_enabled_value="$( [[ "${SELECTED_INSTALL_MODE:-cpu}" == "gpu" ]] && printf "true" || printf "false" )"
     redis_url_value="redis://:${REDIS_PASSWORD}@redis:6379/0"
+    parser_stage_value="$(get_env_value "${env_file}" "ENABLE_PARSER_STAGE" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_STAGE" || true)"
+    parser_public_cutover_value="$(get_env_value "${env_file}" "ENABLE_PARSER_PUBLIC_CUTOVER" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_PUBLIC_CUTOVER" || true)"
+    parser_stage_value="$(normalize_boolean_input "${parser_stage_value:-true}")"
+    parser_public_cutover_value="$(normalize_boolean_input "${parser_public_cutover_value:-true}")"
 
     : >"${temp_file}"
     append_env_line "${temp_file}" "LDAP_SERVER" "${LDAP_SERVER_URL}"
@@ -1422,6 +1427,8 @@ write_env_file() {
     append_env_line "${temp_file}" "DEFAULT_MODEL" "${DEFAULT_MODEL}"
     append_env_line "${temp_file}" "AUTO_START_OLLAMA" "false"
     append_env_line "${temp_file}" "GPU_ENABLED" "${gpu_enabled_value}"
+    append_env_line "${temp_file}" "ENABLE_PARSER_STAGE" "${parser_stage_value}"
+    append_env_line "${temp_file}" "ENABLE_PARSER_PUBLIC_CUTOVER" "${parser_public_cutover_value}"
     printf '\n' >>"${temp_file}"
     append_env_line "${temp_file}" "REDIS_URL" "${redis_url_value}"
     append_env_line "${temp_file}" "REDIS_PASSWORD" "${REDIS_PASSWORD}"
