@@ -172,6 +172,34 @@ services:
       retries: 3
       start_period: 30s
 
+  worker-parser:
+    build: .
+    container_name: corporate-ai-worker-parser
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      WORKER_TARGET_KIND: cpu
+      WORKER_POOL: parser
+      WORKER_SUPPORTED_WORKLOADS: parse
+      WORKER_TARGET_ID: parser-main
+      WORKER_NODE_ID: local-parser-node
+    command: ["python", "worker.py"]
+    volumes:
+      - ./deploy/krb5.conf:/etc/krb5.conf:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "python", "runtime_healthcheck.py", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   worker-gpu:
     build: .
     container_name: corporate-ai-worker-gpu

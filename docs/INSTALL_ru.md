@@ -67,6 +67,7 @@ Compose stack реально включает:
 - `worker-chat`
 - `worker-siem`
 - `worker-batch`
+- `worker-parser`
 - `redis`
 - `ollama`
 
