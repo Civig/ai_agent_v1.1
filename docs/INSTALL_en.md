@@ -71,7 +71,7 @@ The deployed Compose stack contains:
 - `redis`
 - `ollama`
 
-`app` and `worker-parser` use shared parser staging storage so parser root jobs and the parser worker see the same shared staging contract.
+`app` and `worker-parser` use shared parser staging storage so parser root jobs and the parser worker see the same shared staging contract. `install.sh` also initializes access permissions for that shared staging during a fresh deploy, so no manual `chmod` step is required after installation.
 
 Optional:
 

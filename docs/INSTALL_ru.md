@@ -71,7 +71,7 @@ Compose stack реально включает:
 - `redis`
 - `ollama`
 
-`app` и `worker-parser` используют общий parser staging storage, чтобы parser root jobs и parser worker видели один и тот же shared staging contract.
+`app` и `worker-parser` используют общий parser staging storage, чтобы parser root jobs и parser worker видели один и тот же shared staging contract. `install.sh` сам инициализирует права доступа к этому shared staging во время fresh deploy, поэтому ручной `chmod` после установки не нужен.
 
 Опционально:
 

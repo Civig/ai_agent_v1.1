@@ -1891,9 +1891,17 @@ run_auth_smoke_test() {
     print_success "Kerberos + LDAP login smoke test passed"
 }
 
+initialize_parser_staging_permissions() {
+    print_info "Initializing shared parser staging permissions"
+    docker_compose_for_install_mode run --rm --no-deps --user root --entrypoint sh app -c \
+        'mkdir -p "${PARSER_STAGING_ROOT}" && chmod 0777 "${PARSER_STAGING_ROOT}"'
+    print_success "Shared parser staging permissions initialized"
+}
+
 build_and_start_stack() {
     print_header "Docker Compose Deployment"
     docker_compose_for_install_mode build
+    initialize_parser_staging_permissions
     docker_compose_for_install_mode up -d redis ollama
     wait_for_ollama_container
     ensure_default_model_available
