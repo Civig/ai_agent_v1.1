@@ -715,6 +715,10 @@ class AsyncChatStore(RedisBackedComponent):
         if self.redis is None:
             raise RuntimeError("Redis chat store is unavailable")
 
+        await self._migrate_legacy_default_history_if_needed(
+            username,
+            self.history_key(username, DEFAULT_CHAT_THREAD_ID),
+        )
         await self._sync_thread_registry_from_existing_buckets(username)
         members = await self.redis.zrevrange(self.thread_registry_key(username), 0, -1, withscores=True)
         threads: list[dict[str, Any]] = []

@@ -201,6 +201,7 @@ Current properties:
 - the backend maintains a server-side thread registry and uses it as the source of truth for thread list bootstrap
 - the UI thread list and active-thread bootstrap are already synchronized with backend truth through `/chat`, `GET /api/threads`, `POST /api/threads`, and `GET /api/threads/{thread_id}/messages`
 - legacy `chat:{username}` remains only as a compatibility/migration bridge for the explicit `default` thread
+- the bridge is deterministic: on the first `default` thread bootstrap/read/write/list, the legacy bucket is moved into `chat:{username}:default`, the old key is deleted, and no repeated re-migration occurs
 - a session-scoped active-thread pointer plus archive/restore as platform capabilities are still not implemented
 
 The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md).

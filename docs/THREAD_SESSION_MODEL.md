@@ -373,6 +373,13 @@ Frontend не должен оставаться authoritative source of truth д
 5. Добавить недостающие thread APIs для activate/archive/restore, не ломая текущие chat/file-chat flows.
 6. Убрать остаточную зависимость от `chat:{username}` как compatibility bridge после стабилизации и миграции старых данных.
 
+Текущая runtime policy для legacy history:
+
+- legacy `chat:{username}` не является primary source of truth
+- при первом bootstrap/read/write/list для explicit `default` thread legacy bucket детерминированно переносится в `chat:{username}:default`
+- после успешного переноса legacy key удаляется сразу, а thread registry синхронизируется с `default`
+- повторные bootstrap/read операции читают уже explicit per-thread bucket и не делают repeated re-migration
+
 Критично для migration:
 
 - file-chat и parser path не должны менять свои validated queue/root/child semantics

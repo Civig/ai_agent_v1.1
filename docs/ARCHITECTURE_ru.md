@@ -201,6 +201,7 @@ Chat history сейчас хранится в Redis через `AsyncChatStore`.
 - backend ведёт server-side thread registry и использует его как источник truth для thread list bootstrap
 - UI thread list и active thread bootstrap уже синхронизируются с backend truth через `/chat`, `GET /api/threads`, `POST /api/threads` и `GET /api/threads/{thread_id}/messages`
 - legacy `chat:{username}` остаётся только как compatibility/migration bridge для explicit `default` thread
+- migration bridge детерминированный: на первом bootstrap/read/write/list для `default` thread legacy bucket переносится в `chat:{username}:default`, старый key удаляется, повторной re-migration не происходит
 - session-scoped active-thread pointer, archive и restore как отдельная platform capability пока не реализованы
 
 Целевая server-side модель thread/session для следующего implementation step отдельно зафиксирована в [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md).

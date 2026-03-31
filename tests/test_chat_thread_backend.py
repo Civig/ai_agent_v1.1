@@ -259,6 +259,40 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
             [DEFAULT_CHAT_THREAD_ID],
         )
 
+    async def test_list_threads_migrates_legacy_default_bucket_once_without_duplication(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        legacy_key = store.legacy_history_key("alice")
+        default_key = store.history_key("alice", DEFAULT_CHAT_THREAD_ID)
+        store.redis.lists[legacy_key] = [
+            '{"role":"user","content":"legacy-list-1","created_at":20}',
+            '{"role":"assistant","content":"legacy-list-2","created_at":21}',
+        ]
+
+        first_threads = await store.list_threads("alice")
+        second_threads = await store.list_threads("alice")
+
+        self.assertEqual(
+            first_threads,
+            [
+                {
+                    "thread_id": DEFAULT_CHAT_THREAD_ID,
+                    "updated_at": 21,
+                    "title": "legacy-list-1",
+                    "message_count": 2,
+                }
+            ],
+        )
+        self.assertEqual(second_threads, first_threads)
+        self.assertNotIn(legacy_key, store.redis.lists)
+        self.assertEqual(
+            store.redis.lists[default_key],
+            [
+                '{"role":"user","content":"legacy-list-1","created_at":20}',
+                '{"role":"assistant","content":"legacy-list-2","created_at":21}',
+            ],
+        )
+
     async def test_restore_chat_history_restores_only_requested_thread(self):
         store = AsyncChatStore("redis://test")
         store.redis = FakeRedis()
@@ -500,6 +534,41 @@ class ChatThreadBackendContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertCountEqual(
             [thread["id"] for thread in payload["threads"]],
             ["thread-a", "thread-empty"],
+        )
+
+    async def test_api_threads_migrates_legacy_history_before_bootstrap_truth(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        legacy_key = store.legacy_history_key("alice")
+        store.redis.lists[legacy_key] = [
+            '{"role":"user","content":"legacy-bootstrap-1","created_at":30}',
+            '{"role":"assistant","content":"legacy-bootstrap-2","created_at":31}',
+        ]
+
+        request = self.build_request(query_params={}, chat_store=store, gateway=None)
+        response = await app_module.get_chat_threads(request, current_user={"username": "alice"})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["active_thread_id"], DEFAULT_CHAT_THREAD_ID)
+        self.assertEqual(
+            payload["threads"],
+            [
+                {
+                    "id": DEFAULT_CHAT_THREAD_ID,
+                    "title": "legacy-bootstrap-1",
+                    "updatedAt": 31000,
+                    "messageCount": 2,
+                }
+            ],
+        )
+        self.assertNotIn(legacy_key, store.redis.lists)
+        self.assertEqual(
+            await store.get_history("alice", thread_id=DEFAULT_CHAT_THREAD_ID),
+            [
+                {"role": "user", "content": "legacy-bootstrap-1"},
+                {"role": "assistant", "content": "legacy-bootstrap-2"},
+            ],
         )
 
     async def test_create_chat_thread_creates_real_server_thread_entity(self):
