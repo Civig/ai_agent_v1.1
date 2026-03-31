@@ -197,6 +197,11 @@ Current properties:
 - bounded history retention
 - no separate SQL database
 - no long-term archival backend in this repository
+- the effective history primary key is still `username`
+- server-side thread list, active thread, archive, and restore are not implemented yet
+- the current browser-side thread UI is not an authoritative storage model
+
+The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md).
 
 ### Job state
 
@@ -278,6 +283,7 @@ No full metrics stack is packaged in the repository.
 ### Planned or not yet implemented
 
 - dedicated persistent database for chat history
+- server-side thread/session storage model implementation
 - HA Redis / Sentinel profile
 - packaged external monitoring stack
 - antivirus or sandbox-based file scanning
@@ -290,4 +296,5 @@ No full metrics stack is packaged in the repository.
 - [Administration and Operations](ADMIN_en.md)
 - [Troubleshooting](TROUBLESHOOTING_en.md)
 - [Security Baseline](SECURITY_en.md)
+- [Server-side thread/session model](THREAD_SESSION_MODEL.md)
 - [README.md](../README.md)

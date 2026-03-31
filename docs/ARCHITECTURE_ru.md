@@ -197,6 +197,11 @@ Chat history сейчас хранится в Redis через `AsyncChatStore`.
 - bounded history retention
 - отдельной SQL database нет
 - long-term archival backend в репозитории не реализован
+- primary key истории сейчас фактически равен `username`
+- server-side thread list, active thread, archive и restore пока не реализованы
+- текущая browser-side thread UI не является authoritative storage model
+
+Целевая server-side модель thread/session для следующего implementation step отдельно зафиксирована в [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md).
 
 ### Job state
 
@@ -278,6 +283,7 @@ Job state хранится в Redis и включает:
 ### Planned или пока не реализовано
 
 - выделенная persistent database для chat history
+- server-side thread/session storage model implementation
 - HA Redis / Sentinel profile
 - packaged external monitoring stack
 - antivirus или sandbox-based file scanning
@@ -290,4 +296,5 @@ Job state хранится в Redis и включает:
 - [Администрирование и эксплуатация](ADMIN_ru.md)
 - [Troubleshooting](TROUBLESHOOTING_ru.md)
 - [Базовый security baseline](SECURITY_ru.md)
+- [Server-side thread/session model](THREAD_SESSION_MODEL.md)
 - [README.md](../README.md)

@@ -43,6 +43,7 @@ Russian documents are the primary operator reference. English documents are kept
 - Primary document / Основной документ: [ARCHITECTURE_ru.md](ARCHITECTURE_ru.md)
 - Synced companion / Синхронизированная companion-версия: [ARCHITECTURE_en.md](ARCHITECTURE_en.md)
 - Parser-stage design and current file-chat path / Дизайн parser-stage и текущий file-chat path: [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md)
+- Server-side thread/session target model / Целевая server-side модель thread/session: [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md)
 - When to read / Когда читать: when you need the implemented system design, component boundaries, request paths, and current limitations
 - Covers / Что покрывает: current architecture, components, request flows, storage model, implemented vs planned scope
 - Does not cover / Что не покрывает: installation runbook, production rollout checklist, operator incident recovery
@@ -77,6 +78,7 @@ Russian documents are the primary operator reference. English documents are kept
 
 - [SUPPORTED_OS.md](SUPPORTED_OS.md) - canonical supported OS matrix and validation status
 - [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md) - current parser-stage architecture, design rationale, and file-chat path boundaries
+- [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md) - target server-side thread/session model, current limitations, and migration path from username-based history
 - [../PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) - repository layout reference
 - [../CHANGELOG.md](../CHANGELOG.md) - release and change history
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) - contribution workflow and coding style
