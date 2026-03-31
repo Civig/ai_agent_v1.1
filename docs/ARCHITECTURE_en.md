@@ -197,9 +197,11 @@ Current properties:
 - bounded history retention
 - no separate SQL database
 - no long-term archival backend in this repository
-- the effective history primary key is still `username`
-- server-side thread list, active thread, archive, and restore are not implemented yet
-- the current browser-side thread UI is not an authoritative storage model
+- the primary history model is already per-thread: `chat:{username}:{thread_id}`
+- the backend maintains a server-side thread registry and uses it as the source of truth for thread list bootstrap
+- the UI thread list and active-thread bootstrap are already synchronized with backend truth through `/chat`, `GET /api/threads`, `POST /api/threads`, and `GET /api/threads/{thread_id}/messages`
+- legacy `chat:{username}` remains only as a compatibility/migration bridge for the explicit `default` thread
+- a session-scoped active-thread pointer plus archive/restore as platform capabilities are still not implemented
 
 The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md).
 

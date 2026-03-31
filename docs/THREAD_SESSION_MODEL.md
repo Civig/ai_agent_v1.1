@@ -10,39 +10,42 @@
 
 ## 1. Текущее состояние
 
-Сейчас в репозитории уже есть server-side authentication/session слой, но полноценной server-side thread model ещё нет.
+Сейчас в репозитории уже есть server-side authentication/session слой, per-thread history storage и backend truth для thread bootstrap, но полноценная session/archive platform ещё не завершена.
 
 Что реально есть сейчас:
 
 - identity определяется через cookie-based JWT session и normalised `username`
-- backend хранит chat history в `AsyncChatStore` под ключом `chat:{username}`
-- обычный chat и file-chat читают history по `username`
-- file-chat и parser path используют тот же username-scoped history snapshot
+- backend хранит chat history в `AsyncChatStore` по primary key `chat:{username}:{thread_id}`
+- backend ведёт per-user thread registry и умеет `list_threads()` / `create_thread()`
+- обычный chat и file-chat уже читают и пишут history с учётом `thread_id`
+- file-chat и parser path используют тот же thread-aware history contract
 - cancel и observability тоже завязаны на `job_id` и `username`
 
 Что реально делает frontend:
 
-- `ThreadStore` хранит список тредов только в памяти браузера
-- `activeThreadId` и `liveThreadId` существуют только на клиенте
-- `startNewThread()` создаёт новый локальный thread record, а прошлый thread становится локальным snapshot
-- reload страницы не восстанавливает полный thread list; backend bootstrap'ит только один линейный history
-- `/api/chat/clear` очищает весь server-side history пользователя, а не один server-side thread
+- `ThreadStore` bootstrap'ится из backend truth, а не из локального synthetic thread list
+- `activeThreadId` живёт в browser state как текущий выбранный thread, но список диалогов и messages поднимается с backend
+- `new chat` создаёт реальный server-side thread через `POST /api/threads`
+- reload страницы поднимает backend thread list и history выбранного thread через `/chat`
+- `GET /api/threads/{thread_id}/messages` используется для server-backed thread switching
+- `POST /api/chat/clear` уже работает thread-aware и очищает только выбранный `thread_id`
 
 Итог current state:
 
 - server-side session есть
-- server-side per-user history есть
-- server-side thread list / active thread / archive / restore нет
-- frontend currently simulates threads as a UI-only layer above one server-side history stream
+- server-side per-thread history есть
+- server-side thread list / thread bootstrap truth уже есть
+- frontend больше не является primary source of truth для thread list
+- session-scoped active-thread pointer, archive и restore как platform capabilities ещё не реализованы
 
 ## 2. Главные ограничения текущей модели
 
-- `username` одновременно играет роль auth identity и surrogate key для history
-- нельзя иметь несколько независимых server-side тредов на одного пользователя
-- active thread не переживает reload как отдельная server-side сущность
+- `username` всё ещё участвует в storage namespace и ownership, хотя primary history key уже thread-aware
+- нет отдельной session-scoped server-side сущности для `active_thread_id`
+- active thread после reload определяется через backend bootstrap/query flow, а не через отдельный persisted session pointer
 - archive/restore отсутствуют как серверные операции
 - новый браузерный session того же пользователя не имеет собственного active-thread pointer
-- file-chat и parser path нельзя надёжно привязать к конкретному durable thread без перехода на thread identifiers
+- file-chat и parser path уже привязаны к конкретному durable `thread_id`, но не к полной session/thread platform
 
 ## 3. Целевая модель
 
@@ -275,6 +278,7 @@ Frontend не должен оставаться authoritative source of truth д
 ### List threads
 
 - `GET /api/threads`
+- current runtime already implements a minimal version of this endpoint for non-archived threads
 - параметры:
   - `include_archived=false` по умолчанию
 - возвращает summary list:
@@ -288,6 +292,7 @@ Frontend не должен оставаться authoritative source of truth д
 ### Create thread
 
 - `POST /api/threads`
+- current runtime already implements a minimal create-thread endpoint without archive/session semantics
 - создаёт новый empty thread или thread с initial user message
 - может сразу сделать его active для текущей session
 
@@ -299,6 +304,7 @@ Frontend не должен оставаться authoritative source of truth д
 ### Get thread messages
 
 - `GET /api/threads/{thread_id}/messages`
+- current runtime already implements this endpoint for thread-aware message bootstrap
 - пагинация определяется implementation step, но API должен поддерживать cursor/limit
 
 ### Append regular chat message
@@ -335,7 +341,8 @@ Frontend не должен оставаться authoritative source of truth д
 - существующий `POST /api/chat/clear`
 - migration target:
   - временно остаётся compatibility alias
-  - semantics меняются с "очистить весь history пользователя" на "очистить active thread текущей session"
+  - current runtime уже использует thread-aware semantics для выбранного `thread_id`
+  - future session model должна доопределить поведение, когда `thread_id` не передан и используется `session.active_thread_id`
 
 ## 11. Совместимость с текущим username-based поведением
 
@@ -359,13 +366,12 @@ Frontend не должен оставаться authoritative source of truth д
 
 Минимально безопасный migration path:
 
-1. Ввести server-side entities и identifiers без удаления текущего username-based history path.
-2. Добавить `session_id` в auth/session contract и сделать backend aware of `active_thread_id`.
-3. Добавить thread APIs для list/create/activate/archive/restore.
-4. Расширить `POST /api/chat` и `POST /api/chat_with_files` optional `thread_id`, сохранив backward compatibility при его отсутствии.
-5. На переходном этапе зеркалировать append в новую thread/message модель и в старый username-based history path.
-6. Перевести prompt assembly и terminal assistant append на thread-scoped history.
-7. После стабилизации удалить зависимость от `chat:{username}` как primary source of truth.
+1. Зафиксировать уже выполненный переход на `thread_id` в `POST /api/chat`, `POST /api/chat_with_files`, worker append и parser child flows.
+2. Зафиксировать уже выполненный переход на per-thread history storage и server-side thread registry как primary model.
+3. Зафиксировать уже выполненный backend truth bootstrap для thread list через `/chat`, `GET /api/threads`, `POST /api/threads` и `GET /api/threads/{thread_id}/messages`.
+4. Добавить `session_id` в auth/session contract и сделать backend authoritative owner of persisted `active_thread_id`.
+5. Добавить недостающие thread APIs для activate/archive/restore, не ломая текущие chat/file-chat flows.
+6. Убрать остаточную зависимость от `chat:{username}` как compatibility bridge после стабилизации и миграции старых данных.
 
 Критично для migration:
 
@@ -399,8 +405,8 @@ Frontend не должен оставаться authoritative source of truth д
 
 Следующий implementation step должен считаться корректным, если:
 
-- backend становится source of truth для thread list и active thread
-- reload не теряет active thread внутри одной session
+- backend уже остаётся source of truth для thread list; следующий шаг должен сделать его source of truth и для persisted active thread внутри session
+- reload не теряет active thread внутри одной session за счёт session-scoped persisted pointer, а не только за счёт thread-aware bootstrap
 - logout не удаляет threads пользователя
 - archive/restore работают как серверные операции
 - обычный chat и file-chat append идут в конкретный `thread_id`
