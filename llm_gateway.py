@@ -527,8 +527,24 @@ class AsyncChatStore(RedisBackedComponent):
     def legacy_history_key(self, username: str) -> str:
         return f"chat:{username}"
 
+    def thread_registry_key(self, username: str) -> str:
+        return f"chat:{username}:threads"
+
     def history_key(self, username: str, thread_id: Optional[str] = None) -> str:
         return f"chat:{username}:{self.normalize_thread_id(thread_id)}"
+
+    def _history_key_prefix(self, username: str) -> str:
+        return f"chat:{username}:"
+
+    def _extract_thread_id_from_history_key(self, username: str, key: str) -> Optional[str]:
+        normalized_key = key.decode("utf-8") if isinstance(key, bytes) else str(key)
+        prefix = self._history_key_prefix(username)
+        if not normalized_key.startswith(prefix):
+            return None
+        thread_id = normalized_key[len(prefix) :].strip()
+        if not thread_id or thread_id == "threads":
+            return None
+        return thread_id
 
     async def _decode_history_entries(self, key: str) -> list[dict[str, Any]]:
         if self.redis is None:
@@ -544,24 +560,75 @@ class AsyncChatStore(RedisBackedComponent):
                 history.append({"role": role, "content": content})
         return history[-self.max_history :]
 
-    async def _migrate_legacy_default_history_if_needed(self, username: str, thread_key: str) -> None:
+    async def _latest_history_timestamp(self, key: str) -> int:
+        if self.redis is None:
+            raise RuntimeError("Redis chat store is unavailable")
+
+        entries = await self.redis.lrange(key, -1, -1)
+        if not entries:
+            return 0
+        try:
+            payload = json.loads(entries[-1])
+            return _safe_int(payload.get("created_at"))
+        except Exception:
+            return 0
+
+    async def _touch_thread_registry(self, username: str, thread_id: str, *, updated_at: int = 0) -> None:
+        if self.redis is None:
+            raise RuntimeError("Redis chat store is unavailable")
+
+        score = float(updated_at or int(time.time()))
+        await self.redis.zadd(self.thread_registry_key(username), {self.normalize_thread_id(thread_id): score})
+
+    async def _remove_from_thread_registry(self, username: str, thread_id: str) -> None:
+        if self.redis is None:
+            raise RuntimeError("Redis chat store is unavailable")
+
+        await self.redis.zrem(self.thread_registry_key(username), self.normalize_thread_id(thread_id))
+
+    async def _sync_thread_registry_from_existing_buckets(self, username: str) -> None:
+        if self.redis is None or not hasattr(self.redis, "keys"):
+            return
+
+        pattern = f"{self._history_key_prefix(username)}*"
+        for key in await self.redis.keys(pattern):
+            thread_id = self._extract_thread_id_from_history_key(username, key)
+            if not thread_id:
+                continue
+            timestamp = await self._latest_history_timestamp(str(key.decode("utf-8") if isinstance(key, bytes) else key))
+            if timestamp <= 0:
+                continue
+            await self._touch_thread_registry(username, thread_id, updated_at=timestamp)
+
+    async def _migrate_legacy_default_history_if_needed(self, username: str, thread_key: str) -> bool:
         if self.redis is None:
             raise RuntimeError("Redis chat store is unavailable")
 
         existing_entries = await self.redis.lrange(thread_key, 0, -1)
         if existing_entries:
-            return
+            await self._touch_thread_registry(
+                username,
+                DEFAULT_CHAT_THREAD_ID,
+                updated_at=await self._latest_history_timestamp(thread_key),
+            )
+            return False
 
         legacy_key = self.legacy_history_key(username)
         legacy_entries = await self.redis.lrange(legacy_key, 0, -1)
         if not legacy_entries:
-            return
+            return False
 
         async with self.redis.pipeline(transaction=True) as pipeline:
             pipeline.rpush(thread_key, *legacy_entries)
             pipeline.ltrim(thread_key, -self.max_history, -1)
             pipeline.delete(legacy_key)
             await pipeline.execute()
+        await self._touch_thread_registry(
+            username,
+            DEFAULT_CHAT_THREAD_ID,
+            updated_at=await self._latest_history_timestamp(thread_key),
+        )
+        return True
 
     async def append_message(
         self,
@@ -587,16 +654,24 @@ class AsyncChatStore(RedisBackedComponent):
             pipeline.rpush(key, json.dumps(message, ensure_ascii=False))
             pipeline.ltrim(key, -self.max_history, -1)
             await pipeline.execute()
+        await self._touch_thread_registry(username, normalized_thread_id, updated_at=message["created_at"])
 
     async def get_history(self, username: str, *, thread_id: Optional[str] = None) -> list[dict[str, Any]]:
         if self.redis is None:
             raise RuntimeError("Redis chat store is unavailable")
 
         normalized_thread_id = self.normalize_thread_id(thread_id)
-        history = await self._decode_history_entries(self.history_key(username, normalized_thread_id))
-        if history or normalized_thread_id != DEFAULT_CHAT_THREAD_ID:
-            return history
-        return await self._decode_history_entries(self.legacy_history_key(username))
+        history_key = self.history_key(username, normalized_thread_id)
+        if normalized_thread_id == DEFAULT_CHAT_THREAD_ID:
+            await self._migrate_legacy_default_history_if_needed(username, history_key)
+        history = await self._decode_history_entries(history_key)
+        if history:
+            await self._touch_thread_registry(
+                username,
+                normalized_thread_id,
+                updated_at=await self._latest_history_timestamp(history_key),
+            )
+        return history
 
     async def clear_history(self, username: str, *, thread_id: Optional[str] = None) -> None:
         if self.redis is None:
@@ -604,8 +679,21 @@ class AsyncChatStore(RedisBackedComponent):
         normalized_thread_id = self.normalize_thread_id(thread_id)
         if normalized_thread_id == DEFAULT_CHAT_THREAD_ID:
             await self.redis.delete(self.history_key(username, normalized_thread_id), self.legacy_history_key(username))
-            return
-        await self.redis.delete(self.history_key(username, normalized_thread_id))
+        else:
+            await self.redis.delete(self.history_key(username, normalized_thread_id))
+        await self._remove_from_thread_registry(username, normalized_thread_id)
+
+    async def list_threads(self, username: str) -> list[dict[str, Any]]:
+        if self.redis is None:
+            raise RuntimeError("Redis chat store is unavailable")
+
+        await self._sync_thread_registry_from_existing_buckets(username)
+        members = await self.redis.zrevrange(self.thread_registry_key(username), 0, -1, withscores=True)
+        threads: list[dict[str, Any]] = []
+        for member, score in members:
+            thread_id = member.decode("utf-8") if isinstance(member, bytes) else str(member)
+            threads.append({"thread_id": thread_id, "updated_at": int(score)})
+        return threads
 
 
 class AsyncRateLimiter(RedisBackedComponent):

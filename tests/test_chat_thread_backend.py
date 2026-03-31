@@ -51,6 +51,7 @@ class FakePipeline:
 class FakeRedis:
     def __init__(self):
         self.lists = {}
+        self.zsets = {}
 
     def pipeline(self, transaction=True):
         return FakePipeline(self)
@@ -79,7 +80,49 @@ class FakeRedis:
             if key in self.lists:
                 removed += 1
                 del self.lists[key]
+            if key in self.zsets:
+                removed += 1
+                del self.zsets[key]
         return removed
+
+    async def zadd(self, key, mapping):
+        bucket = self.zsets.setdefault(key, {})
+        for member, score in mapping.items():
+            bucket[member] = float(score)
+        return len(mapping)
+
+    async def zrem(self, key, *members):
+        bucket = self.zsets.get(key, {})
+        removed = 0
+        for member in members:
+            if member in bucket:
+                removed += 1
+                del bucket[member]
+        return removed
+
+    async def zrevrange(self, key, start, stop, withscores=False):
+        bucket = self.zsets.get(key, {})
+        items = sorted(bucket.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        if stop == -1:
+            sliced = items[start:]
+        else:
+            sliced = items[start : stop + 1]
+        if withscores:
+            return [(member, score) for member, score in sliced]
+        return [member for member, _ in sliced]
+
+    async def keys(self, pattern):
+        if pattern.endswith("*"):
+            prefix = pattern[:-1]
+            list_keys = [key for key in self.lists if key.startswith(prefix)]
+            zset_keys = [key for key in self.zsets if key.startswith(prefix)]
+            return sorted({*list_keys, *zset_keys})
+        matches = []
+        if pattern in self.lists:
+            matches.append(pattern)
+        if pattern in self.zsets:
+            matches.append(pattern)
+        return matches
 
 
 class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
@@ -95,6 +138,10 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([message["content"] for message in history_a], ["thread-a-1"])
         self.assertEqual([message["content"] for message in history_b], ["thread-b-1"])
+        self.assertEqual(
+            [thread["thread_id"] for thread in await store.list_threads("alice")],
+            ["thread-b", "thread-a"],
+        )
 
     async def test_chat_page_bootstraps_file_chat_history_for_requested_thread_only(self):
         store = AsyncChatStore("redis://test")
@@ -171,6 +218,60 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([message["content"] for message in history_before], ["legacy-1", "legacy-2"])
         self.assertEqual([message["content"] for message in history_after], ["legacy-1", "legacy-2", "legacy-3"])
         self.assertNotIn(legacy_key, store.redis.lists)
+        self.assertEqual(
+            [thread["thread_id"] for thread in await store.list_threads("alice")],
+            [DEFAULT_CHAT_THREAD_ID],
+        )
+
+    async def test_get_history_migrates_legacy_default_bucket_before_any_new_append(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        legacy_key = store.legacy_history_key("alice")
+        store.redis.lists[legacy_key] = [
+            '{"role":"user","content":"legacy-read-1","created_at":10}',
+            '{"role":"assistant","content":"legacy-read-2","created_at":11}',
+        ]
+
+        history = await store.get_history("alice")
+
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": "legacy-read-1"},
+                {"role": "assistant", "content": "legacy-read-2"},
+            ],
+        )
+        self.assertNotIn(legacy_key, store.redis.lists)
+        self.assertEqual(
+            store.redis.lists[store.history_key("alice", DEFAULT_CHAT_THREAD_ID)],
+            [
+                '{"role":"user","content":"legacy-read-1","created_at":10}',
+                '{"role":"assistant","content":"legacy-read-2","created_at":11}',
+            ],
+        )
+        self.assertEqual(
+            [thread["thread_id"] for thread in await store.list_threads("alice")],
+            [DEFAULT_CHAT_THREAD_ID],
+        )
+
+    async def test_clear_history_removes_only_requested_thread_from_registry(self):
+        store = AsyncChatStore("redis://test")
+        store.redis = FakeRedis()
+        await store.append_message("alice", "user", "thread-a-1", thread_id="thread-a")
+        await store.append_message("alice", "assistant", "thread-a-2", thread_id="thread-a")
+        await store.append_message("alice", "user", "thread-b-1", thread_id="thread-b")
+
+        await store.clear_history("alice", thread_id="thread-a")
+
+        self.assertEqual(await store.get_history("alice", thread_id="thread-a"), [])
+        self.assertEqual(
+            await store.get_history("alice", thread_id="thread-b"),
+            [{"role": "user", "content": "thread-b-1"}],
+        )
+        self.assertEqual(
+            [thread["thread_id"] for thread in await store.list_threads("alice")],
+            ["thread-b"],
+        )
 
 
 class ChatThreadBackendContractTests(unittest.IsolatedAsyncioTestCase):
