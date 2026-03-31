@@ -71,6 +71,8 @@ The deployed Compose stack contains:
 - `redis`
 - `ollama`
 
+`app` and `worker-parser` use shared parser staging storage so parser root jobs and the parser worker see the same shared staging contract.
+
 Optional:
 
 - `worker-gpu` through the `gpu` profile
