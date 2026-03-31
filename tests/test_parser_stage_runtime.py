@@ -418,6 +418,102 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
             worker.gateway.mark_job_failed.assert_awaited_once()
             self.assertIn("Parser child enqueue failed", worker.gateway.mark_job_failed.await_args.args[1])
 
+    async def test_parser_worker_whitespace_only_documents_fail_with_controlled_message(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER
+        ), patch.object(worker_module.settings, "ENABLE_PARSER_STAGE", True), patch.object(
+            worker_module.settings, "PARSER_STAGING_ROOT", tmp
+        ):
+            upload = UploadFile(
+                filename="empty.txt",
+                file=io.BytesIO(b"   \n\t   "),
+                headers=Headers({"content-type": "text/plain"}),
+            )
+            staged = await parser_stage.stage_uploads_to_shared_root([upload], staging_root=tmp, username="alice")
+            worker = worker_module.LLMWorker()
+            worker.gateway = type("Gateway", (), {})()
+            worker.gateway.is_cancel_requested = AsyncMock(return_value=False)
+            worker.gateway.get_job = AsyncMock(
+                return_value={
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                    "prompt": "Summarize",
+                    "history": [],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                    "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                }
+            )
+            worker.gateway.get_linked_child_job_id = AsyncMock(return_value=None)
+            worker.gateway.mark_job_failed = AsyncMock(return_value=None)
+            worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
+
+            await worker.process_job(
+                {
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": staged["staging_id"],
+                    "prompt": "Summarize",
+                    "history": [],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                    "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                }
+            )
+
+            worker.gateway.mark_job_failed.assert_awaited_once()
+            self.assertIn("Не удалось извлечь текст из выбранных файлов", worker.gateway.mark_job_failed.await_args.args[1])
+
+    async def test_parser_artifact_preparation_timeout_is_distinct(self):
+        def slow_prepare(**kwargs):
+            import time
+
+            time.sleep(0.05)
+            return {"prepared_llm_job": {}, "files": [], "original_doc_chars": 0, "trimmed_doc_chars": 0}
+
+        with patch.object(worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER), patch.object(
+            worker_module.settings, "ENABLE_PARSER_STAGE", True
+        ), patch.object(worker_module.settings, "PARSER_JOB_TIMEOUT_SECONDS", 0.01), patch.object(
+            worker_module, "prepare_parser_job_artifacts", side_effect=slow_prepare
+        ):
+            worker = worker_module.LLMWorker()
+            worker.gateway = type("Gateway", (), {})()
+            worker.gateway.is_cancel_requested = AsyncMock(return_value=False)
+            worker.gateway.get_job = AsyncMock(
+                return_value={
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": "staging-1",
+                    "prompt": "Summarize",
+                    "history": [],
+                    "model_key": "demo",
+                    "model_name": "demo",
+                }
+            )
+            worker.gateway.get_linked_child_job_id = AsyncMock(return_value=None)
+            worker.gateway.mark_job_failed = AsyncMock(return_value=None)
+            worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
+
+            await worker.process_job(
+                {
+                    "id": "parse-job-1",
+                    "username": "alice",
+                    "job_kind": JOB_KIND_PARSE,
+                    "workload_class": WORKLOAD_PARSE,
+                    "staging_id": "staging-1",
+                }
+            )
+
+            worker.gateway.mark_job_failed.assert_awaited_once()
+            self.assertIn("Parser artifact preparation timed out", worker.gateway.mark_job_failed.await_args.args[1])
+
     async def test_parser_cancel_between_recheck_and_enqueue_is_cancelled_cleanly(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             worker_module.settings, "WORKER_POOL", WORKER_POOL_PARSER

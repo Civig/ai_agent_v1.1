@@ -136,11 +136,19 @@ def pdf_page_limit_exceeded_detail(page_count: int) -> str:
     return f"PDF-документ превышает лимит страниц: {page_count}. Максимум: {MAX_PDF_PAGES}"
 
 
+def pdf_parse_failed_detail() -> str:
+    return "Не удалось извлечь текст из PDF"
+
+
 def image_dimension_limit_exceeded_detail(width: int, height: int) -> str:
     return (
         f"Изображение превышает лимит размера: {width}x{height}. "
         f"Максимум: {IMAGE_OCR_MAX_DIMENSION}px"
     )
+
+
+def image_parse_failed_detail() -> str:
+    return "Не удалось извлечь текст из изображения"
 
 
 def ocr_timeout_exceeded_detail() -> str:
@@ -192,28 +200,43 @@ def extract_text_from_docx(path: Path) -> str:
 
 
 def extract_text_from_pdf(path: Path) -> str:
+    parse_errors: list[Exception] = []
     try:
         from pypdf import PdfReader  # type: ignore
-
-        reader = PdfReader(str(path))
-        page_count = len(reader.pages)
-        if page_count > MAX_PDF_PAGES:
-            raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
-        return trim_document_content("\n".join((page.extract_text() or "") for page in reader.pages))
-    except ImportError:
+    except ImportError as exc:
+        parse_errors.append(exc)
+    else:
         try:
-            import fitz  # type: ignore
+            reader = PdfReader(str(path))
+            page_count = len(reader.pages)
+            if page_count > MAX_PDF_PAGES:
+                raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
+            return trim_document_content("\n".join((page.extract_text() or "") for page in reader.pages))
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            parse_errors.append(exc)
 
-            document = fitz.open(path)
-            try:
-                page_count = len(document)
-                if page_count > MAX_PDF_PAGES:
-                    raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
-                return trim_document_content("\n".join(document[index].get_text() for index in range(page_count)))
-            finally:
-                document.close()
-        except ImportError as exc:
-            raise RuntimeError("PDF parser unavailable on server") from exc
+    try:
+        import fitz  # type: ignore
+    except ImportError as exc:
+        if any(not isinstance(error, ImportError) for error in parse_errors):
+            raise RuntimeError(pdf_parse_failed_detail()) from parse_errors[-1]
+        raise RuntimeError("PDF parser unavailable on server") from exc
+
+    try:
+        document = fitz.open(path)
+        try:
+            page_count = len(document)
+            if page_count > MAX_PDF_PAGES:
+                raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
+            return trim_document_content("\n".join(document[index].get_text() for index in range(page_count)))
+        finally:
+            document.close()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(pdf_parse_failed_detail()) from exc
 
 
 def extract_text_from_image(path: Path) -> str:
@@ -223,16 +246,21 @@ def extract_text_from_image(path: Path) -> str:
     except ImportError as exc:
         raise RuntimeError("OCR parser unavailable on server") from exc
 
-    with Image.open(path) as image:
-        width, height = image.size
-        if max(width, height) > IMAGE_OCR_MAX_DIMENSION:
-            raise RuntimeError(image_dimension_limit_exceeded_detail(width, height))
-        try:
-            return trim_document_content(pytesseract.image_to_string(image, timeout=IMAGE_OCR_TIMEOUT_SECONDS))
-        except RuntimeError as exc:
-            if "timeout" in str(exc).lower():
-                raise RuntimeError(ocr_timeout_exceeded_detail()) from exc
-            raise
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            if max(width, height) > IMAGE_OCR_MAX_DIMENSION:
+                raise RuntimeError(image_dimension_limit_exceeded_detail(width, height))
+            try:
+                return trim_document_content(pytesseract.image_to_string(image, timeout=IMAGE_OCR_TIMEOUT_SECONDS))
+            except RuntimeError as exc:
+                if "timeout" in str(exc).lower():
+                    raise RuntimeError(ocr_timeout_exceeded_detail()) from exc
+                raise RuntimeError(image_parse_failed_detail()) from exc
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(image_parse_failed_detail()) from exc
 
 
 def parse_uploaded_file(path: Path) -> str:

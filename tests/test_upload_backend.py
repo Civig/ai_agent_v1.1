@@ -91,6 +91,18 @@ class UploadBackendTests(unittest.TestCase):
         self.assertIn("Пользователь не уточнил задачу", prompt)
         self.assertIn("Если запрос пустой или неясный", prompt)
 
+    def test_build_document_prompt_rejects_whitespace_only_documents(self):
+        with self.assertRaises(ValueError) as error:
+            build_document_prompt(
+                "Сделай summary",
+                [
+                    {"name": "empty.txt", "content": ""},
+                    {"name": "spaces.txt", "content": "   \n\t   "},
+                ],
+            )
+
+        self.assertEqual(str(error.exception), "Не удалось извлечь текст из выбранных файлов")
+
     def test_response_requires_document_retry_detects_inaccessible_file_phrases(self):
         self.assertTrue(response_requires_document_retry("Я не имею доступа к файлам и не могу прочитать документ."))
         self.assertTrue(response_requires_document_retry(""))
@@ -396,6 +408,48 @@ class UploadBackendTests(unittest.TestCase):
 
         self.assertEqual(str(error.exception), "PDF parser unavailable on server")
 
+    def test_extract_text_from_pdf_maps_malformed_payload_to_controlled_error_with_pypdf(self):
+        class FakePdfReader:
+            def __init__(self, path):
+                raise ValueError("broken pdf payload")
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pypdf":
+                return types.SimpleNamespace(PdfReader=FakePdfReader)
+            if name == "fitz":
+                return types.SimpleNamespace(open=lambda path: (_ for _ in ()).throw(ValueError("garbage pdf")))
+            return original_import(name, globals, locals, fromlist, level)
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            handle.write(b"not-a-real-pdf")
+            handle.flush()
+            with mock.patch("builtins.__import__", side_effect=fake_import):
+                with self.assertRaises(RuntimeError) as error:
+                    extract_text_from_pdf(Path(handle.name))
+
+        self.assertEqual(str(error.exception), "Не удалось извлечь текст из PDF")
+
+    def test_extract_text_from_pdf_maps_malformed_payload_to_controlled_error_with_fitz(self):
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pypdf":
+                raise ImportError("pypdf unavailable")
+            if name == "fitz":
+                return types.SimpleNamespace(open=lambda path: (_ for _ in ()).throw(ValueError("garbage pdf")))
+            return original_import(name, globals, locals, fromlist, level)
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            handle.write(b"still-not-a-real-pdf")
+            handle.flush()
+            with mock.patch("builtins.__import__", side_effect=fake_import):
+                with self.assertRaises(RuntimeError) as error:
+                    extract_text_from_pdf(Path(handle.name))
+
+        self.assertEqual(str(error.exception), "Не удалось извлечь текст из PDF")
+
     def test_extract_text_from_image_passes_timeout_to_ocr(self):
         calls = {}
 
@@ -484,6 +538,26 @@ class UploadBackendTests(unittest.TestCase):
                 extract_text_from_image(Path("/tmp/fake.png"))
 
         self.assertIn(str(IMAGE_OCR_TIMEOUT_SECONDS).rstrip("0").rstrip("."), str(error.exception))
+
+    def test_extract_text_from_image_maps_invalid_payload_to_controlled_error(self):
+        def fake_open(path):
+            raise OSError("cannot identify image file")
+
+        fake_image_module = types.SimpleNamespace(open=fake_open)
+        fake_pytesseract = types.SimpleNamespace(image_to_string=lambda image, *, timeout: "ocr text")
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "pytesseract": fake_pytesseract,
+                "PIL": types.SimpleNamespace(Image=fake_image_module),
+                "PIL.Image": fake_image_module,
+            },
+        ):
+            with self.assertRaises(RuntimeError) as error:
+                extract_text_from_image(Path("/tmp/fake.png"))
+
+        self.assertEqual(str(error.exception), "Не удалось извлечь текст из изображения")
 
 
 if __name__ == "__main__":
