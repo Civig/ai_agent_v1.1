@@ -224,20 +224,21 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
             worker.gateway.mark_job_failed = AsyncMock(return_value=None)
             worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
 
-            await worker.process_job(
-                {
-                    "id": "parse-job-1",
-                    "username": "alice",
-                    "job_kind": JOB_KIND_PARSE,
-                    "workload_class": WORKLOAD_PARSE,
-                    "staging_id": staged["staging_id"],
-                    "prompt": "Summarize",
-                    "history": [{"role": "user", "content": "Earlier"}],
-                    "model_key": "demo",
-                    "model_name": "demo",
-                    "parser_metadata": {"phase": "staged", "files": staged["files"]},
-                }
-            )
+            with self.assertLogs("llm_worker", level="INFO") as captured:
+                await worker.process_job(
+                    {
+                        "id": "parse-job-1",
+                        "username": "alice",
+                        "job_kind": JOB_KIND_PARSE,
+                        "workload_class": WORKLOAD_PARSE,
+                        "staging_id": staged["staging_id"],
+                        "prompt": "Summarize",
+                        "history": [{"role": "user", "content": "Earlier"}],
+                        "model_key": "demo",
+                        "model_name": "demo",
+                        "parser_metadata": {"phase": "staged", "files": staged["files"]},
+                    }
+                )
             worker.gateway.mark_job_failed.assert_not_awaited()
             worker.gateway.mark_job_cancelled.assert_not_awaited()
             worker.gateway.mark_job_completed.assert_not_awaited()
@@ -267,8 +268,17 @@ class ParserWorkerRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(parser_payload["raw_deleted"])
             self.assertEqual(parser_payload["child_job_id"], "child-job-1")
             self.assertEqual(parser_payload["prepared_llm_job"]["job_kind"], "file_chat")
+            self.assertEqual(
+                parser_payload["prepared_llm_job"]["file_chat"]["doc_chars"],
+                saved_job["parser_metadata"]["trimmed_doc_chars"],
+            )
             self.assertIn("[Документ 1: a.txt]", parser_payload["prepared_llm_job"]["prompt"])
             self.assertIn(parser_stage.DOCUMENT_TRUNCATION_MARKER, parser_payload["prepared_llm_job"]["prompt"])
+            joined_logs = "\n".join(captured.output)
+            self.assertIn("file_parse_observability", joined_logs)
+            self.assertIn("job_kind=parse", joined_logs)
+            self.assertIn("parse_ms=", joined_logs)
+            self.assertIn("doc_chars=", joined_logs)
 
     async def test_parser_worker_reuses_existing_child_without_duplicate_enqueue(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(

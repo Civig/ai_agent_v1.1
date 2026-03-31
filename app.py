@@ -422,6 +422,7 @@ async def stage_uploads(
 def log_file_parse_observability(
     *,
     username: str,
+    job_kind: str,
     file_count: int,
     staging_ms: int,
     parse_ms: int,
@@ -430,19 +431,18 @@ def log_file_parse_observability(
     terminal_status: str,
     error_type: str,
 ) -> None:
-    log_method = logger.info if terminal_status == "success" else logger.warning
-    log_method(
-        "file_parse_observability username=%s job_kind=%s file_count=%s staging_ms=%s parse_ms=%s "
-        "original_doc_chars=%s trimmed_doc_chars=%s terminal_status=%s error_type=%s",
-        username,
-        JOB_KIND_FILE_CHAT,
-        file_count,
-        staging_ms,
-        parse_ms,
-        original_doc_chars,
-        trimmed_doc_chars,
-        terminal_status,
-        error_type,
+    parser_stage.log_file_pipeline_observability(
+        username=username,
+        job_kind=job_kind,
+        file_count=file_count,
+        receive_ms=staging_ms,
+        parse_ms=parse_ms,
+        doc_chars=trimmed_doc_chars,
+        original_doc_chars=original_doc_chars,
+        trimmed_doc_chars=trimmed_doc_chars,
+        terminal_status=terminal_status,
+        error_type=error_type,
+        target_logger=logger,
     )
 
 
@@ -450,10 +450,12 @@ def build_file_chat_job_metadata(
     *,
     retry_prompt: Optional[str],
     staged_files: list[dict[str, Any]],
+    doc_chars: int = 0,
 ) -> dict[str, Any]:
     return {
         "retry_prompt": (retry_prompt or "").strip() or None,
         "suppress_token_stream": True,
+        "doc_chars": max(0, int(doc_chars)),
         "files": [
             {
                 "name": file_info["name"],
@@ -1420,6 +1422,17 @@ async def api_chat_with_files(
                 f"{prompt or 'Пользователь не уточнил задачу'}\n\n"
                 f"[Вложения: {', '.join(file_info['name'] for file_info in staged_files)}]"
             )
+            log_file_parse_observability(
+                username=username,
+                job_kind=JOB_KIND_PARSE,
+                file_count=len(staged_files),
+                staging_ms=staging_ms,
+                parse_ms=0,
+                original_doc_chars=0,
+                trimmed_doc_chars=0,
+                terminal_status="accepted",
+                error_type=ERROR_TYPE_NONE,
+            )
             logger.info(
                 "File chat public cutover request accepted for user %s with %s files and parser root job model %s",
                 username,
@@ -1515,6 +1528,7 @@ async def api_chat_with_files(
         trimmed_doc_chars = sum(len((document.get("content") or "").strip()) for document in budgeted_documents)
         log_file_parse_observability(
             username=username,
+            job_kind=JOB_KIND_FILE_CHAT,
             file_count=len(staged_files),
             staging_ms=staging_ms,
             parse_ms=parse_ms,
@@ -1554,6 +1568,7 @@ async def api_chat_with_files(
         file_chat_metadata = build_file_chat_job_metadata(
             retry_prompt=retry_prompt,
             staged_files=staged_files,
+            doc_chars=trimmed_doc_chars,
         )
         temp_dir.cleanup()
         temp_dir = None
@@ -1656,6 +1671,7 @@ async def api_chat_with_files(
     except HTTPException:
         log_file_parse_observability(
             username=username,
+            job_kind=JOB_KIND_FILE_CHAT,
             file_count=len(staged_files) or len(files),
             staging_ms=staging_ms or elapsed_ms(staging_started),
             parse_ms=parse_ms,
@@ -1668,6 +1684,7 @@ async def api_chat_with_files(
     except ValueError as exc:
         log_file_parse_observability(
             username=username,
+            job_kind=JOB_KIND_FILE_CHAT,
             file_count=len(staged_files) or len(files),
             staging_ms=staging_ms or elapsed_ms(staging_started),
             parse_ms=parse_ms,
@@ -1680,6 +1697,7 @@ async def api_chat_with_files(
     except RuntimeError as exc:
         log_file_parse_observability(
             username=username,
+            job_kind=JOB_KIND_FILE_CHAT,
             file_count=len(staged_files) or len(files),
             staging_ms=staging_ms or elapsed_ms(staging_started),
             parse_ms=parse_ms,
@@ -1693,6 +1711,7 @@ async def api_chat_with_files(
     except Exception:
         log_file_parse_observability(
             username=username,
+            job_kind=JOB_KIND_FILE_CHAT,
             file_count=len(staged_files) or len(files),
             staging_ms=staging_ms or elapsed_ms(staging_started),
             parse_ms=parse_ms,

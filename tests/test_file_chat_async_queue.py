@@ -382,13 +382,14 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
             "response_requires_document_retry",
             side_effect=AssertionError("legacy app-side retry should not run for parser-root JSON path"),
         ):
-            response = await app_module.api_chat_with_files(
-                request,
-                message="Summarize",
-                model=None,
-                files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
-                current_user={"username": "alice", "model_key": "demo", "model": "demo"},
-            )
+            with self.assertLogs("app", level="INFO") as captured:
+                response = await app_module.api_chat_with_files(
+                    request,
+                    message="Summarize",
+                    model=None,
+                    files=[UploadFile(filename="note.txt", file=io.BytesIO(b"hello"))],
+                    current_user={"username": "alice", "model_key": "demo", "model": "demo"},
+                )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'"response":"done"', response.body)
@@ -397,6 +398,11 @@ class FileChatAsyncQueueTests(unittest.IsolatedAsyncioTestCase):
         wait_mock.assert_awaited_once_with(gateway, "root-job-1", app_module.parser_public_json_timeout_seconds())
         chat_store.append_message.assert_awaited_once()
         self.assertEqual(chat_store.append_message.await_args.args[:2], ("alice", "user"))
+        joined_logs = "\n".join(captured.output)
+        self.assertIn("file_parse_observability", joined_logs)
+        self.assertIn("job_kind=parse", joined_logs)
+        self.assertIn("receive_ms=", joined_logs)
+        self.assertIn("terminal_status=accepted", joined_logs)
 
     async def test_file_chat_json_fallback_returns_failed_payload_under_public_cutover_flag(self):
         gateway = self.build_gateway()

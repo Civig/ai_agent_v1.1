@@ -29,6 +29,7 @@ from llm_gateway import (
     ERROR_TYPE_INTERNAL,
     ERROR_TYPE_MODEL_NOT_FOUND,
     ERROR_TYPE_NONE,
+    ERROR_TYPE_PARSE,
     GENERIC_CHAT_ERROR,
     JOB_KIND_FILE_CHAT,
     JOB_KIND_PARSE,
@@ -47,7 +48,12 @@ from llm_gateway import (
     extract_job_observability_fields,
     prepare_ollama_messages_with_metrics,
 )
-from parser_stage import delete_staged_raw_files, prepare_parser_job_artifacts, write_parser_result_metadata
+from parser_stage import (
+    delete_staged_raw_files,
+    log_file_pipeline_observability,
+    prepare_parser_job_artifacts,
+    write_parser_result_metadata,
+)
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -595,6 +601,7 @@ class LLMWorker:
 
     async def _process_parser_job(self, job: Dict[str, Any]) -> None:
         job_id = job["id"]
+        parse_started_at: Optional[float] = None
         if await self.gateway.is_cancel_requested(job_id):
             await self.gateway.mark_job_cancelled(job_id, worker_id=self.worker_id)
             return
@@ -650,6 +657,7 @@ class LLMWorker:
             return
 
         try:
+            parse_started_at = time.perf_counter()
             prepared = await asyncio.wait_for(
                 asyncio.to_thread(
                     prepare_parser_job_artifacts,
@@ -684,13 +692,52 @@ class LLMWorker:
             }
             updated_job["lifecycle_stage"] = LIFECYCLE_STAGE_PARSER_PREPARED
             await self.gateway.save_job(updated_job)
+            log_file_pipeline_observability(
+                username=current_job.get("username") or job.get("username") or "unknown",
+                job_kind=JOB_KIND_PARSE,
+                file_count=len(prepared["files"]),
+                receive_ms=0,
+                parse_ms=elapsed_ms(parse_started_at),
+                doc_chars=prepared["trimmed_doc_chars"],
+                original_doc_chars=prepared["original_doc_chars"],
+                trimmed_doc_chars=prepared["trimmed_doc_chars"],
+                terminal_status="success",
+                error_type=ERROR_TYPE_NONE,
+                target_logger=logger,
+            )
         except TimeoutError:
             error_text = "Parser artifact preparation timed out"
+            log_file_pipeline_observability(
+                username=current_job.get("username") or job.get("username") or "unknown",
+                job_kind=JOB_KIND_PARSE,
+                file_count=len((current_job.get("parser_metadata") or {}).get("files") or []),
+                receive_ms=0,
+                parse_ms=elapsed_ms(parse_started_at) if parse_started_at is not None else 0,
+                doc_chars=0,
+                original_doc_chars=0,
+                trimmed_doc_chars=0,
+                terminal_status="failed",
+                error_type=classify_observability_error(error_text, phase="parse", default=ERROR_TYPE_PARSE),
+                target_logger=logger,
+            )
             logger.warning("Parser job %s failed: %s", job_id, error_text)
             await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
             return
         except Exception as exc:
             error_text = f"Parser artifact preparation failed: {str(exc) or 'unknown error'}"
+            log_file_pipeline_observability(
+                username=current_job.get("username") or job.get("username") or "unknown",
+                job_kind=JOB_KIND_PARSE,
+                file_count=len((current_job.get("parser_metadata") or {}).get("files") or []),
+                receive_ms=0,
+                parse_ms=elapsed_ms(parse_started_at) if parse_started_at is not None else 0,
+                doc_chars=0,
+                original_doc_chars=0,
+                trimmed_doc_chars=0,
+                terminal_status="failed",
+                error_type=classify_observability_error(error_text, phase="parse", default=ERROR_TYPE_PARSE),
+                target_logger=logger,
+            )
             logger.warning("Parser job %s failed: %s", job_id, error_text, exc_info=True)
             await self.gateway.mark_job_failed(job_id, error_text, worker_id=self.worker_id)
             return
@@ -870,8 +917,8 @@ class LLMWorker:
             total_job_ms = max(0, current_time_ms() - created_at_ms)
             logger.info(
                 "job_terminal_observability job_id=%s username=%s job_kind=%s workload_class=%s target_kind=%s "
-                "model_key=%s model_name=%s file_count=%s prompt_chars=%s history_messages=%s queue_wait_ms=%s "
-                "inference_ms=%s total_job_ms=%s terminal_status=%s error_type=%s",
+                "model_key=%s model_name=%s file_count=%s doc_chars=%s prompt_chars=%s history_messages=%s queue_wait_ms=%s "
+                "inference_ms=%s total_ms=%s total_job_ms=%s terminal_status=%s error_type=%s",
                 job_fields["job_id"],
                 job_fields["username"],
                 job_fields["job_kind"],
@@ -880,10 +927,12 @@ class LLMWorker:
                 job_fields["model_key"],
                 job_fields["model_name"],
                 job_fields["file_count"],
+                job_fields["doc_chars"],
                 job_fields["prompt_chars"],
                 job_fields["history_messages"],
                 queue_wait_ms,
                 inference_ms,
+                total_job_ms,
                 total_job_ms,
                 terminal_status,
                 error_type,

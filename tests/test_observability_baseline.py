@@ -1,4 +1,8 @@
+import os
 import unittest
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
+os.environ.setdefault("COOKIE_SECURE", "false")
 
 from llm_gateway import (
     JOB_KIND_FILE_CHAT,
@@ -32,7 +36,7 @@ class ObservabilityBaselineTests(unittest.TestCase):
                 "model_name": "gemma2:2b",
                 "prompt": "hello",
                 "history": [{"role": "user", "content": "hi"}],
-                "file_chat": {"files": [{"name": "a.txt"}, {"name": "b.pdf"}]},
+                "file_chat": {"files": [{"name": "a.txt"}, {"name": "b.pdf"}], "doc_chars": 800},
             }
         )
 
@@ -43,6 +47,7 @@ class ObservabilityBaselineTests(unittest.TestCase):
         self.assertEqual(fields["target_kind"], "gpu")
         self.assertEqual(fields["model_key"], "gemma2:2b")
         self.assertEqual(fields["file_count"], 2)
+        self.assertEqual(fields["doc_chars"], 800)
         self.assertEqual(fields["prompt_chars"], 5)
         self.assertEqual(fields["history_messages"], 1)
 

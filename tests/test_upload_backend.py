@@ -262,6 +262,7 @@ class UploadBackendTests(unittest.TestCase):
         with self.assertLogs("app", level="INFO") as captured:
             log_file_parse_observability(
                 username="alice",
+                job_kind="file_chat",
                 file_count=2,
                 staging_ms=15,
                 parse_ms=28,
@@ -274,9 +275,11 @@ class UploadBackendTests(unittest.TestCase):
         joined_logs = "\n".join(captured.output)
         self.assertIn("file_parse_observability", joined_logs)
         self.assertIn("username=alice", joined_logs)
+        self.assertIn("job_kind=file_chat", joined_logs)
         self.assertIn("file_count=2", joined_logs)
-        self.assertIn("staging_ms=15", joined_logs)
+        self.assertIn("receive_ms=15", joined_logs)
         self.assertIn("parse_ms=28", joined_logs)
+        self.assertIn("doc_chars=800", joined_logs)
         self.assertIn("original_doc_chars=1200", joined_logs)
         self.assertIn("trimmed_doc_chars=800", joined_logs)
 

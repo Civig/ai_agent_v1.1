@@ -143,6 +143,29 @@ def get_job_file_count(job: Dict[str, Any]) -> int:
     return len(parser_files) if isinstance(parser_files, list) else 0
 
 
+def get_job_doc_chars(job: Dict[str, Any]) -> int:
+    if not isinstance(job, dict):
+        return 0
+
+    file_chat = job.get("file_chat")
+    if isinstance(file_chat, dict):
+        trimmed = _safe_int(file_chat.get("trimmed_doc_chars"))
+        if trimmed > 0:
+            return trimmed
+        file_chat_doc_chars = _safe_int(file_chat.get("doc_chars"))
+        if file_chat_doc_chars > 0:
+            return file_chat_doc_chars
+
+    parser_metadata = job.get("parser_metadata")
+    if isinstance(parser_metadata, dict):
+        trimmed = _safe_int(parser_metadata.get("trimmed_doc_chars"))
+        if trimmed > 0:
+            return trimmed
+        return max(0, _safe_int(parser_metadata.get("original_doc_chars")))
+
+    return 0
+
+
 def extract_job_observability_fields(job: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(job, dict):
         return {
@@ -154,6 +177,7 @@ def extract_job_observability_fields(job: Dict[str, Any]) -> Dict[str, Any]:
             "model_key": "unknown",
             "model_name": "unknown",
             "file_count": 0,
+            "doc_chars": 0,
             "prompt_chars": 0,
             "history_messages": 0,
         }
@@ -171,6 +195,7 @@ def extract_job_observability_fields(job: Dict[str, Any]) -> Dict[str, Any]:
         "model_key": job.get("model_key") or job.get("model_name") or "unknown",
         "model_name": job.get("model_name") or job.get("model_key") or "unknown",
         "file_count": get_job_file_count(job),
+        "doc_chars": get_job_doc_chars(job),
         "prompt_chars": len((job.get("prompt") or "").strip()),
         "history_messages": len(job.get("history") or []),
     }
@@ -1473,8 +1498,8 @@ class LLMGateway(RedisBackedComponent):
             )
             logger.warning(
                 "job_terminal_observability job_id=%s username=%s job_kind=%s workload_class=%s target_kind=%s "
-                "model_key=%s model_name=%s file_count=%s prompt_chars=%s history_messages=%s queue_wait_ms=%s "
-                "inference_ms=%s total_job_ms=%s terminal_status=%s error_type=%s",
+                "model_key=%s model_name=%s file_count=%s doc_chars=%s prompt_chars=%s history_messages=%s queue_wait_ms=%s "
+                "inference_ms=%s total_ms=%s total_job_ms=%s terminal_status=%s error_type=%s",
                 job_fields["job_id"],
                 job_fields["username"],
                 job_fields["job_kind"],
@@ -1483,10 +1508,12 @@ class LLMGateway(RedisBackedComponent):
                 job_fields["model_key"],
                 job_fields["model_name"],
                 job_fields["file_count"],
+                job_fields["doc_chars"],
                 job_fields["prompt_chars"],
                 job_fields["history_messages"],
                 max(0, now_ms - (_safe_int(job.get("enqueued_at_ms")) or _safe_int(job.get("created_at_ms")) or now_ms)),
                 0,
+                total_job_ms,
                 total_job_ms,
                 JOB_STATUS_FAILED,
                 classify_observability_error(DEADLINE_EXCEEDED_ERROR, phase="queue", default=ERROR_TYPE_QUEUE_TIMEOUT),

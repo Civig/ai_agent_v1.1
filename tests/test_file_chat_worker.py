@@ -83,17 +83,25 @@ class FileChatWorkerTests(unittest.IsolatedAsyncioTestCase):
             "file_chat": {
                 "retry_prompt": "retry prompt",
                 "suppress_token_stream": True,
+                "doc_chars": 123,
                 "files": [{"name": "report.txt", "size": 12}],
             },
         }
 
-        await worker.process_job(job)
+        with self.assertLogs("llm_worker", level="INFO") as captured:
+            await worker.process_job(job)
 
         worker.gateway.mark_job_completed.assert_awaited_once()
         self.assertEqual(worker.gateway.mark_job_completed.await_args.args[1], "Сумма договора: 10 руб.")
         worker.gateway.emit_event.assert_any_await("job-file", {"result": "Сумма договора: 10 руб."})
         token_events = [call for call in worker.gateway.emit_event.await_args_list if call.args[1].get("token")]
         self.assertEqual(token_events, [])
+        joined_logs = "\n".join(captured.output)
+        self.assertIn("job_terminal_observability", joined_logs)
+        self.assertIn("file_count=1", joined_logs)
+        self.assertIn("doc_chars=123", joined_logs)
+        self.assertIn("inference_ms=", joined_logs)
+        self.assertIn("total_ms=", joined_logs)
 
     async def test_normal_chat_job_still_streams_tokens(self):
         worker = self.build_worker()

@@ -85,6 +85,38 @@ def log_upload_rejection(
     )
 
 
+def log_file_pipeline_observability(
+    *,
+    username: str,
+    job_kind: str,
+    file_count: int,
+    receive_ms: int,
+    parse_ms: int,
+    doc_chars: int,
+    original_doc_chars: int,
+    trimmed_doc_chars: int,
+    terminal_status: str,
+    error_type: str,
+    target_logger: Optional[logging.Logger] = None,
+) -> None:
+    active_logger = target_logger or logger
+    log_method = active_logger.warning if terminal_status == "failed" else active_logger.info
+    log_method(
+        "file_parse_observability username=%s job_kind=%s file_count=%s receive_ms=%s parse_ms=%s "
+        "doc_chars=%s original_doc_chars=%s trimmed_doc_chars=%s terminal_status=%s error_type=%s",
+        username,
+        job_kind,
+        file_count,
+        receive_ms,
+        parse_ms,
+        doc_chars,
+        original_doc_chars,
+        trimmed_doc_chars,
+        terminal_status,
+        error_type,
+    )
+
+
 def _max_size_megabytes(size_bytes: int) -> int:
     return max(1, size_bytes // (1024 * 1024))
 
@@ -344,10 +376,12 @@ def build_file_chat_job_metadata(
     *,
     retry_prompt: Optional[str],
     staged_files: list[dict[str, Any]],
+    doc_chars: int = 0,
 ) -> dict[str, Any]:
     return {
         "retry_prompt": (retry_prompt or "").strip() or None,
         "suppress_token_stream": True,
+        "doc_chars": max(0, int(doc_chars)),
         "files": [
             {
                 "name": file_info["name"],
@@ -554,7 +588,11 @@ def prepare_parser_job_artifacts(
             "model_name": model_name,
             "prompt": final_prompt,
             "history": history,
-            "file_chat": build_file_chat_job_metadata(retry_prompt=retry_prompt, staged_files=staged_files),
+            "file_chat": build_file_chat_job_metadata(
+                retry_prompt=retry_prompt,
+                staged_files=staged_files,
+                doc_chars=sum(len((document.get("content") or "").strip()) for document in budgeted_documents),
+            ),
         },
     }
 
