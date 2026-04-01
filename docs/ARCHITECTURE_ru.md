@@ -204,9 +204,10 @@ Chat history сейчас хранится в Redis через `AsyncChatStore`.
 - migration bridge детерминированный: на первом bootstrap/read/write/list для `default` thread legacy bucket переносится в `chat:{username}:default`, старый key удаляется, повторной re-migration не происходит
 - для следующего durable storage этапа выбран PostgreSQL как target persistent relational database; текущий runtime при этом всё ещё Redis-based и DB integration пока не реализована
 - ownership split для следующего storage этапа зафиксирован отдельно: Redis остаётся owner для queue/control-plane/transient state, а persistent relational DB — target durable owner для dialog/message/meta entities
+- quota direction для следующего policy/storage этапа тоже фиксируется отдельно: current rate limiting и queue admission уже есть, но они не считаются полноценной quota platform
 - session-scoped active-thread pointer, archive и restore как отдельная platform capability пока не реализованы
 
-Целевая server-side модель thread/session для следующего implementation step отдельно зафиксирована в [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), storage direction — в [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), а ownership split — в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md).
+Целевая server-side модель thread/session для следующего implementation step отдельно зафиксирована в [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), storage direction — в [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), ownership split — в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md), а quota direction — в [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md).
 
 ### Job state
 
@@ -289,6 +290,7 @@ Job state хранится в Redis и включает:
 
 - runtime integration выделенной persistent relational database для dialog/message/meta entities
 - runtime boundary между durable conversation/meta storage и Redis control plane
+- отдельный runtime quota layer с per-user/per-group enforcement
 - server-side thread/session storage model implementation
 - HA Redis / Sentinel profile
 - packaged external monitoring stack

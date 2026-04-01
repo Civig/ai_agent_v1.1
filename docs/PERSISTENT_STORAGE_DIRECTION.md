@@ -123,3 +123,5 @@
 
 - runtime storage для chat/thread/job state по-прежнему Redis-based
 - PostgreSQL выбран как target durable store, но не внедрён
+
+Отдельный design follow-up для quota direction после ownership split оформляется в [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md).

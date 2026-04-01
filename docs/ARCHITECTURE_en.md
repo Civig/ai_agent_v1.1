@@ -204,9 +204,10 @@ Current properties:
 - the bridge is deterministic: on the first `default` thread bootstrap/read/write/list, the legacy bucket is moved into `chat:{username}:default`, the old key is deleted, and no repeated re-migration occurs
 - for the next durable storage step, PostgreSQL is selected as the target persistent relational database; the current runtime still remains Redis-based and DB integration is not implemented yet
 - the ownership split for the next storage step is fixed separately: Redis remains the owner of queue/control-plane/transient state, while the persistent relational DB is the target durable owner for dialog/message/meta entities
+- the quota direction for the next policy/storage step is also defined separately: current rate limiting and queue admission already exist, but they are not treated as a full quota platform
 - a session-scoped active-thread pointer plus archive/restore as platform capabilities are still not implemented
 
-The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), the storage direction is defined in [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), and the ownership split is defined in [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md).
+The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), the storage direction is defined in [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), the ownership split is defined in [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md), and the quota direction is defined in [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md).
 
 ### Job state
 
@@ -289,6 +290,7 @@ No full metrics stack is packaged in the repository.
 
 - runtime integration of a dedicated persistent relational database for dialog/message/meta entities
 - a runtime boundary between durable conversation/meta storage and the Redis control plane
+- a dedicated runtime quota layer with per-user/per-group enforcement
 - server-side thread/session storage model implementation
 - HA Redis / Sentinel profile
 - packaged external monitoring stack

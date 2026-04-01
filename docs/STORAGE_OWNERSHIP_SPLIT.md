@@ -95,6 +95,7 @@ Redis остаётся authoritative owner для transient runtime coordination
 - `session-ish/auth state` beyond token revocation
 - attachment/blob/file object storage strategy
 - exact migration mechanics между Redis history и будущим persistent DB
+- exact quota model и runtime quota rollout
 - нужен ли временный dual-read bridge на migration phase
 - нужен ли отдельный durable store для assistant partial state
 
@@ -145,3 +146,5 @@ Redis остаётся authoritative owner для transient runtime coordination
 - target durable ownership для dialog/message/meta entities выбрана за persistent relational DB
 - Redis ownership фиксируется как control-plane / transient runtime ownership
 - actual implementation, migration и runtime integration остаются следующими шагами roadmap
+
+Следующий связанный design step для quota direction отдельно оформляется в [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md).
