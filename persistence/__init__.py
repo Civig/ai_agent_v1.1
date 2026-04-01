@@ -1,4 +1,9 @@
 from .conversation_models import ConversationMessage, ConversationThread, ConversationBase
+from .conversation_migration import (
+    migrate_thread_from_history,
+    migrate_threads_for_user,
+    normalize_history_to_snapshot,
+)
 from .conversation_store import (
     ConversationMessageRecord,
     ConversationSnapshotMessage,
@@ -24,6 +29,9 @@ __all__ = [
     "ConversationMessage",
     "ConversationMessageRecord",
     "ConversationSnapshotMessage",
+    "migrate_thread_from_history",
+    "migrate_threads_for_user",
+    "normalize_history_to_snapshot",
     "ConversationPersistenceRuntime",
     "ConversationPersistenceSettings",
     "ConversationStore",
