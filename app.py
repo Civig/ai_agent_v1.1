@@ -59,6 +59,10 @@ from llm_gateway import (
     elapsed_ms,
 )
 import parser_stage
+from persistence import (
+    close_conversation_persistence_runtime,
+    open_conversation_persistence_runtime,
+)
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -948,6 +952,8 @@ async def wait_for_terminal_job(gateway: LLMGateway, job_id: str, timeout_second
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.conversation_persistence = None
+    app.state.conversation_db_store = None
     app.state.chat_store = AsyncChatStore(settings.REDIS_URL, max_history=100)
     app.state.rate_limiter = AsyncRateLimiter(
         settings.REDIS_URL,
@@ -972,9 +978,19 @@ async def lifespan(app: FastAPI):
         await app.state.llm_gateway.set_model_catalog(startup_models)
     else:
         logger.error("No LLM models available during application startup")
+    app.state.conversation_persistence = await asyncio.to_thread(
+        open_conversation_persistence_runtime,
+        settings,
+    )
+    if app.state.conversation_persistence is not None:
+        app.state.conversation_db_store = app.state.conversation_persistence.store
     try:
         yield
     finally:
+        await asyncio.to_thread(
+            close_conversation_persistence_runtime,
+            app.state.conversation_persistence,
+        )
         await app.state.llm_gateway.close()
         await app.state.login_rate_limiter.close()
         await app.state.rate_limiter.close()

@@ -22,6 +22,11 @@ from .conversation_store import (
     ConversationStore,
     ConversationThreadRecord,
 )
+from .conversation_runtime import (
+    ConversationPersistenceCoordinator,
+    close_conversation_persistence_runtime,
+    open_conversation_persistence_runtime,
+)
 from .database import (
     ConversationPersistenceRuntime,
     ConversationPersistenceSettings,
@@ -40,10 +45,12 @@ __all__ = [
     "ConversationBase",
     "ConversationMessage",
     "ConversationMessageRecord",
+    "ConversationPersistenceCoordinator",
     "ConversationThreadParityResult",
     "ConversationThreadMigrationResult",
     "ConversationUserParityResult",
     "ConversationUserMigrationResult",
+    "close_conversation_persistence_runtime",
     "compare_all_threads_for_user",
     "compare_thread_for_user",
     "ConversationSnapshotMessage",
@@ -52,6 +59,7 @@ __all__ = [
     "migrate_thread_for_user",
     "migrate_threads_for_user",
     "normalize_history_to_snapshot",
+    "open_conversation_persistence_runtime",
     "ConversationPersistenceRuntime",
     "ConversationPersistenceSettings",
     "ConversationStore",
