@@ -1,6 +1,7 @@
 from .conversation_models import ConversationMessage, ConversationThread, ConversationBase
 from .conversation_store import (
     ConversationMessageRecord,
+    ConversationSnapshotMessage,
     ConversationStore,
     ConversationThreadRecord,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "ConversationBase",
     "ConversationMessage",
     "ConversationMessageRecord",
+    "ConversationSnapshotMessage",
     "ConversationPersistenceRuntime",
     "ConversationPersistenceSettings",
     "ConversationStore",

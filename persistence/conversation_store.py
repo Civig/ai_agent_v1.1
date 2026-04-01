@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Mapping, Optional, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +28,12 @@ class ConversationMessageRecord:
     role: str
     content: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class ConversationSnapshotMessage:
+    role: str
+    content: str
 
 
 class ConversationStore:
@@ -147,6 +153,52 @@ class ConversationStore:
             session.commit()
             return deleted_count
 
+    def import_thread_snapshot(
+        self,
+        username: str,
+        thread_id: str,
+        messages: Sequence[ConversationSnapshotMessage | Mapping[str, object]],
+    ) -> list[ConversationMessageRecord]:
+        normalized_username = self._require_non_empty(username, "username")
+        normalized_thread_id = self._require_non_empty(thread_id, "thread_id")
+        snapshot = self._normalize_snapshot_messages(messages)
+
+        with self.session_factory() as session:
+            thread = self._find_thread(session, normalized_username, normalized_thread_id)
+            if thread is None:
+                thread = ConversationThread(username=normalized_username, thread_id=normalized_thread_id)
+                session.add(thread)
+                session.flush()
+
+            existing_messages = self._load_thread_messages(session, thread.id)
+            if self._snapshot_matches_rows(snapshot, existing_messages):
+                return [self._message_record(row) for row in existing_messages]
+
+            self._replace_messages(session, thread, snapshot)
+            session.commit()
+            return [self._message_record(row) for row in self._load_thread_messages(session, thread.id)]
+
+    def replace_thread_snapshot(
+        self,
+        username: str,
+        thread_id: str,
+        messages: Sequence[ConversationSnapshotMessage | Mapping[str, object]],
+    ) -> list[ConversationMessageRecord]:
+        normalized_username = self._require_non_empty(username, "username")
+        normalized_thread_id = self._require_non_empty(thread_id, "thread_id")
+        snapshot = self._normalize_snapshot_messages(messages)
+
+        with self.session_factory() as session:
+            thread = self._find_thread(session, normalized_username, normalized_thread_id)
+            if thread is None:
+                thread = ConversationThread(username=normalized_username, thread_id=normalized_thread_id)
+                session.add(thread)
+                session.flush()
+
+            self._replace_messages(session, thread, snapshot)
+            session.commit()
+            return [self._message_record(row) for row in self._load_thread_messages(session, thread.id)]
+
     @staticmethod
     def _find_thread(session: Session, username: str, thread_id: str) -> Optional[ConversationThread]:
         if not username or not thread_id:
@@ -178,3 +230,70 @@ class ConversationStore:
             content=row.content,
             created_at=row.created_at,
         )
+
+    @staticmethod
+    def _require_non_empty(value: str, field_name: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"{field_name} must not be empty")
+        return normalized
+
+    @classmethod
+    def _normalize_snapshot_messages(
+        cls,
+        messages: Sequence[ConversationSnapshotMessage | Mapping[str, object]],
+    ) -> list[ConversationSnapshotMessage]:
+        normalized: list[ConversationSnapshotMessage] = []
+        for item in messages:
+            if isinstance(item, ConversationSnapshotMessage):
+                role = cls._require_non_empty(item.role, "role")
+                content = cls._require_non_empty(item.content, "content")
+            elif isinstance(item, Mapping):
+                role = cls._require_non_empty(str(item.get("role") or ""), "role")
+                content = cls._require_non_empty(str(item.get("content") or ""), "content")
+            else:
+                raise TypeError("snapshot messages must be mappings with role/content or ConversationSnapshotMessage")
+            normalized.append(ConversationSnapshotMessage(role=role, content=content))
+        return normalized
+
+    @staticmethod
+    def _load_thread_messages(session: Session, thread_pk: int) -> list[ConversationMessage]:
+        return session.scalars(
+            select(ConversationMessage)
+            .where(ConversationMessage.thread_pk == thread_pk)
+            .order_by(ConversationMessage.message_index.asc(), ConversationMessage.id.asc())
+        ).all()
+
+    @staticmethod
+    def _snapshot_matches_rows(
+        snapshot: Sequence[ConversationSnapshotMessage],
+        rows: Sequence[ConversationMessage],
+    ) -> bool:
+        if len(snapshot) != len(rows):
+            return False
+        return all(
+            snapshot_item.role == row.role and snapshot_item.content == row.content
+            for snapshot_item, row in zip(snapshot, rows)
+        )
+
+    @staticmethod
+    def _replace_messages(
+        session: Session,
+        thread: ConversationThread,
+        snapshot: Sequence[ConversationSnapshotMessage],
+    ) -> None:
+        existing_rows = ConversationStore._load_thread_messages(session, thread.id)
+        for row in existing_rows:
+            session.delete(row)
+        session.flush()
+
+        for index, item in enumerate(snapshot):
+            session.add(
+                ConversationMessage(
+                    thread_pk=thread.id,
+                    message_index=index,
+                    role=item.role,
+                    content=item.content,
+                )
+            )
+        thread.updated_at = func.now()
