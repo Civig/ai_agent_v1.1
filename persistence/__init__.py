@@ -4,6 +4,12 @@ from .conversation_migration import (
     migrate_threads_for_user,
     normalize_history_to_snapshot,
 )
+from .conversation_migrator import (
+    ConversationThreadMigrationResult,
+    ConversationUserMigrationResult,
+    migrate_all_threads_for_user,
+    migrate_thread_for_user,
+)
 from .conversation_store import (
     ConversationMessageRecord,
     ConversationSnapshotMessage,
@@ -28,8 +34,12 @@ __all__ = [
     "ConversationBase",
     "ConversationMessage",
     "ConversationMessageRecord",
+    "ConversationThreadMigrationResult",
+    "ConversationUserMigrationResult",
     "ConversationSnapshotMessage",
+    "migrate_all_threads_for_user",
     "migrate_thread_from_history",
+    "migrate_thread_for_user",
     "migrate_threads_for_user",
     "normalize_history_to_snapshot",
     "ConversationPersistenceRuntime",
