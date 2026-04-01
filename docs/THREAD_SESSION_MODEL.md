@@ -8,6 +8,8 @@
 - это не storage implementation plan по таблицам или Redis key layout
 - это не меняет текущий runtime behavior само по себе
 
+Связанный design choice для следующего storage-этапа отдельно зафиксирован в [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md).
+
 ## 1. Текущее состояние
 
 Сейчас в репозитории уже есть server-side authentication/session слой, per-thread history storage и backend truth для thread bootstrap, но полноценная session/archive platform ещё не завершена.
@@ -402,7 +404,7 @@ Frontend не должен оставаться authoritative source of truth д
 
 ## 14. Open Questions For The Next Step
 
-- где физически хранить thread/message records: Redis-only, SQL, или hybrid
+- physical durable store direction для dialog/message/meta entities уже выбран на `P5.1`: PostgreSQL как target persistent relational database; runtime integration пока не сделана
 - нужен ли soft-delete для messages или только archive на уровне thread
 - нужна ли server-side pagination с message windows по умолчанию
 - как именно хранить assistant partial state: durable draft или only terminal message

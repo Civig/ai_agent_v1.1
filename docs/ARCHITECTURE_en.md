@@ -202,9 +202,10 @@ Current properties:
 - the UI thread list and active-thread bootstrap are already synchronized with backend truth through `/chat`, `GET /api/threads`, `POST /api/threads`, and `GET /api/threads/{thread_id}/messages`
 - legacy `chat:{username}` remains only as a compatibility/migration bridge for the explicit `default` thread
 - the bridge is deterministic: on the first `default` thread bootstrap/read/write/list, the legacy bucket is moved into `chat:{username}:default`, the old key is deleted, and no repeated re-migration occurs
+- for the next durable storage step, PostgreSQL is selected as the target persistent relational database; the current runtime still remains Redis-based and DB integration is not implemented yet
 - a session-scoped active-thread pointer plus archive/restore as platform capabilities are still not implemented
 
-The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md).
+The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), and the storage direction is defined in [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md).
 
 ### Job state
 
@@ -285,7 +286,7 @@ No full metrics stack is packaged in the repository.
 
 ### Planned or not yet implemented
 
-- dedicated persistent database for chat history
+- runtime integration of a dedicated persistent relational database for dialog/message/meta entities
 - server-side thread/session storage model implementation
 - HA Redis / Sentinel profile
 - packaged external monitoring stack
