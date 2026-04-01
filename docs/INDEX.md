@@ -82,6 +82,7 @@ Russian documents are the primary operator reference. English documents are kept
 - [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md) - selected persistent storage direction for durable dialog/message/meta entities and explicit Redis role boundaries
 - [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md) - design-level ownership matrix for Redis control-plane state vs future persistent DB entities
 - [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md) - design-level quota matrix, entitlement vs throttling split, and future durable quota ownership
+- [QUEUE_CONCURRENCY_CONTROL_DIRECTION.md](QUEUE_CONCURRENCY_CONTROL_DIRECTION.md) - design-level queue depth, concurrency, overload, and parser-vs-chat control contract
 - [../PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) - repository layout reference
 - [../CHANGELOG.md](../CHANGELOG.md) - release and change history
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) - contribution workflow and coding style

@@ -205,9 +205,10 @@ Current properties:
 - for the next durable storage step, PostgreSQL is selected as the target persistent relational database; the current runtime still remains Redis-based and DB integration is not implemented yet
 - the ownership split for the next storage step is fixed separately: Redis remains the owner of queue/control-plane/transient state, while the persistent relational DB is the target durable owner for dialog/message/meta entities
 - the quota direction for the next policy/storage step is also defined separately: current rate limiting and queue admission already exist, but they are not treated as a full quota platform
+- the queue/concurrency control direction for the next reliability step is also fixed separately: current queue backpressure, scheduler admission, timeout/cancel/recovery, and observability already exist, but part of the control contract remains topology-derived and is only now being formalized at the docs level
 - a session-scoped active-thread pointer plus archive/restore as platform capabilities are still not implemented
 
-The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), the storage direction is defined in [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), the ownership split is defined in [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md), and the quota direction is defined in [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md).
+The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), the storage direction is defined in [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), the ownership split is defined in [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md), the quota direction is defined in [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md), and the queue/concurrency control direction is defined in [QUEUE_CONCURRENCY_CONTROL_DIRECTION.md](QUEUE_CONCURRENCY_CONTROL_DIRECTION.md).
 
 ### Job state
 

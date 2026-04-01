@@ -205,9 +205,10 @@ Chat history сейчас хранится в Redis через `AsyncChatStore`.
 - для следующего durable storage этапа выбран PostgreSQL как target persistent relational database; текущий runtime при этом всё ещё Redis-based и DB integration пока не реализована
 - ownership split для следующего storage этапа зафиксирован отдельно: Redis остаётся owner для queue/control-plane/transient state, а persistent relational DB — target durable owner для dialog/message/meta entities
 - quota direction для следующего policy/storage этапа тоже фиксируется отдельно: current rate limiting и queue admission уже есть, но они не считаются полноценной quota platform
+- queue/concurrency control direction для следующего reliability этапа тоже фиксируется отдельно: current queue backpressure, scheduler admission, timeout/cancel/recovery и observability уже есть, но часть control contract остаётся topology-derived и только сейчас formalized на docs-уровне
 - session-scoped active-thread pointer, archive и restore как отдельная platform capability пока не реализованы
 
-Целевая server-side модель thread/session для следующего implementation step отдельно зафиксирована в [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), storage direction — в [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), ownership split — в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md), а quota direction — в [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md).
+Целевая server-side модель thread/session для следующего implementation step отдельно зафиксирована в [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), storage direction — в [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), ownership split — в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md), quota direction — в [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md), а queue/concurrency control direction — в [QUEUE_CONCURRENCY_CONTROL_DIRECTION.md](QUEUE_CONCURRENCY_CONTROL_DIRECTION.md).
 
 ### Job state
 
