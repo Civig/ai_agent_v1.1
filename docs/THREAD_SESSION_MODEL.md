@@ -8,7 +8,7 @@
 - это не storage implementation plan по таблицам или Redis key layout
 - это не меняет текущий runtime behavior само по себе
 
-Связанный design choice для следующего storage-этапа отдельно зафиксирован в [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md).
+Связанный design choice для следующего storage-этапа отдельно зафиксирован в [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), а ownership split между Redis и future persistent store — в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md).
 
 ## 1. Текущее состояние
 
@@ -405,6 +405,7 @@ Frontend не должен оставаться authoritative source of truth д
 ## 14. Open Questions For The Next Step
 
 - physical durable store direction для dialog/message/meta entities уже выбран на `P5.1`: PostgreSQL как target persistent relational database; runtime integration пока не сделана
+- ownership split для durable entities vs Redis control-plane зафиксирован на `P5.2` в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md); implementation boundary всё ещё не введена
 - нужен ли soft-delete для messages или только archive на уровне thread
 - нужна ли server-side pagination с message windows по умолчанию
 - как именно хранить assistant partial state: durable draft или only terminal message

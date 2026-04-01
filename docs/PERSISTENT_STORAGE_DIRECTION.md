@@ -99,7 +99,16 @@
 - migrations framework
 - persistent runtime read/write path для dialogs
 
-## 7. Минимальный безопасный следующий implementation scope
+## 7. Ownership Split Follow-up
+
+Следующий design шаг после `P5.1` уже не должен выбирать БД заново. Он должен зафиксировать ownership split между:
+
+- Redis как control-plane / transient runtime owner
+- persistent relational DB как target durable owner для dialog/message/meta entities
+
+Этот split отдельно оформляется в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md).
+
+## 8. Минимальный безопасный следующий implementation scope
 
 После `P5.1` минимальный безопасный следующий шаг должен быть уже не про выбор направления, а про узкий groundwork для future persistent layer.
 

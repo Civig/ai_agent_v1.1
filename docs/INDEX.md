@@ -80,6 +80,7 @@ Russian documents are the primary operator reference. English documents are kept
 - [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md) - current parser-stage architecture, design rationale, and file-chat path boundaries
 - [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md) - target server-side thread/session model, current limitations, and migration path from username-based history
 - [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md) - selected persistent storage direction for durable dialog/message/meta entities and explicit Redis role boundaries
+- [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md) - design-level ownership matrix for Redis control-plane state vs future persistent DB entities
 - [../PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) - repository layout reference
 - [../CHANGELOG.md](../CHANGELOG.md) - release and change history
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) - contribution workflow and coding style
