@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     REDIS_CONNECT_RETRY_BACKOFF_SECONDS: float = 0.5
     REDIS_SENTINELS: str = ""
     REDIS_SENTINEL_MASTER: str = "mymaster"
+    PERSISTENT_DB_ENABLED: bool = False
+    PERSISTENT_DB_URL: str = ""
+    PERSISTENT_DB_ECHO: bool = False
+    PERSISTENT_DB_POOL_PRE_PING: bool = True
     RATE_LIMIT_REQUESTS: int = 20
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     LOGIN_RATE_LIMIT_REQUESTS: int = 5
@@ -233,6 +237,10 @@ class Settings(BaseSettings):
             host, _, port = raw.partition(":")
             sentinels.append((host.strip(), int(port or 26379)))
         return sentinels
+
+    @property
+    def persistent_db_url_configured(self) -> bool:
+        return bool(self.PERSISTENT_DB_URL.strip())
 
     @property
     def pinned_models(self) -> list[str]:
