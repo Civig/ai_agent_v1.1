@@ -22,6 +22,7 @@ class ConversationPersistenceGroundworkTests(unittest.TestCase):
         self.assertFalse(settings.persistent_db_url_configured)
         self.assertFalse(settings.PERSISTENT_DB_ECHO)
         self.assertTrue(settings.PERSISTENT_DB_POOL_PRE_PING)
+        self.assertFalse(settings.PERSISTENT_DB_BOOTSTRAP_SCHEMA)
 
     def test_init_from_settings_returns_none_when_persistent_db_is_disabled(self):
         settings = config_module.Settings(

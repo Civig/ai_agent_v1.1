@@ -16,6 +16,15 @@ class ConversationPersistenceRuntime:
     session_factory: sessionmaker[Session]
 
 
+@dataclass(frozen=True)
+class ConversationPersistenceSettings:
+    enabled: bool
+    database_url: str
+    echo: bool
+    pool_pre_ping: bool
+    bootstrap_schema: bool
+
+
 def create_persistent_engine(
     database_url: str,
     *,
@@ -65,21 +74,71 @@ def close_conversation_persistence(runtime: Optional[ConversationPersistenceRunt
     runtime.engine.dispose()
 
 
-def init_conversation_persistence_from_settings(
-    app_settings: object,
-    *,
-    create_schema: bool = True,
-) -> Optional[ConversationPersistenceRuntime]:
-    if not bool(getattr(app_settings, "PERSISTENT_DB_ENABLED", False)):
-        return None
-
+def resolve_conversation_persistence_settings(app_settings: object) -> ConversationPersistenceSettings:
+    enabled = bool(getattr(app_settings, "PERSISTENT_DB_ENABLED", False))
     database_url = str(getattr(app_settings, "PERSISTENT_DB_URL", "") or "").strip()
     echo = bool(getattr(app_settings, "PERSISTENT_DB_ECHO", False))
     pool_pre_ping = bool(getattr(app_settings, "PERSISTENT_DB_POOL_PRE_PING", True))
+    bootstrap_schema = bool(getattr(app_settings, "PERSISTENT_DB_BOOTSTRAP_SCHEMA", False))
 
-    return init_conversation_persistence(
-        database_url,
+    if enabled and not database_url:
+        raise ValueError("PERSISTENT_DB_URL must not be empty when persistent DB mode is enabled")
+
+    return ConversationPersistenceSettings(
+        enabled=enabled,
+        database_url=database_url,
         echo=echo,
         pool_pre_ping=pool_pre_ping,
+        bootstrap_schema=bootstrap_schema,
+    )
+
+
+def validate_conversation_persistence_settings(app_settings: object) -> ConversationPersistenceSettings:
+    return resolve_conversation_persistence_settings(app_settings)
+
+
+def open_conversation_persistence_from_settings(
+    app_settings: object,
+) -> Optional[ConversationPersistenceRuntime]:
+    resolved = resolve_conversation_persistence_settings(app_settings)
+    if not resolved.enabled:
+        return None
+
+    return init_conversation_persistence(
+        resolved.database_url,
+        echo=resolved.echo,
+        pool_pre_ping=resolved.pool_pre_ping,
+        create_schema=False,
+    )
+
+
+def bootstrap_conversation_persistence_from_settings(
+    app_settings: object,
+) -> Optional[ConversationPersistenceRuntime]:
+    resolved = resolve_conversation_persistence_settings(app_settings)
+    if not resolved.enabled or not resolved.bootstrap_schema:
+        return None
+
+    return init_conversation_persistence(
+        resolved.database_url,
+        echo=resolved.echo,
+        pool_pre_ping=resolved.pool_pre_ping,
+        create_schema=True,
+    )
+
+
+def init_conversation_persistence_from_settings(
+    app_settings: object,
+    *,
+    create_schema: bool = False,
+) -> Optional[ConversationPersistenceRuntime]:
+    resolved = resolve_conversation_persistence_settings(app_settings)
+    if not resolved.enabled:
+        return None
+
+    return init_conversation_persistence(
+        resolved.database_url,
+        echo=resolved.echo,
+        pool_pre_ping=resolved.pool_pre_ping,
         create_schema=create_schema,
     )
