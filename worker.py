@@ -55,6 +55,10 @@ from parser_stage import (
     prepare_parser_job_artifacts,
     write_parser_result_metadata,
 )
+from persistence.conversation_runtime import (
+    close_conversation_persistence_runtime,
+    open_conversation_persistence_runtime,
+)
 from persistence.conversation_write_coordinator import create_conversation_write_coordinator
 
 logging.basicConfig(
@@ -421,7 +425,22 @@ class LLMWorker:
     def __init__(self):
         self.gateway = LLMGateway(settings.REDIS_URL)
         self.chat_store = AsyncChatStore(settings.REDIS_URL, max_history=100)
-        self.conversation_writer = create_conversation_write_coordinator(self.chat_store)
+        self.conversation_persistence = None
+        self.conversation_db_store = None
+        if settings.PERSISTENT_DB_DUAL_WRITE_CONVERSATION:
+            try:
+                self.conversation_persistence = open_conversation_persistence_runtime(settings)
+            except Exception:
+                logger.exception("Worker failed to open persistent conversation runtime for dual-write; continuing Redis-only")
+            else:
+                if self.conversation_persistence is not None:
+                    self.conversation_db_store = self.conversation_persistence.store
+        self.conversation_writer = create_conversation_write_coordinator(
+            self.chat_store,
+            db_store=self.conversation_db_store,
+            dual_write_enabled=settings.PERSISTENT_DB_DUAL_WRITE_CONVERSATION,
+            logger=logger,
+        )
         self.is_parser_pool = settings.WORKER_POOL == WORKER_POOL_PARSER
         self.ollama = None if self.is_parser_pool else OllamaWorkerClient(settings.OLLAMA_URL)
         self.monitor = LocalResourceMonitor(self.ollama)
@@ -460,6 +479,10 @@ class LLMWorker:
                     await task
             if self.ollama is not None:
                 await self.ollama.close()
+            await asyncio.to_thread(
+                close_conversation_persistence_runtime,
+                self.conversation_persistence,
+            )
             await self.chat_store.close()
             await self.gateway.close()
 

@@ -231,6 +231,15 @@ def serialize_thread_summary(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_conversation_writer(app_state: Any) -> RedisConversationWriteCoordinator:
+    return create_conversation_write_coordinator(
+        app_state.chat_store,
+        db_store=getattr(app_state, "conversation_db_store", None),
+        dual_write_enabled=settings.PERSISTENT_DB_DUAL_WRITE_CONVERSATION,
+        logger=logger,
+    )
+
+
 async def load_thread_summaries(
     chat_store: AsyncChatStore,
     username: str,
@@ -1437,7 +1446,7 @@ async def chat_page(
         "model_description": model_info["description"],
     }
     chat_store = request.app.state.chat_store
-    conversation_writer = create_conversation_write_coordinator(chat_store)
+    conversation_writer = build_conversation_writer(request.app.state)
     threads = await load_thread_summaries(
         chat_store,
         current_user["username"],
@@ -1494,7 +1503,7 @@ async def get_chat_threads(
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ):
     chat_store = request.app.state.chat_store
-    conversation_writer = create_conversation_write_coordinator(chat_store)
+    conversation_writer = build_conversation_writer(request.app.state)
     redis_threads = await load_thread_summaries(
         chat_store,
         current_user["username"],
@@ -1516,7 +1525,7 @@ async def create_chat_thread(
 ):
     enforce_csrf(request)
     chat_store = request.app.state.chat_store
-    conversation_writer = create_conversation_write_coordinator(chat_store)
+    conversation_writer = build_conversation_writer(request.app.state)
     created_thread_id = await conversation_writer.ensure_thread(
         current_user["username"],
         thread_id=f"thread-{uuid.uuid4().hex}",
@@ -1543,7 +1552,7 @@ async def get_chat_thread_messages(
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ):
     chat_store = request.app.state.chat_store
-    conversation_writer = create_conversation_write_coordinator(chat_store)
+    conversation_writer = build_conversation_writer(request.app.state)
     redis_threads = await load_thread_summaries(
         chat_store,
         current_user["username"],
@@ -1692,7 +1701,7 @@ async def api_chat(request: Request, current_user: Dict[str, Any] = Depends(get_
 
     gateway: LLMGateway = request.app.state.llm_gateway
     chat_store: AsyncChatStore = request.app.state.chat_store
-    conversation_writer = create_conversation_write_coordinator(chat_store)
+    conversation_writer = build_conversation_writer(request.app.state)
     queue_pressure = await gateway.get_queue_pressure()
     if queue_pressure["queue_depth"] >= queue_pressure["threshold"]:
         return JSONResponse({"error": "Сервис перегружен", "retry_after": 5}, status_code=503)
@@ -1781,7 +1790,7 @@ async def api_chat_with_files(
 
     gateway: LLMGateway = request.app.state.llm_gateway
     chat_store: AsyncChatStore = request.app.state.chat_store
-    conversation_writer = create_conversation_write_coordinator(chat_store)
+    conversation_writer = build_conversation_writer(request.app.state)
     queue_pressure = await gateway.get_queue_pressure()
     if queue_pressure["queue_depth"] >= queue_pressure["threshold"]:
         return JSONResponse({"error": "Сервис перегружен", "retry_after": 5}, status_code=503)
@@ -2156,7 +2165,7 @@ async def clear_chat(request: Request, current_user: Dict[str, Any] = Depends(ge
             payload = ThreadScopedRequest()
         requested_thread_id = payload.thread_id
     thread_id = normalize_chat_thread_id(requested_thread_id)
-    conversation_writer = create_conversation_write_coordinator(request.app.state.chat_store)
+    conversation_writer = build_conversation_writer(request.app.state)
     await conversation_writer.clear_thread(current_user["username"], thread_id=thread_id)
     return JSONResponse({"ok": True, "thread_id": thread_id})
 
