@@ -63,6 +63,7 @@ from persistence import (
     close_conversation_persistence_runtime,
     open_conversation_persistence_runtime,
 )
+from persistence.conversation_parity import PARITY_MATCHED, compare_history_snapshot_to_store
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -786,6 +787,61 @@ def prepare_messages(messages: list[dict]) -> list[dict]:
     return prepared
 
 
+async def maybe_run_shadow_compare_for_conversation_read(
+    request: Request,
+    *,
+    username: str,
+    thread_id: str,
+    history: list[dict[str, Any]],
+) -> None:
+    if not settings.PERSISTENT_DB_SHADOW_COMPARE:
+        return
+
+    db_store = getattr(request.app.state, "conversation_db_store", None)
+    if db_store is None:
+        logger.warning(
+            "Conversation shadow compare enabled but DB store unavailable for user %s thread %s",
+            username,
+            thread_id,
+        )
+        return
+
+    try:
+        result = await asyncio.to_thread(
+            compare_history_snapshot_to_store,
+            history,
+            db_store,
+            username,
+            thread_id,
+        )
+    except Exception:
+        logger.exception(
+            "Conversation shadow compare failed for user %s thread %s",
+            username,
+            thread_id,
+        )
+        return
+
+    if result.status == PARITY_MATCHED:
+        logger.info(
+            "Conversation shadow compare matched for user %s thread %s (source=%s db=%s)",
+            username,
+            thread_id,
+            result.source_message_count,
+            result.db_message_count,
+        )
+        return
+
+    logger.warning(
+        "Conversation shadow compare %s for user %s thread %s (source=%s db=%s)",
+        result.status,
+        username,
+        thread_id,
+        result.source_message_count,
+        result.db_message_count,
+    )
+
+
 def resolve_model_identifier(
     model_identifier: Optional[str],
     allowed_models: Dict[str, Dict[str, str]],
@@ -1310,6 +1366,12 @@ async def get_chat_thread_messages(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     history = await chat_store.get_history(current_user["username"], thread_id=thread["id"])
+    await maybe_run_shadow_compare_for_conversation_read(
+        request,
+        username=current_user["username"],
+        thread_id=thread["id"],
+        history=history,
+    )
     return JSONResponse(
         {
             "thread": thread,
