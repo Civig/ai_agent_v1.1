@@ -69,6 +69,10 @@ from persistence.conversation_parity import (
     compare_history_snapshot_to_messages,
     compare_history_snapshot_to_store,
 )
+from persistence.conversation_write_coordinator import (
+    RedisConversationWriteCoordinator,
+    create_conversation_write_coordinator,
+)
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -227,12 +231,20 @@ def serialize_thread_summary(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def load_thread_summaries(chat_store: AsyncChatStore, username: str) -> list[dict[str, Any]]:
+async def load_thread_summaries(
+    chat_store: AsyncChatStore,
+    username: str,
+    *,
+    conversation_writer: Optional[RedisConversationWriteCoordinator] = None,
+) -> list[dict[str, Any]]:
     threads = [serialize_thread_summary(thread) for thread in await chat_store.list_threads(username)]
     if threads:
         return threads
 
-    await chat_store.create_thread(username, thread_id=DEFAULT_CHAT_THREAD_ID)
+    if conversation_writer is None:
+        await chat_store.create_thread(username, thread_id=DEFAULT_CHAT_THREAD_ID)
+    else:
+        await conversation_writer.ensure_thread(username, thread_id=DEFAULT_CHAT_THREAD_ID)
     return [serialize_thread_summary(thread) for thread in await chat_store.list_threads(username)]
 
 
@@ -274,23 +286,18 @@ def normalize_document_response(response_text: str) -> str:
 
 
 async def restore_chat_history(
-    chat_store: AsyncChatStore,
+    conversation_writer: RedisConversationWriteCoordinator,
     username: str,
     thread_id: str,
     history: list[dict[str, Any]],
 ) -> None:
-    await chat_store.clear_history(username, thread_id=thread_id)
-    for message in history:
-        role = message.get("role")
-        content = (message.get("content") or "").strip()
-        if role in {"user", "assistant"} and content:
-            await chat_store.append_message(username, role, content, thread_id=thread_id)
+    await conversation_writer.replace_thread_snapshot(username, thread_id, history)
 
 
 async def run_document_job(
     *,
     gateway: LLMGateway,
-    chat_store: AsyncChatStore,
+    conversation_writer: RedisConversationWriteCoordinator,
     username: str,
     thread_id: str,
     model_info: Dict[str, str],
@@ -301,7 +308,7 @@ async def run_document_job(
 ) -> tuple[str, Dict[str, Any]]:
     job_id = await enqueue_document_job(
         gateway=gateway,
-        chat_store=chat_store,
+        conversation_writer=conversation_writer,
         username=username,
         thread_id=thread_id,
         model_info=model_info,
@@ -317,7 +324,7 @@ async def run_document_job(
 async def enqueue_document_job(
     *,
     gateway: LLMGateway,
-    chat_store: AsyncChatStore,
+    conversation_writer: RedisConversationWriteCoordinator,
     username: str,
     thread_id: str,
     model_info: Dict[str, str],
@@ -337,7 +344,7 @@ async def enqueue_document_job(
         job_kind=JOB_KIND_FILE_CHAT,
         file_chat=file_chat,
     )
-    await chat_store.append_message(username, "user", history_entry, thread_id=thread_id)
+    await conversation_writer.append_message(username, "user", history_entry, thread_id=thread_id)
     return job_id
 
 
@@ -416,7 +423,7 @@ def parser_public_json_timeout_seconds() -> int:
 async def run_parser_public_job(
     *,
     gateway: LLMGateway,
-    chat_store: AsyncChatStore,
+    conversation_writer: RedisConversationWriteCoordinator,
     username: str,
     thread_id: str,
     model_info: Dict[str, str],
@@ -429,7 +436,7 @@ async def run_parser_public_job(
 ) -> tuple[str, Dict[str, Any]]:
     job_id = await enqueue_parser_public_job(
         gateway=gateway,
-        chat_store=chat_store,
+        conversation_writer=conversation_writer,
         username=username,
         thread_id=thread_id,
         model_info=model_info,
@@ -447,7 +454,7 @@ async def run_parser_public_job(
 async def enqueue_parser_public_job(
     *,
     gateway: LLMGateway,
-    chat_store: AsyncChatStore,
+    conversation_writer: RedisConversationWriteCoordinator,
     username: str,
     thread_id: str,
     model_info: Dict[str, str],
@@ -469,7 +476,7 @@ async def enqueue_parser_public_job(
         staged_files=staged_files,
         requested_model=requested_model,
     )
-    await chat_store.append_message(username, "user", history_entry, thread_id=thread_id)
+    await conversation_writer.append_message(username, "user", history_entry, thread_id=thread_id)
     return job_id
 
 
@@ -1430,7 +1437,12 @@ async def chat_page(
         "model_description": model_info["description"],
     }
     chat_store = request.app.state.chat_store
-    threads = await load_thread_summaries(chat_store, current_user["username"])
+    conversation_writer = create_conversation_write_coordinator(chat_store)
+    threads = await load_thread_summaries(
+        chat_store,
+        current_user["username"],
+        conversation_writer=conversation_writer,
+    )
     resolved_thread_id = resolve_active_thread_id(thread_id, threads)
     history = await request.app.state.chat_store.get_history(current_user["username"], thread_id=resolved_thread_id)
     messages = prepare_messages(history)
@@ -1481,7 +1493,13 @@ async def get_chat_threads(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ):
-    redis_threads = await load_thread_summaries(request.app.state.chat_store, current_user["username"])
+    chat_store = request.app.state.chat_store
+    conversation_writer = create_conversation_write_coordinator(chat_store)
+    redis_threads = await load_thread_summaries(
+        chat_store,
+        current_user["username"],
+        conversation_writer=conversation_writer,
+    )
     threads = await resolve_thread_summaries_for_read_response(
         request,
         username=current_user["username"],
@@ -1498,11 +1516,16 @@ async def create_chat_thread(
 ):
     enforce_csrf(request)
     chat_store = request.app.state.chat_store
-    created_thread_id = await chat_store.create_thread(
+    conversation_writer = create_conversation_write_coordinator(chat_store)
+    created_thread_id = await conversation_writer.ensure_thread(
         current_user["username"],
         thread_id=f"thread-{uuid.uuid4().hex}",
     )
-    threads = await load_thread_summaries(chat_store, current_user["username"])
+    threads = await load_thread_summaries(
+        chat_store,
+        current_user["username"],
+        conversation_writer=conversation_writer,
+    )
     thread = find_thread_summary(threads, created_thread_id)
     return JSONResponse(
         {
@@ -1520,7 +1543,12 @@ async def get_chat_thread_messages(
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ):
     chat_store = request.app.state.chat_store
-    redis_threads = await load_thread_summaries(chat_store, current_user["username"])
+    conversation_writer = create_conversation_write_coordinator(chat_store)
+    redis_threads = await load_thread_summaries(
+        chat_store,
+        current_user["username"],
+        conversation_writer=conversation_writer,
+    )
     threads = await resolve_thread_summaries_for_read_response(
         request,
         username=current_user["username"],
@@ -1664,6 +1692,7 @@ async def api_chat(request: Request, current_user: Dict[str, Any] = Depends(get_
 
     gateway: LLMGateway = request.app.state.llm_gateway
     chat_store: AsyncChatStore = request.app.state.chat_store
+    conversation_writer = create_conversation_write_coordinator(chat_store)
     queue_pressure = await gateway.get_queue_pressure()
     if queue_pressure["queue_depth"] >= queue_pressure["threshold"]:
         return JSONResponse({"error": "Сервис перегружен", "retry_after": 5}, status_code=503)
@@ -1712,7 +1741,7 @@ async def api_chat(request: Request, current_user: Dict[str, Any] = Depends(get_
         prompt=prompt,
         history=history,
     )
-    await chat_store.append_message(username, "user", prompt, thread_id=thread_id)
+    await conversation_writer.append_message(username, "user", prompt, thread_id=thread_id)
 
     async def event_stream():
         try:
@@ -1752,6 +1781,7 @@ async def api_chat_with_files(
 
     gateway: LLMGateway = request.app.state.llm_gateway
     chat_store: AsyncChatStore = request.app.state.chat_store
+    conversation_writer = create_conversation_write_coordinator(chat_store)
     queue_pressure = await gateway.get_queue_pressure()
     if queue_pressure["queue_depth"] >= queue_pressure["threshold"]:
         return JSONResponse({"error": "Сервис перегружен", "retry_after": 5}, status_code=503)
@@ -1818,7 +1848,7 @@ async def api_chat_with_files(
             if wants_event_stream(request):
                 job_id = await enqueue_parser_public_job(
                     gateway=gateway,
-                    chat_store=chat_store,
+                    conversation_writer=conversation_writer,
                     username=username,
                     thread_id=thread_id,
                     model_info=model_info,
@@ -1851,7 +1881,7 @@ async def api_chat_with_files(
 
             job_id, result = await run_parser_public_job(
                 gateway=gateway,
-                chat_store=chat_store,
+                conversation_writer=conversation_writer,
                 username=username,
                 thread_id=thread_id,
                 model_info=model_info,
@@ -1873,12 +1903,12 @@ async def api_chat_with_files(
                     }
                 )
             if status == "failed":
-                await restore_chat_history(chat_store, username, thread_id, history)
+                await restore_chat_history(conversation_writer, username, thread_id, history)
                 return JSONResponse({"error": result.get("error") or "Сервис временно недоступен"}, status_code=503)
             if status == "cancelled":
-                await restore_chat_history(chat_store, username, thread_id, history)
+                await restore_chat_history(conversation_writer, username, thread_id, history)
                 return JSONResponse({"error": "Генерация была отменена"}, status_code=409)
-            await restore_chat_history(chat_store, username, thread_id, history)
+            await restore_chat_history(conversation_writer, username, thread_id, history)
             return JSONResponse({"error": "Истекло время ожидания ответа модели"}, status_code=504)
 
         temp_dir, staged_files = await stage_uploads(files, username=username)
@@ -1953,7 +1983,7 @@ async def api_chat_with_files(
         if wants_event_stream(request):
             job_id = await enqueue_document_job(
                 gateway=gateway,
-                chat_store=chat_store,
+                conversation_writer=conversation_writer,
                 username=username,
                 thread_id=thread_id,
                 model_info=model_info,
@@ -1984,7 +2014,7 @@ async def api_chat_with_files(
 
         job_id, result = await run_document_job(
             gateway=gateway,
-            chat_store=chat_store,
+            conversation_writer=conversation_writer,
             username=username,
             thread_id=thread_id,
             model_info=model_info,
@@ -2002,11 +2032,11 @@ async def api_chat_with_files(
                     username,
                     job_id,
                 )
-                await restore_chat_history(chat_store, username, thread_id, history)
+                await restore_chat_history(conversation_writer, username, thread_id, history)
                 retry_prompt = build_retry_document_prompt(prompt, budgeted_documents)
                 retry_job_id, retry_result = await run_document_job(
                     gateway=gateway,
-                    chat_store=chat_store,
+                    conversation_writer=conversation_writer,
                     username=username,
                     thread_id=thread_id,
                     model_info=model_info,
@@ -2019,7 +2049,7 @@ async def api_chat_with_files(
                     response_text = (retry_result.get("result") or "").strip()
                     job_id = retry_job_id
                 else:
-                    await restore_chat_history(chat_store, username, thread_id, history)
+                    await restore_chat_history(conversation_writer, username, thread_id, history)
                     return JSONResponse({"error": retry_result.get("error") or "Сервис временно недоступен"}, status_code=503)
 
             if response_requires_document_retry(response_text):
@@ -2029,9 +2059,9 @@ async def api_chat_with_files(
                     job_id,
                 )
                 response_text = DOCUMENT_NO_INFORMATION_RESPONSE
-                await restore_chat_history(chat_store, username, thread_id, history)
-                await chat_store.append_message(username, "user", history_entry, thread_id=thread_id)
-                await chat_store.append_message(username, "assistant", response_text, thread_id=thread_id)
+                await restore_chat_history(conversation_writer, username, thread_id, history)
+                await conversation_writer.append_message(username, "user", history_entry, thread_id=thread_id)
+                await conversation_writer.append_message(username, "assistant", response_text, thread_id=thread_id)
 
             response_text = normalize_document_response(response_text)
             return JSONResponse(
@@ -2042,12 +2072,12 @@ async def api_chat_with_files(
                 }
             )
         if status == "failed":
-            await restore_chat_history(chat_store, username, thread_id, history)
+            await restore_chat_history(conversation_writer, username, thread_id, history)
             return JSONResponse({"error": result.get("error") or "Сервис временно недоступен"}, status_code=503)
         if status == "cancelled":
-            await restore_chat_history(chat_store, username, thread_id, history)
+            await restore_chat_history(conversation_writer, username, thread_id, history)
             return JSONResponse({"error": "Генерация была отменена"}, status_code=409)
-        await restore_chat_history(chat_store, username, thread_id, history)
+        await restore_chat_history(conversation_writer, username, thread_id, history)
         return JSONResponse({"error": "Истекло время ожидания ответа модели"}, status_code=504)
     except HTTPException:
         log_file_parse_observability(
@@ -2126,7 +2156,8 @@ async def clear_chat(request: Request, current_user: Dict[str, Any] = Depends(ge
             payload = ThreadScopedRequest()
         requested_thread_id = payload.thread_id
     thread_id = normalize_chat_thread_id(requested_thread_id)
-    await request.app.state.chat_store.clear_history(current_user["username"], thread_id=thread_id)
+    conversation_writer = create_conversation_write_coordinator(request.app.state.chat_store)
+    await conversation_writer.clear_thread(current_user["username"], thread_id=thread_id)
     return JSONResponse({"ok": True, "thread_id": thread_id})
 
 
