@@ -60,6 +60,9 @@ SSO_SERVICE_PRINCIPAL=""
 SSO_KEYTAB_PATH="/etc/corporate-ai-sso/http.keytab"
 REDIS_PASSWORD=""
 SECRET_KEY=""
+POSTGRES_DB="corporate_ai"
+POSTGRES_USER="corporate_ai"
+POSTGRES_PASSWORD=""
 TEST_ADMIN_USER=""
 TEST_ADMIN_PASSWORD=""
 AD_SERVER_IP_OVERRIDE=""
@@ -1214,6 +1217,7 @@ collect_configuration() {
     local default_domain default_ldap_host default_kdc_host default_base_dn default_admin_user default_ip_override
     local default_coding_groups default_admin_groups default_sso_enabled default_sso_principal default_sso_keytab
     local existing_redis_password existing_secret_key existing_default_model
+    local existing_postgres_db existing_postgres_user existing_postgres_password
 
     default_domain="$(get_env_value "${existing_env}" "LDAP_DOMAIN" || get_env_value "${example_env}" "LDAP_DOMAIN" || true)"
     default_domain="${default_domain:-example.local}"
@@ -1237,6 +1241,9 @@ collect_configuration() {
     existing_default_model="$(get_env_value "${existing_env}" "DEFAULT_MODEL" || get_env_value "${example_env}" "DEFAULT_MODEL" || true)"
     existing_redis_password="$(get_env_value "${existing_env}" "REDIS_PASSWORD" || true)"
     existing_secret_key="$(get_env_value "${existing_env}" "SECRET_KEY" || true)"
+    existing_postgres_db="$(get_env_value "${existing_env}" "POSTGRES_DB" || get_env_value "${example_env}" "POSTGRES_DB" || true)"
+    existing_postgres_user="$(get_env_value "${existing_env}" "POSTGRES_USER" || get_env_value "${example_env}" "POSTGRES_USER" || true)"
+    existing_postgres_password="$(get_env_value "${existing_env}" "POSTGRES_PASSWORD" || true)"
 
     DOMAIN="$(prompt_with_default "AD domain / Домен AD (example: corp.local)" "${default_domain}")"
     DOMAIN="${DOMAIN,,}"
@@ -1296,6 +1303,13 @@ collect_configuration() {
     REDIS_PASSWORD="$(prompt_secret_or_generate "Redis password / Пароль Redis (example: leave blank to generate)" "${existing_redis_password}" generate_hex_secret)"
     [[ -n "${REDIS_PASSWORD}" ]] || die "Redis password cannot be empty"
 
+    POSTGRES_DB="${existing_postgres_db:-corporate_ai}"
+    POSTGRES_USER="${existing_postgres_user:-corporate_ai}"
+    POSTGRES_PASSWORD="$(prompt_secret_or_generate "PostgreSQL password / Пароль PostgreSQL (example: leave blank to generate)" "${existing_postgres_password}" generate_hex_secret)"
+    [[ -n "${POSTGRES_DB}" ]] || die "PostgreSQL database name cannot be empty"
+    [[ -n "${POSTGRES_USER}" ]] || die "PostgreSQL username cannot be empty"
+    [[ -n "${POSTGRES_PASSWORD}" ]] || die "PostgreSQL password cannot be empty"
+
     SECRET_KEY="$(prompt_secret_or_generate "JWT secret key / JWT secret: ключ подписи (example: leave blank to generate)" "${existing_secret_key}" generate_base64_secret)"
     [[ ${#SECRET_KEY} -ge 32 ]] || die "JWT secret key must be at least 32 characters long"
 
@@ -1313,6 +1327,8 @@ collect_configuration() {
     printf "  KERBEROS_KDC=%s\n" "${KERBEROS_KDC}"
     printf "  DEFAULT_MODEL=%s\n" "${DEFAULT_MODEL}"
     printf "  DOWNLOAD_DEFAULT_MODEL_NOW=%s\n" "${DOWNLOAD_DEFAULT_MODEL_NOW}"
+    printf "  POSTGRES_DB=%s\n" "${POSTGRES_DB}"
+    printf "  POSTGRES_USER=%s\n" "${POSTGRES_USER}"
     printf "  MODEL_ACCESS_CODING_GROUPS=%s\n" "${MODEL_ACCESS_CODING_GROUPS:-<none>}"
     printf "  MODEL_ACCESS_ADMIN_GROUPS=%s\n" "${MODEL_ACCESS_ADMIN_GROUPS:-<none>}"
     printf "  SSO_ENABLED=%s\n" "${SSO_ENABLED}"
@@ -1374,6 +1390,12 @@ write_env_file() {
     local backup_file=""
     local temp_file preserved_file regex
     local gpu_enabled_value redis_url_value parser_stage_value parser_public_cutover_value
+    local persistent_db_url_value
+    local existing_postgres_db existing_postgres_user existing_postgres_password
+    local persistent_db_enabled_value persistent_db_bootstrap_value persistent_db_dual_write_value
+    local persistent_db_read_threads_value persistent_db_read_messages_value persistent_db_shadow_compare_value
+    local persistent_db_echo_value persistent_db_pool_pre_ping_value
+    local is_existing_env=0
     local managed_keys=(
         LDAP_SERVER LDAP_DOMAIN LDAP_BASE_DN LDAP_NETBIOS_DOMAIN
         KERBEROS_REALM KERBEROS_KDC
@@ -1384,6 +1406,10 @@ write_env_file() {
         OLLAMA_URL DEFAULT_MODEL AUTO_START_OLLAMA GPU_ENABLED
         ENABLE_PARSER_STAGE ENABLE_PARSER_PUBLIC_CUTOVER
         REDIS_URL REDIS_PASSWORD RATE_LIMIT_REQUESTS RATE_LIMIT_WINDOW_SECONDS
+        POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
+        PERSISTENT_DB_ENABLED PERSISTENT_DB_URL PERSISTENT_DB_ECHO PERSISTENT_DB_POOL_PRE_PING
+        PERSISTENT_DB_BOOTSTRAP_SCHEMA PERSISTENT_DB_SHADOW_COMPARE
+        PERSISTENT_DB_READ_THREADS PERSISTENT_DB_READ_MESSAGES PERSISTENT_DB_DUAL_WRITE_CONVERSATION
         LOGIN_RATE_LIMIT_REQUESTS LOGIN_RATE_LIMIT_WINDOW_SECONDS
         APP_HOST APP_PORT APP_RELOAD LOG_LEVEL DEBUG_LOAD_ENABLED
         AD_SERVER_IP_OVERRIDE INSTALL_TEST_USER
@@ -1397,6 +1423,42 @@ write_env_file() {
     parser_public_cutover_value="$(get_env_value "${env_file}" "ENABLE_PARSER_PUBLIC_CUTOVER" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_PUBLIC_CUTOVER" || true)"
     parser_stage_value="$(normalize_boolean_input "${parser_stage_value:-true}")"
     parser_public_cutover_value="$(normalize_boolean_input "${parser_public_cutover_value:-true}")"
+    existing_postgres_db="$(get_env_value "${env_file}" "POSTGRES_DB" || true)"
+    existing_postgres_user="$(get_env_value "${env_file}" "POSTGRES_USER" || true)"
+    existing_postgres_password="$(get_env_value "${env_file}" "POSTGRES_PASSWORD" || true)"
+
+    if [[ -f "${env_file}" ]]; then
+        is_existing_env=1
+    fi
+
+    POSTGRES_DB="${existing_postgres_db:-${POSTGRES_DB}}"
+    POSTGRES_USER="${existing_postgres_user:-${POSTGRES_USER}}"
+    POSTGRES_PASSWORD="${existing_postgres_password:-${POSTGRES_PASSWORD}}"
+    [[ -n "${POSTGRES_DB}" ]] || die "POSTGRES_DB cannot be empty"
+    [[ -n "${POSTGRES_USER}" ]] || die "POSTGRES_USER cannot be empty"
+    [[ -n "${POSTGRES_PASSWORD}" ]] || die "POSTGRES_PASSWORD cannot be empty"
+    persistent_db_url_value="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+
+    if [[ "${is_existing_env}" -eq 1 ]]; then
+        persistent_db_enabled_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_ENABLED" || true)")"
+        persistent_db_echo_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_ECHO" || true)")"
+        persistent_db_pool_pre_ping_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_POOL_PRE_PING" || printf "true")")"
+        persistent_db_bootstrap_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_BOOTSTRAP_SCHEMA" || true)")"
+        persistent_db_dual_write_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_DUAL_WRITE_CONVERSATION" || true)")"
+        persistent_db_read_threads_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_READ_THREADS" || true)")"
+        persistent_db_read_messages_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_READ_MESSAGES" || true)")"
+        persistent_db_shadow_compare_value="$(normalize_boolean_input "$(get_env_value "${env_file}" "PERSISTENT_DB_SHADOW_COMPARE" || true)")"
+        persistent_db_url_value="$(get_env_value "${env_file}" "PERSISTENT_DB_URL" || printf "%s" "${persistent_db_url_value}")"
+    else
+        persistent_db_enabled_value="true"
+        persistent_db_echo_value="false"
+        persistent_db_pool_pre_ping_value="true"
+        persistent_db_bootstrap_value="true"
+        persistent_db_dual_write_value="true"
+        persistent_db_read_threads_value="true"
+        persistent_db_read_messages_value="true"
+        persistent_db_shadow_compare_value="false"
+    fi
 
     : >"${temp_file}"
     append_env_line "${temp_file}" "LDAP_SERVER" "${LDAP_SERVER_URL}"
@@ -1432,6 +1494,18 @@ write_env_file() {
     printf '\n' >>"${temp_file}"
     append_env_line "${temp_file}" "REDIS_URL" "${redis_url_value}"
     append_env_line "${temp_file}" "REDIS_PASSWORD" "${REDIS_PASSWORD}"
+    append_env_line "${temp_file}" "POSTGRES_DB" "${POSTGRES_DB}"
+    append_env_line "${temp_file}" "POSTGRES_USER" "${POSTGRES_USER}"
+    append_env_line "${temp_file}" "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_ENABLED" "${persistent_db_enabled_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_URL" "${persistent_db_url_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_ECHO" "${persistent_db_echo_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_POOL_PRE_PING" "${persistent_db_pool_pre_ping_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_BOOTSTRAP_SCHEMA" "${persistent_db_bootstrap_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_SHADOW_COMPARE" "${persistent_db_shadow_compare_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_READ_THREADS" "${persistent_db_read_threads_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_READ_MESSAGES" "${persistent_db_read_messages_value}"
+    append_env_line "${temp_file}" "PERSISTENT_DB_DUAL_WRITE_CONVERSATION" "${persistent_db_dual_write_value}"
     append_env_line "${temp_file}" "RATE_LIMIT_REQUESTS" "20"
     append_env_line "${temp_file}" "RATE_LIMIT_WINDOW_SECONDS" "60"
     append_env_line "${temp_file}" "LOGIN_RATE_LIMIT_REQUESTS" "5"
@@ -1902,7 +1976,7 @@ build_and_start_stack() {
     print_header "Docker Compose Deployment"
     docker_compose_for_install_mode build
     initialize_parser_staging_permissions
-    docker_compose_for_install_mode up -d redis ollama
+    docker_compose_for_install_mode up -d redis postgres ollama
     wait_for_ollama_container
     ensure_default_model_available
     docker_compose_for_install_mode up -d
