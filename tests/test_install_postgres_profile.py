@@ -30,6 +30,11 @@ class InstallPostgresProfileTests(unittest.TestCase):
             source ./install.sh
             DOMAIN="corp.local"
             LDAP_SERVER_URL="ldap://srv-ad.corp.local"
+            if [[ -f ".env" ]]; then
+                LDAP_GSSAPI_SERVICE_HOST="$(get_env_value ".env" "LDAP_GSSAPI_SERVICE_HOST" || true)"
+            else
+                LDAP_GSSAPI_SERVICE_HOST="srv-ad"
+            fi
             BASE_DN="DC=corp,DC=local"
             NETBIOS_DOMAIN="CORP"
             KERBEROS_REALM="CORP.LOCAL"
@@ -71,6 +76,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             env_text = self._run_write_env_file(temp_dir)
 
+        self.assertEqual(self._get_env_value(env_text, "LDAP_GSSAPI_SERVICE_HOST"), "srv-ad")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_DB"), "corporate_ai")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_USER"), "corporate_ai")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_PASSWORD"), "postgres-secret")
@@ -98,11 +104,13 @@ class InstallPostgresProfileTests(unittest.TestCase):
             PERSISTENT_DB_READ_THREADS=false
             PERSISTENT_DB_READ_MESSAGES=false
             PERSISTENT_DB_DUAL_WRITE_CONVERSATION=false
+            LDAP_GSSAPI_SERVICE_HOST=legacy-ldap
             """
         ).strip()
         with tempfile.TemporaryDirectory() as temp_dir:
             env_text = self._run_write_env_file(temp_dir, existing_env=existing_env)
 
+        self.assertEqual(self._get_env_value(env_text, "LDAP_GSSAPI_SERVICE_HOST"), "legacy-ldap")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_DB"), "legacy_db")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_USER"), "legacy_user")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_PASSWORD"), "legacy_pw")

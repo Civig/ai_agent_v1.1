@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -37,6 +38,7 @@ class KerberosAuth:
         self.realm = settings.KERBEROS_REALM
         self.kdc = settings.KERBEROS_KDC
         self.ldap_server = settings.LDAP_SERVER
+        self.ldap_gssapi_service_host = settings.LDAP_GSSAPI_SERVICE_HOST.strip()
         self.base_dn = settings.LDAP_BASE_DN
         self.ldap_domain = settings.LDAP_DOMAIN
 
@@ -95,7 +97,47 @@ class KerberosAuth:
         env = os.environ.copy()
         env["KRB5CCNAME"] = ticket_cache
         env["KRB5_CONFIG"] = krb5_config
+        if self.ldap_gssapi_service_host:
+            env["SASL_NOCANON"] = "on"
         return env
+
+    def _build_ldapsearch_uri(self) -> str:
+        if not self.ldap_gssapi_service_host:
+            return self.ldap_server
+
+        parsed = urlparse(self.ldap_server)
+        if not parsed.scheme or not parsed.netloc:
+            return self.ldap_server
+
+        host = self.ldap_gssapi_service_host
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+
+        if parsed.username:
+            credentials = parsed.username
+            if parsed.password:
+                credentials = f"{credentials}:{parsed.password}"
+            host = f"{credentials}@{host}"
+
+        return urlunparse(parsed._replace(netloc=host))
+
+    def _build_ldapsearch_command(self, username: str) -> list[str]:
+        safe_username = escape_filter_chars(username)
+        return [
+            "ldapsearch",
+            "-LLL",
+            "-N",
+            "-Y",
+            "GSSAPI",
+            "-H",
+            self._build_ldapsearch_uri(),
+            "-b",
+            self.base_dn,
+            f"(sAMAccountName={safe_username})",
+            "displayName",
+            "mail",
+            "memberOf",
+        ]
 
     def get_ticket(self, username: str, password: str, ticket_cache: str, krb5_config: str) -> bool:
         try:
@@ -153,22 +195,7 @@ class KerberosAuth:
                     logger.warning("Failed to remove temporary Kerberos file %s: %s", path, exc)
 
     def get_user_info_from_ldap(self, username: str, ticket_cache: str, krb5_config: str) -> Optional[Dict[str, Any]]:
-        safe_username = escape_filter_chars(username)
-        cmd = [
-            "ldapsearch",
-            "-LLL",
-            "-N",
-            "-Y",
-            "GSSAPI",
-            "-H",
-            self.ldap_server,
-            "-b",
-            self.base_dn,
-            f"(sAMAccountName={safe_username})",
-            "displayName",
-            "mail",
-            "memberOf",
-        ]
+        cmd = self._build_ldapsearch_command(username)
 
         try:
             result = subprocess.run(

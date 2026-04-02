@@ -55,6 +55,7 @@ _load_environment_file()
 
 class Settings(BaseSettings):
     LDAP_SERVER: str = "ldap://your-dc-server.local"
+    LDAP_GSSAPI_SERVICE_HOST: str = ""
     LDAP_DOMAIN: str = "your-domain.local"
     LDAP_BASE_DN: str = "dc=your-domain,dc=local"
     LDAP_NETBIOS_DOMAIN: str = "DOMAIN"

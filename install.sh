@@ -47,6 +47,7 @@ OS_CODENAME=""
 DOMAIN=""
 LDAP_SERVER_HOST=""
 LDAP_SERVER_URL=""
+LDAP_GSSAPI_SERVICE_HOST=""
 BASE_DN=""
 NETBIOS_DOMAIN=""
 KERBEROS_REALM=""
@@ -1217,7 +1218,7 @@ collect_configuration() {
     local default_domain default_ldap_host default_kdc_host default_base_dn default_admin_user default_ip_override
     local default_coding_groups default_admin_groups default_sso_enabled default_sso_principal default_sso_keytab
     local existing_redis_password existing_secret_key existing_default_model
-    local existing_postgres_db existing_postgres_user existing_postgres_password
+    local existing_postgres_db existing_postgres_user existing_postgres_password existing_ldap_gssapi_host
 
     default_domain="$(get_env_value "${existing_env}" "LDAP_DOMAIN" || get_env_value "${example_env}" "LDAP_DOMAIN" || true)"
     default_domain="${default_domain:-example.local}"
@@ -1244,6 +1245,7 @@ collect_configuration() {
     existing_postgres_db="$(get_env_value "${existing_env}" "POSTGRES_DB" || get_env_value "${example_env}" "POSTGRES_DB" || true)"
     existing_postgres_user="$(get_env_value "${existing_env}" "POSTGRES_USER" || get_env_value "${example_env}" "POSTGRES_USER" || true)"
     existing_postgres_password="$(get_env_value "${existing_env}" "POSTGRES_PASSWORD" || true)"
+    existing_ldap_gssapi_host="$(get_env_value "${existing_env}" "LDAP_GSSAPI_SERVICE_HOST" || true)"
 
     DOMAIN="$(prompt_with_default "AD domain / Домен AD (example: corp.local)" "${default_domain}")"
     DOMAIN="${DOMAIN,,}"
@@ -1254,6 +1256,11 @@ collect_configuration() {
     [[ -n "${LDAP_SERVER_HOST}" ]] || die "LDAP server cannot be empty"
     if is_ipv4 "${LDAP_SERVER_HOST}"; then
         die "LDAP server must be a hostname or FQDN, not an IP address"
+    fi
+    if [[ -f "${existing_env}" ]]; then
+        LDAP_GSSAPI_SERVICE_HOST="$(normalize_host_input "${existing_ldap_gssapi_host}")"
+    else
+        LDAP_GSSAPI_SERVICE_HOST="${LDAP_SERVER_HOST%%.*}"
     fi
 
     KERBEROS_KDC="$(prompt_with_default "Kerberos KDC hostname or FQDN / Kerberos KDC: имя хоста или FQDN (example: srv-ad.corp.local)" "${default_kdc_host}")"
@@ -1321,6 +1328,9 @@ collect_configuration() {
     print_info "Configuration summary"
     printf "  DOMAIN=%s\n" "${DOMAIN}"
     printf "  LDAP_SERVER=%s\n" "${LDAP_SERVER_URL}"
+    if [[ -n "${LDAP_GSSAPI_SERVICE_HOST}" ]]; then
+        printf "  LDAP_GSSAPI_SERVICE_HOST=%s\n" "${LDAP_GSSAPI_SERVICE_HOST}"
+    fi
     printf "  BASE_DN=%s\n" "${BASE_DN}"
     printf "  NETBIOS=%s\n" "${NETBIOS_DOMAIN}"
     printf "  KERBEROS_REALM=%s\n" "${KERBEROS_REALM}"
@@ -1397,7 +1407,7 @@ write_env_file() {
     local persistent_db_echo_value persistent_db_pool_pre_ping_value
     local is_existing_env=0
     local managed_keys=(
-        LDAP_SERVER LDAP_DOMAIN LDAP_BASE_DN LDAP_NETBIOS_DOMAIN
+        LDAP_SERVER LDAP_GSSAPI_SERVICE_HOST LDAP_DOMAIN LDAP_BASE_DN LDAP_NETBIOS_DOMAIN
         KERBEROS_REALM KERBEROS_KDC
         SECRET_KEY ALGORITHM ACCESS_TOKEN_EXPIRE_MINUTES REFRESH_TOKEN_EXPIRE_DAYS
         COOKIE_SECURE COOKIE_SAMESITE COOKIE_DOMAIN TRUSTED_AUTH_PROXY_ENABLED
@@ -1462,6 +1472,7 @@ write_env_file() {
 
     : >"${temp_file}"
     append_env_line "${temp_file}" "LDAP_SERVER" "${LDAP_SERVER_URL}"
+    append_env_line "${temp_file}" "LDAP_GSSAPI_SERVICE_HOST" "${LDAP_GSSAPI_SERVICE_HOST}"
     append_env_line "${temp_file}" "LDAP_DOMAIN" "${DOMAIN}"
     append_env_line "${temp_file}" "LDAP_BASE_DN" "${BASE_DN}"
     append_env_line "${temp_file}" "LDAP_NETBIOS_DOMAIN" "${NETBIOS_DOMAIN}"
