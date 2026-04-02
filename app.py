@@ -802,6 +802,85 @@ def prepare_db_store_messages(messages: list[Any]) -> list[dict[str, str]]:
     ]
 
 
+def build_db_thread_summaries_from_store(
+    chat_store: AsyncChatStore,
+    db_store: Any,
+    username: str,
+) -> list[dict[str, Any]]:
+    threads: list[dict[str, Any]] = []
+    for thread in db_store.list_threads(username):
+        history = prepare_db_store_messages(db_store.get_messages(username, thread.thread_id))
+        threads.append(
+            {
+                "id": normalize_chat_thread_id(thread.thread_id),
+                "title": chat_store.build_thread_title(history),
+                "updatedAt": max(0, int(thread.updated_at.timestamp() * 1000)),
+                "messageCount": len(history),
+            }
+        )
+    return threads
+
+
+def summarize_thread_list_for_cutover_compare(threads: list[dict[str, Any]]) -> list[tuple[str, str, int]]:
+    return [
+        (
+            normalize_chat_thread_id(thread.get("id")),
+            str(thread.get("title") or "Новый чат").strip() or "Новый чат",
+            max(0, int(thread.get("messageCount") or 0)),
+        )
+        for thread in threads
+    ]
+
+
+async def resolve_thread_summaries_for_read_response(
+    request: Request,
+    *,
+    username: str,
+    redis_threads: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not settings.PERSISTENT_DB_READ_THREADS:
+        return redis_threads
+
+    db_store = getattr(request.app.state, "conversation_db_store", None)
+    if db_store is None:
+        logger.warning(
+            "Conversation DB thread-list cutover enabled but DB store unavailable for user %s; falling back to Redis",
+            username,
+        )
+        return redis_threads
+
+    chat_store = request.app.state.chat_store
+    try:
+        db_threads = await asyncio.to_thread(
+            build_db_thread_summaries_from_store,
+            chat_store,
+            db_store,
+            username,
+        )
+    except Exception:
+        logger.exception(
+            "Conversation DB thread-list cutover failed for user %s; falling back to Redis",
+            username,
+        )
+        return redis_threads
+
+    if summarize_thread_list_for_cutover_compare(redis_threads) == summarize_thread_list_for_cutover_compare(db_threads):
+        logger.info(
+            "Conversation DB thread-list cutover serving DB-backed summaries for user %s (threads=%s)",
+            username,
+            len(db_threads),
+        )
+        return db_threads
+
+    logger.warning(
+        "Conversation DB thread-list cutover fallback to Redis for user %s (redis_threads=%s db_threads=%s)",
+        username,
+        len(redis_threads),
+        len(db_threads),
+    )
+    return redis_threads
+
+
 async def maybe_run_shadow_compare_for_conversation_read(
     request: Request,
     *,
@@ -1402,7 +1481,12 @@ async def get_chat_threads(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ):
-    threads = await load_thread_summaries(request.app.state.chat_store, current_user["username"])
+    redis_threads = await load_thread_summaries(request.app.state.chat_store, current_user["username"])
+    threads = await resolve_thread_summaries_for_read_response(
+        request,
+        username=current_user["username"],
+        redis_threads=redis_threads,
+    )
     active_thread_id = resolve_active_thread_id(request.query_params.get("thread_id"), threads)
     return JSONResponse({"threads": threads, "active_thread_id": active_thread_id})
 
@@ -1436,7 +1520,12 @@ async def get_chat_thread_messages(
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ):
     chat_store = request.app.state.chat_store
-    threads = await load_thread_summaries(chat_store, current_user["username"])
+    redis_threads = await load_thread_summaries(chat_store, current_user["username"])
+    threads = await resolve_thread_summaries_for_read_response(
+        request,
+        username=current_user["username"],
+        redis_threads=redis_threads,
+    )
     thread = find_thread_summary(threads, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")

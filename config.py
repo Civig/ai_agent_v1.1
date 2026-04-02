@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     PERSISTENT_DB_POOL_PRE_PING: bool = True
     PERSISTENT_DB_BOOTSTRAP_SCHEMA: bool = False
     PERSISTENT_DB_SHADOW_COMPARE: bool = False
+    PERSISTENT_DB_READ_THREADS: bool = False
     PERSISTENT_DB_READ_MESSAGES: bool = False
     RATE_LIMIT_REQUESTS: int = 20
     RATE_LIMIT_WINDOW_SECONDS: int = 60
