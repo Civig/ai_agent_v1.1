@@ -63,7 +63,12 @@ from persistence import (
     close_conversation_persistence_runtime,
     open_conversation_persistence_runtime,
 )
-from persistence.conversation_parity import PARITY_MATCHED, compare_history_snapshot_to_store
+from persistence.conversation_parity import (
+    PARITY_EMPTY_THREAD,
+    PARITY_MATCHED,
+    compare_history_snapshot_to_messages,
+    compare_history_snapshot_to_store,
+)
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -787,6 +792,16 @@ def prepare_messages(messages: list[dict]) -> list[dict]:
     return prepared
 
 
+def prepare_db_store_messages(messages: list[Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "role": str(getattr(message, "role", "assistant")),
+            "content": str(getattr(message, "content", "")),
+        }
+        for message in messages
+    ]
+
+
 async def maybe_run_shadow_compare_for_conversation_read(
     request: Request,
     *,
@@ -840,6 +855,67 @@ async def maybe_run_shadow_compare_for_conversation_read(
         result.source_message_count,
         result.db_message_count,
     )
+
+
+async def resolve_thread_messages_for_read_response(
+    request: Request,
+    *,
+    username: str,
+    thread_id: str,
+    redis_history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not settings.PERSISTENT_DB_READ_MESSAGES:
+        await maybe_run_shadow_compare_for_conversation_read(
+            request,
+            username=username,
+            thread_id=thread_id,
+            history=redis_history,
+        )
+        return redis_history
+
+    db_store = getattr(request.app.state, "conversation_db_store", None)
+    if db_store is None:
+        logger.warning(
+            "Conversation DB read cutover enabled but DB store unavailable for user %s thread %s; falling back to Redis",
+            username,
+            thread_id,
+        )
+        return redis_history
+
+    try:
+        db_messages = await asyncio.to_thread(db_store.get_messages, username, thread_id)
+        result = compare_history_snapshot_to_messages(
+            redis_history,
+            db_messages,
+            thread_id,
+        )
+    except Exception:
+        logger.exception(
+            "Conversation DB read cutover failed for user %s thread %s; falling back to Redis",
+            username,
+            thread_id,
+        )
+        return redis_history
+
+    if result.status in {PARITY_MATCHED, PARITY_EMPTY_THREAD}:
+        logger.info(
+            "Conversation DB read cutover serving DB-backed messages for user %s thread %s (source=%s db=%s)",
+            username,
+            thread_id,
+            result.source_message_count,
+            result.db_message_count,
+        )
+        return prepare_db_store_messages(db_messages)
+
+    logger.warning(
+        "Conversation DB read cutover fallback to Redis due to %s for user %s thread %s (source=%s db=%s)",
+        result.status,
+        username,
+        thread_id,
+        result.source_message_count,
+        result.db_message_count,
+    )
+    return redis_history
 
 
 def resolve_model_identifier(
@@ -1366,16 +1442,16 @@ async def get_chat_thread_messages(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     history = await chat_store.get_history(current_user["username"], thread_id=thread["id"])
-    await maybe_run_shadow_compare_for_conversation_read(
+    response_history = await resolve_thread_messages_for_read_response(
         request,
         username=current_user["username"],
         thread_id=thread["id"],
-        history=history,
+        redis_history=history,
     )
     return JSONResponse(
         {
             "thread": thread,
-            "messages": prepare_messages(history),
+            "messages": prepare_messages(response_history),
             "thread_id": thread["id"],
         }
     )

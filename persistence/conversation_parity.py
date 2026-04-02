@@ -61,7 +61,18 @@ def compare_history_snapshot_to_store(
     thread_id: str,
 ) -> ConversationThreadParityResult:
     db_messages = db_store.get_messages(username, thread_id)
+    return compare_history_snapshot_to_messages(
+        source_messages,
+        db_messages,
+        thread_id,
+    )
 
+
+def compare_history_snapshot_to_messages(
+    source_messages: list[dict[str, Any]],
+    db_messages: list[Any],
+    thread_id: str,
+) -> ConversationThreadParityResult:
     source_count = len(source_messages)
     db_count = len(db_messages)
 
