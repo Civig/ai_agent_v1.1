@@ -75,7 +75,7 @@ class AuthGssapiServiceHostTests(unittest.TestCase):
         self.assertIn("DC=corp,DC=local", command)
         self.assertIn("(sAMAccountName=alice@example)", command)
 
-    def test_explicit_gssapi_service_host_disables_kerberos_hostname_canonicalization(self):
+    def test_explicit_gssapi_service_host_builds_fully_no_canon_krb5_config(self):
         auth = self._make_auth(
             ldap_server="ldap://srv-ad.corp.local",
             gssapi_host="srv-ad",
@@ -87,6 +87,8 @@ class AuthGssapiServiceHostTests(unittest.TestCase):
         config_text = Path(krb5_path).read_text(encoding="utf-8")
 
         self.assertIn("dns_canonicalize_hostname = false", config_text)
+        self.assertIn("rdns = false", config_text)
+        self.assertIn('qualify_shortname = ""', config_text)
 
 
 if __name__ == "__main__":

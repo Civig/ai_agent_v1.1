@@ -76,7 +76,10 @@ class KerberosAuth:
         realm = self.realm.upper()
         hostname_canonicalization = ""
         if self.ldap_gssapi_service_host:
-            hostname_canonicalization = "    dns_canonicalize_hostname = false\n"
+            hostname_canonicalization = (
+                "    dns_canonicalize_hostname = false\n"
+                '    qualify_shortname = ""\n'
+            )
         config = (
             "[libdefaults]\n"
             f"    default_realm = {realm}\n"
