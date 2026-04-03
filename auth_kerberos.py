@@ -74,11 +74,15 @@ class KerberosAuth:
     def _create_krb5_config(self) -> str:
         domain = self.ldap_domain.lower()
         realm = self.realm.upper()
+        hostname_canonicalization = ""
+        if self.ldap_gssapi_service_host:
+            hostname_canonicalization = "    dns_canonicalize_hostname = false\n"
         config = (
             "[libdefaults]\n"
             f"    default_realm = {realm}\n"
             "    dns_lookup_kdc = false\n"
             "    dns_lookup_realm = false\n"
+            f"{hostname_canonicalization}"
             "    rdns = false\n\n"
             "[realms]\n"
             f"    {realm} = {{\n"

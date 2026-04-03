@@ -20,16 +20,19 @@ class ConversationPersistenceCoordinator:
 
 def open_conversation_persistence_runtime(
     app_settings: object,
+    *,
+    bootstrap_schema: Optional[bool] = None,
 ) -> Optional[ConversationPersistenceCoordinator]:
     resolved = resolve_conversation_persistence_settings(app_settings)
     if not resolved.enabled:
         return None
 
+    create_schema = resolved.bootstrap_schema if bootstrap_schema is None else bootstrap_schema
     runtime = init_conversation_persistence(
         resolved.database_url,
         echo=resolved.echo,
         pool_pre_ping=resolved.pool_pre_ping,
-        create_schema=resolved.bootstrap_schema,
+        create_schema=create_schema,
     )
     return ConversationPersistenceCoordinator(
         runtime=runtime,

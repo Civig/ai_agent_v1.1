@@ -429,7 +429,10 @@ class LLMWorker:
         self.conversation_db_store = None
         if settings.PERSISTENT_DB_DUAL_WRITE_CONVERSATION:
             try:
-                self.conversation_persistence = open_conversation_persistence_runtime(settings)
+                self.conversation_persistence = open_conversation_persistence_runtime(
+                    settings,
+                    bootstrap_schema=False,
+                )
             except Exception:
                 logger.exception("Worker failed to open persistent conversation runtime for dual-write; continuing Redis-only")
             else:

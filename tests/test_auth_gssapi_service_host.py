@@ -1,5 +1,6 @@
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
@@ -73,6 +74,19 @@ class AuthGssapiServiceHostTests(unittest.TestCase):
         self.assertIn("-b", command)
         self.assertIn("DC=corp,DC=local", command)
         self.assertIn("(sAMAccountName=alice@example)", command)
+
+    def test_explicit_gssapi_service_host_disables_kerberos_hostname_canonicalization(self):
+        auth = self._make_auth(
+            ldap_server="ldap://srv-ad.corp.local",
+            gssapi_host="srv-ad",
+        )
+
+        krb5_path = auth._create_krb5_config()
+        self.addCleanup(lambda: Path(krb5_path).unlink(missing_ok=True))
+
+        config_text = Path(krb5_path).read_text(encoding="utf-8")
+
+        self.assertIn("dns_canonicalize_hostname = false", config_text)
 
 
 if __name__ == "__main__":

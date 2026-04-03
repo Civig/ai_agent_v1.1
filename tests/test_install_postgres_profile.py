@@ -64,6 +64,29 @@ class InstallPostgresProfileTests(unittest.TestCase):
         )
         return env_file.read_text(encoding="utf-8")
 
+    def _run_write_krb5_conf(self, temp_dir: str, *, ldap_gssapi_service_host: str) -> str:
+        temp_root = self._copy_install_fixture(temp_dir)
+        shell_script = textwrap.dedent(
+            """
+            set -Eeuo pipefail
+            cd "$1"
+            export INSTALL_SH_SOURCE_ONLY=1
+            source ./install.sh
+            DOMAIN="corp.local"
+            LDAP_GSSAPI_SERVICE_HOST="$2"
+            KERBEROS_REALM="CORP.LOCAL"
+            KERBEROS_KDC="srv-ad.corp.local"
+            write_krb5_conf
+            """
+        )
+        subprocess.run(
+            ["bash", "-lc", shell_script, "bash", str(temp_root), ldap_gssapi_service_host],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return (temp_root / "deploy" / "krb5.conf").read_text(encoding="utf-8")
+
     @staticmethod
     def _get_env_value(env_text: str, key: str) -> str | None:
         prefix = f"{key}="
@@ -136,6 +159,12 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertIn("POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}", compose_text)
         self.assertIn("postgres-data:/var/lib/postgresql/data", compose_text)
         self.assertIn("postgres-data:", compose_text)
+
+    def test_generated_krb5_conf_disables_hostname_canonicalization_for_explicit_gssapi_host(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            krb5_text = self._run_write_krb5_conf(temp_dir, ldap_gssapi_service_host="srv-ad")
+
+        self.assertIn("dns_canonicalize_hostname = false", krb5_text)
 
 
 if __name__ == "__main__":

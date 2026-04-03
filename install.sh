@@ -1568,6 +1568,7 @@ write_krb5_conf() {
     default_realm = ${KERBEROS_REALM}
     dns_lookup_kdc = false
     dns_lookup_realm = false
+$( [[ -n "${LDAP_GSSAPI_SERVICE_HOST}" ]] && printf '    dns_canonicalize_hostname = false\n' )
     rdns = false
     ticket_lifetime = 10h
     renew_lifetime = 24h
