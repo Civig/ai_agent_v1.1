@@ -1,0 +1,493 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    :root {
+        --dash-bg-1: #09111c;
+        --dash-bg-2: #0f1726;
+        --dash-panel: rgba(16, 24, 38, 0.92);
+        --dash-panel-strong: rgba(11, 18, 29, 0.98);
+        --dash-border: rgba(84, 96, 122, 0.35);
+        --dash-text: #e8edf7;
+        --dash-muted: #8fa2bf;
+        --dash-accent: #4dd0b6;
+        --dash-accent-2: #7dd3fc;
+        --dash-warn: #f59e0b;
+        --dash-danger: #fb7185;
+        --dash-ok: #22c55e;
+        --dash-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    body {
+        background:
+            radial-gradient(circle at top left, rgba(77, 208, 182, 0.14), transparent 32%),
+            radial-gradient(circle at top right, rgba(125, 211, 252, 0.12), transparent 30%),
+            linear-gradient(180deg, var(--dash-bg-1), var(--dash-bg-2));
+        color: var(--dash-text);
+    }
+
+    .container {
+        max-width: 1480px;
+        padding: 2rem;
+    }
+
+    .dashboard-shell {
+        display: grid;
+        gap: 1.5rem;
+        padding-bottom: 4rem;
+    }
+
+    .dashboard-hero {
+        display: grid;
+        gap: 1.25rem;
+        grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+        padding: 1.8rem;
+        border: 1px solid var(--dash-border);
+        border-radius: 28px;
+        background: linear-gradient(135deg, rgba(13, 22, 36, 0.98), rgba(18, 30, 46, 0.92));
+        box-shadow: var(--dash-shadow);
+    }
+
+    .dashboard-kicker {
+        color: var(--dash-accent);
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        font-size: 0.76rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .dashboard-title {
+        font-size: clamp(2rem, 3vw, 3.4rem);
+        line-height: 1.02;
+        letter-spacing: -0.04em;
+        margin-bottom: 0.75rem;
+    }
+
+    .dashboard-subtitle {
+        max-width: 54rem;
+        color: var(--dash-muted);
+        font-size: 1rem;
+    }
+
+    .dashboard-hero-meta {
+        display: grid;
+        gap: 0.9rem;
+        align-content: start;
+    }
+
+    .hero-meta-card {
+        padding: 1rem 1.1rem;
+        border: 1px solid var(--dash-border);
+        border-radius: 20px;
+        background: rgba(10, 17, 28, 0.7);
+    }
+
+    .hero-meta-label {
+        color: var(--dash-muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        margin-bottom: 0.35rem;
+    }
+
+    .hero-meta-value {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        width: fit-content;
+        padding: 0.6rem 0.9rem;
+        border-radius: 999px;
+        border: 1px solid var(--dash-border);
+        background: rgba(17, 26, 40, 0.86);
+        font-size: 0.92rem;
+        font-weight: 600;
+    }
+
+    .status-pill::before {
+        content: "";
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 50%;
+        background: var(--dash-warn);
+        box-shadow: 0 0 16px currentColor;
+    }
+
+    .status-pill[data-status="ready"]::before {
+        background: var(--dash-ok);
+        color: var(--dash-ok);
+    }
+
+    .status-pill[data-status="degraded"]::before {
+        background: var(--dash-warn);
+        color: var(--dash-warn);
+    }
+
+    .status-pill[data-status="not_ready"]::before {
+        background: var(--dash-danger);
+        color: var(--dash-danger);
+    }
+
+    .dashboard-error {
+        padding: 1rem 1.1rem;
+        border-radius: 18px;
+        border: 1px solid rgba(251, 113, 133, 0.45);
+        background: rgba(70, 15, 29, 0.72);
+        color: #ffd8e1;
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
+    .summary-card,
+    .dashboard-panel {
+        border: 1px solid var(--dash-border);
+        background: var(--dash-panel);
+        border-radius: 24px;
+        box-shadow: var(--dash-shadow);
+    }
+
+    .summary-card {
+        padding: 1.2rem;
+    }
+
+    .summary-card-label {
+        color: var(--dash-muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+    }
+
+    .summary-card-value {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        margin: 0.45rem 0 0.15rem;
+    }
+
+    .summary-card-note {
+        color: var(--dash-muted);
+        font-size: 0.88rem;
+    }
+
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+        gap: 1rem;
+    }
+
+    .dashboard-panel {
+        padding: 1.25rem;
+    }
+
+    .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .panel-title {
+        font-size: 1.12rem;
+        letter-spacing: -0.03em;
+    }
+
+    .panel-meta {
+        color: var(--dash-muted);
+        font-size: 0.86rem;
+    }
+
+    .metric-list,
+    .queue-list,
+    .model-list {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .metric-row,
+    .queue-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.8rem 0.9rem;
+        border: 1px solid rgba(84, 96, 122, 0.22);
+        border-radius: 16px;
+        background: rgba(10, 16, 26, 0.55);
+    }
+
+    .metric-row-label,
+    .queue-row-label {
+        color: var(--dash-muted);
+    }
+
+    .metric-row-value,
+    .queue-row-value {
+        font-weight: 600;
+        text-align: right;
+    }
+
+    .panel-table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 18px;
+        border: 1px solid rgba(84, 96, 122, 0.22);
+    }
+
+    .panel-table th,
+    .panel-table td {
+        padding: 0.85rem 0.9rem;
+        border-bottom: 1px solid rgba(84, 96, 122, 0.16);
+        text-align: left;
+        font-size: 0.92rem;
+        vertical-align: top;
+    }
+
+    .panel-table th {
+        color: var(--dash-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.74rem;
+        background: rgba(14, 21, 33, 0.92);
+    }
+
+    .panel-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .worker-status {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.28rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        background: rgba(245, 158, 11, 0.14);
+        color: #fcd34d;
+    }
+
+    .worker-status[data-status="working"] {
+        background: rgba(34, 197, 94, 0.14);
+        color: #86efac;
+    }
+
+    .target-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+    }
+
+    .target-card {
+        padding: 1rem;
+        border-radius: 20px;
+        border: 1px solid rgba(84, 96, 122, 0.22);
+        background: var(--dash-panel-strong);
+    }
+
+    .target-card-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 0.35rem;
+    }
+
+    .target-card-subtitle {
+        color: var(--dash-muted);
+        margin-bottom: 0.85rem;
+        font-size: 0.88rem;
+    }
+
+    .target-card-metrics {
+        display: grid;
+        gap: 0.45rem;
+        color: var(--dash-muted);
+        font-size: 0.88rem;
+    }
+
+    .empty-state {
+        color: var(--dash-muted);
+        padding: 1rem;
+        border: 1px dashed rgba(84, 96, 122, 0.28);
+        border-radius: 16px;
+        background: rgba(10, 16, 26, 0.45);
+    }
+
+    @media (max-width: 1180px) {
+        .summary-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .dashboard-grid,
+        .dashboard-hero {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 760px) {
+        .container {
+            padding: 1rem;
+        }
+
+        .summary-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .panel-table {
+            display: block;
+            overflow-x: auto;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-shell" id="adminDashboardRoot">
+    <section class="dashboard-hero">
+        <div>
+            <div class="dashboard-kicker">Управление нагрузкой</div>
+            <h1 class="dashboard-title">Admin Dashboard</h1>
+            <p class="dashboard-subtitle">
+                Read-only операторская сводка по текущему runtime. Панель показывает только реальные метрики, уже доступные из health,
+                queue и heartbeat surfaces.
+            </p>
+        </div>
+        <div class="dashboard-hero-meta">
+            <div class="hero-meta-card">
+                <div class="hero-meta-label">Доступ</div>
+                <div class="hero-meta-value">Временный preview для aitest</div>
+            </div>
+            <div class="hero-meta-card">
+                <div class="hero-meta-label">Последнее обновление</div>
+                <div class="hero-meta-value" id="adminLastRefresh">—</div>
+            </div>
+            <div class="status-pill" id="adminOverallStatus" data-status="degraded">Ожидание данных</div>
+        </div>
+    </section>
+
+    <div class="dashboard-error" id="adminDashboardError" hidden></div>
+
+    <section class="summary-grid">
+        <article class="summary-card">
+            <div class="summary-card-label">Queue depth</div>
+            <div class="summary-card-value" id="summaryQueueDepth">—</div>
+            <div class="summary-card-note">Сумма pending jobs по всем workload/priority</div>
+        </article>
+        <article class="summary-card">
+            <div class="summary-card-label">Active jobs</div>
+            <div class="summary-card-value" id="summaryActiveJobs">—</div>
+            <div class="summary-card-note">Текущие running/admitted jobs</div>
+        </article>
+        <article class="summary-card">
+            <div class="summary-card-label">Workers</div>
+            <div class="summary-card-value" id="summaryWorkers">—</div>
+            <div class="summary-card-note">Working / total workers</div>
+        </article>
+        <article class="summary-card">
+            <div class="summary-card-label">Targets</div>
+            <div class="summary-card-value" id="summaryTargets">—</div>
+            <div class="summary-card-note">Активные admission targets</div>
+        </article>
+        <article class="summary-card">
+            <div class="summary-card-label">Failures / rejected</div>
+            <div class="summary-card-value" id="summaryFailures">—</div>
+            <div class="summary-card-note">Накопительные runtime counters</div>
+        </article>
+    </section>
+
+    <section class="dashboard-grid">
+        <article class="dashboard-panel">
+            <div class="panel-head">
+                <h2 class="panel-title">Очереди и backlog</h2>
+                <div class="panel-meta">Pending queues by workload / priority</div>
+            </div>
+            <div class="metric-list" style="margin-bottom: 1rem;">
+                <div class="metric-row">
+                    <span class="metric-row-label">Chat backlog</span>
+                    <span class="metric-row-value" id="chatBacklogValue">—</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-row-label">Parser backlog</span>
+                    <span class="metric-row-value" id="parserBacklogValue">—</span>
+                </div>
+            </div>
+            <div class="queue-list" id="pendingQueuesList"></div>
+        </article>
+
+        <article class="dashboard-panel">
+            <div class="panel-head">
+                <h2 class="panel-title">Runtime metrics</h2>
+                <div class="panel-meta">Derived only from existing runtime counters</div>
+            </div>
+            <div class="metric-list">
+                <div class="metric-row">
+                    <span class="metric-row-label">Overall health</span>
+                    <span class="metric-row-value" id="healthStatusValue">—</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-row-label">Scheduler</span>
+                    <span class="metric-row-value" id="schedulerStatusValue">—</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-row-label">Capacity flag</span>
+                    <span class="metric-row-value" id="capacityValue">—</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-row-label">Avg latency</span>
+                    <span class="metric-row-value" id="avgLatencyValue">Недоступно</span>
+                </div>
+            </div>
+            <div class="panel-head" style="margin-top: 1.15rem;">
+                <h2 class="panel-title">Active model summary</h2>
+                <div class="panel-meta">Только если reported by targets</div>
+            </div>
+            <div class="model-list" id="activeModelsList"></div>
+        </article>
+    </section>
+
+    <section class="dashboard-panel">
+        <div class="panel-head">
+            <h2 class="panel-title">Workers status</h2>
+            <div class="panel-meta" id="workersMeta">—</div>
+        </div>
+        <table class="panel-table">
+            <thead>
+                <tr>
+                    <th>Worker</th>
+                    <th>Pool</th>
+                    <th>Status</th>
+                    <th>Target</th>
+                    <th>Kind</th>
+                    <th>Active jobs</th>
+                    <th>Last seen</th>
+                </tr>
+            </thead>
+            <tbody id="workersTableBody"></tbody>
+        </table>
+    </section>
+
+    <section class="dashboard-panel">
+        <div class="panel-head">
+            <h2 class="panel-title">Targets status</h2>
+            <div class="panel-meta">Runtime-reported capacity and loaded model hints</div>
+        </div>
+        <div class="target-grid" id="targetsGrid"></div>
+    </section>
+</div>
+
+<script id="adminDashboardBootstrap" type="application/json">
+    {{ dashboard_bootstrap | tojson }}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script type="module" src="/static/js/admin-dashboard.js"></script>
+{% endblock %}
