@@ -1,7 +1,7 @@
 import os
 import unittest
-from types import SimpleNamespace
-from unittest.mock import patch
+from fastapi import FastAPI
+from starlette.requests import Request
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
 os.environ.setdefault("COOKIE_SECURE", "false")
@@ -11,29 +11,40 @@ import app as app_module
 
 class AdminDashboardTemplateRenderTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_dashboard_route_renders_expected_template_and_bootstrap(self):
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), url=SimpleNamespace(hostname="srv-ai"))
-        captured = {}
+        app = FastAPI()
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/admin/dashboard",
+                "headers": [],
+                "query_string": b"",
+                "scheme": "https",
+                "server": ("127.0.0.1", 443),
+                "client": ("127.0.0.1", 12345),
+                "app": app,
+            }
+        )
 
-        def fake_template_response(req, name, context):
-            captured["request"] = req
-            captured["name"] = name
-            captured["context"] = context
-            return context
+        response = await app_module.admin_dashboard_page(
+            request,
+            current_user={
+                "username": "aitest",
+                "display_name": "AI Test",
+                "email": "aitest@corp.local",
+            },
+        )
 
-        with patch.object(app_module.templates, "TemplateResponse", side_effect=fake_template_response):
-            result = await app_module.admin_dashboard_page(
-                request,
-                current_user={
-                    "username": "aitest",
-                    "display_name": "AI Test",
-                    "email": "aitest@corp.local",
-                },
-            )
-
-        self.assertEqual(captured["name"], "admin_dashboard.html")
-        self.assertTrue(result["is_authenticated"])
-        self.assertEqual(result["dashboard_api_url"], "/api/admin/dashboard/summary")
-        self.assertEqual(result["dashboard_refresh_interval_ms"], app_module.ADMIN_DASHBOARD_REFRESH_INTERVAL_MS)
+        html = response.body.decode("utf-8")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Admin Dashboard", html)
+        self.assertIn("Управление нагрузкой", html)
+        self.assertIn("Предупреждения и рекомендации", html)
+        self.assertIn("Как читать панель", html)
+        self.assertIn("Всего задач в очередях", html)
+        self.assertIn("Активные воркеры", html)
+        self.assertIn("Доступные вычислительные цели", html)
+        self.assertIn("/api/admin/dashboard/summary", html)
 
 
 if __name__ == "__main__":
