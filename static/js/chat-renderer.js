@@ -85,7 +85,7 @@ export class ChatRenderer {
 
             button.append(title, meta);
 
-            const deleteButton = createElement("button", "thread-delete-btn", "Удалить");
+            const deleteButton = createElement("button", "thread-delete-btn", "×");
             deleteButton.type = "button";
             deleteButton.dataset.action = "delete-thread";
             deleteButton.dataset.threadId = thread.id;
