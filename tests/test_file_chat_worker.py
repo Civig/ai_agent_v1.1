@@ -47,8 +47,8 @@ class FileChatWorkerTests(unittest.IsolatedAsyncioTestCase):
         worker.gateway.mark_job_failed = AsyncMock(return_value=None)
         worker.gateway.mark_job_cancelled = AsyncMock(return_value=None)
 
-        worker.chat_store = type("ChatStore", (), {})()
-        worker.chat_store.append_message = AsyncMock(return_value=None)
+        worker.conversation_writer = type("ConversationWriter", (), {})()
+        worker.conversation_writer.append_message = AsyncMock(return_value=None)
 
         worker.ollama = type("Ollama", (), {})()
         return worker
@@ -93,7 +93,12 @@ class FileChatWorkerTests(unittest.IsolatedAsyncioTestCase):
             await worker.process_job(job)
 
         worker.gateway.mark_job_completed.assert_awaited_once()
-        worker.chat_store.append_message.assert_any_await("alice", "assistant", "Сумма договора: 10 руб.", thread_id="thread-file")
+        worker.conversation_writer.append_message.assert_any_await(
+            "alice",
+            "assistant",
+            "Сумма договора: 10 руб.",
+            thread_id="thread-file",
+        )
         self.assertEqual(worker.gateway.mark_job_completed.await_args.args[1], "Сумма договора: 10 руб.")
         worker.gateway.emit_event.assert_any_await("job-file", {"result": "Сумма договора: 10 руб."})
         token_events = [call for call in worker.gateway.emit_event.await_args_list if call.args[1].get("token")]
@@ -130,7 +135,12 @@ class FileChatWorkerTests(unittest.IsolatedAsyncioTestCase):
 
         worker.gateway.emit_event.assert_any_await("job-chat", {"token": "OK"})
         worker.gateway.mark_job_completed.assert_awaited_once()
-        worker.chat_store.append_message.assert_any_await("alice", "assistant", "OK", thread_id="thread-chat")
+        worker.conversation_writer.append_message.assert_any_await(
+            "alice",
+            "assistant",
+            "OK",
+            thread_id="thread-chat",
+        )
 
     async def test_file_chat_job_error_marks_terminal_failure(self):
         worker = self.build_worker()
@@ -155,7 +165,7 @@ class FileChatWorkerTests(unittest.IsolatedAsyncioTestCase):
         await worker.process_job(job)
 
         worker.gateway.mark_job_failed.assert_awaited_once()
-        worker.chat_store.append_message.assert_any_await(
+        worker.conversation_writer.append_message.assert_any_await(
             "alice",
             "assistant",
             "Сервис временно недоступен. Попробуйте позже.",

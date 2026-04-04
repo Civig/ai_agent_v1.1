@@ -188,13 +188,16 @@ class FakeChatStore:
     def __init__(self):
         self.history = defaultdict(list)
 
-    async def get_history(self, username):
+    async def get_history(self, username, thread_id=None):
+        del thread_id
         return list(self.history[username])
 
-    async def append_message(self, username, role, content):
+    async def append_message(self, username, role, content, thread_id=None):
+        del thread_id
         self.history[username].append({"role": role, "content": content})
 
-    async def clear_history(self, username):
+    async def clear_history(self, username, thread_id=None):
+        del thread_id
         self.history[username].clear()
 
 

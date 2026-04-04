@@ -1886,9 +1886,29 @@ class LLMGateway(RedisBackedComponent):
         cpu_parallel_limit = max(1, min(int(target.get("cpu_count") or 1), base_free_ram // max(avg_parallel_cost, 1)))
         required_ram = profile["kv_cache_mb"] + profile["runtime_overhead_mb"] + (0 if model_is_warm else profile["weights_mb"])
         effective_ram = base_free_ram - usage["reserved_ram_mb"]
+        cpu_cold_start_ram_override = (
+            workload_class == WORKLOAD_CHAT
+            and active_jobs == 0
+            and total_reserved == 0
+            and usage["reserved_ram_mb"] == 0
+            and not model_is_warm
+            and effective_ram > 0
+            and required_ram > effective_ram
+        )
+        if cpu_cold_start_ram_override:
+            logger.warning(
+                "CPU cold-start fallback: allowing single chat job despite RAM gate "
+                "(job_id=%s, model=%s, required_ram_mb=%s, effective_ram_mb=%s)",
+                job.get("id", "unknown"),
+                job["model_key"],
+                required_ram,
+                effective_ram,
+            )
         if float(target.get("cpu_percent") or 0.0) >= settings.SCHEDULER_CPU_LOAD_SHED_THRESHOLD and active_jobs > 0:
             return {"admit": False}
-        if active_jobs >= cpu_parallel_limit or effective_ram < required_ram:
+        if active_jobs >= cpu_parallel_limit:
+            return {"admit": False}
+        if effective_ram < required_ram and not cpu_cold_start_ram_override:
             return {"admit": False}
         return {
             "admit": True,
@@ -1901,6 +1921,7 @@ class LLMGateway(RedisBackedComponent):
                 "model_is_warm": model_is_warm,
                 "effective_capacity_tokens": effective_tokens,
                 "cpu_single_slot_override": cpu_single_slot_override,
+                "cpu_cold_start_ram_override": cpu_cold_start_ram_override,
             },
         }
 
