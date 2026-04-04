@@ -54,7 +54,8 @@ export function formatNumber(value, fallback = "Нет данных") {
 }
 
 export function formatLatency(value) {
-    return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} мс` : "Нет данных";
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? `${numeric.toFixed(1)} мс` : "Нет данных";
 }
 
 export function formatAge(value) {
@@ -388,6 +389,72 @@ export function deriveScalingHint(summary) {
     };
 }
 
+export function deriveNextChatExpectation(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary) || hasSchedulerGap(summary)) {
+        return {
+            title: "Нельзя честно оценить ожидание",
+            detail: "Сначала нужно восстановить надёжный control-plane сигнал по scheduler и очередям.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            title: "Следующий chat-запрос под вопросом",
+            detail: "Без active chat worker новый запрос может застрять до реальной обработки.",
+            severity: "critical",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            title: "Ожидание нельзя подтвердить",
+            detail: "Не видно живых target heartbeat, поэтому admission-сигнал недостаточно надёжен.",
+            severity: "warn",
+        };
+    }
+
+    if (summary.capacity && queueDepth <= 0) {
+        return {
+            title: "Примется без ожидания",
+            detail: "Свободная chat capacity есть, а очередь не давит на admission.",
+            severity: "ok",
+        };
+    }
+
+    if (summary.capacity && queueDepth > 0) {
+        return {
+            title: "Вероятно примется, но очередь уже есть",
+            detail: "Система ещё reported имеет запас, но ждать подтверждения admission уже может понадобиться.",
+            severity: "warn",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            title: "Будет ждать в очереди",
+            detail: "Chat backlog уже появился, поэтому новый запрос почти наверняка не стартует сразу.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            title: "Вероятно подождёт",
+            detail: "Текущая chat-мощность занята активной задачей и свободный слот ещё не виден.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        title: "Ожидание не подтверждено",
+        detail: "Текущие поля не дают надёжного ответа, примется ли новый chat-запрос сразу.",
+        severity: "warn",
+    };
+}
+
 export function deriveQueuePressure(summary) {
     const { queueDepth, activeJobs, chatBacklog, parserBacklog } = queueTotals(summary);
 
@@ -611,24 +678,11 @@ export function deriveOverallState(summary) {
 }
 
 export function buildOperationalSummary(summary) {
-    const overall = deriveOverallState(summary);
-    const capacity = deriveCapacityAssessment(summary);
     const bottleneck = derivePrimaryBottleneck(summary);
+    const nextChat = deriveNextChatExpectation(summary);
     const scaling = deriveScalingHint(summary);
 
     return [
-        {
-            label: "Состояние системы",
-            value: overall.title,
-            detail: overall.description,
-            severity: overall.severity,
-        },
-        {
-            label: "Оценка запаса",
-            value: capacity.state,
-            detail: capacity.reason,
-            severity: capacity.severity,
-        },
         {
             label: "Что ограничивает систему сейчас",
             value: bottleneck.title,
@@ -636,7 +690,13 @@ export function buildOperationalSummary(summary) {
             severity: bottleneck.severity,
         },
         {
-            label: "Что это значит для масштабирования",
+            label: "Следующий chat-запрос",
+            value: nextChat.title,
+            detail: nextChat.detail,
+            severity: nextChat.severity,
+        },
+        {
+            label: "Масштабирование",
             value: scaling.title,
             detail: scaling.detail,
             severity: scaling.severity,
@@ -645,54 +705,59 @@ export function buildOperationalSummary(summary) {
 }
 
 export function buildKpiCards(summary) {
+    const overall = deriveOverallState(summary);
+    const capacity = deriveCapacityAssessment(summary);
     return [
         {
-            label: "Всего задач в очередях",
+            label: "Состояние",
+            value: overall.badge,
+            help: "Главный operator-сигнал: всё штатно, система занята, новые chat-задачи будут ждать или данных недостаточно.",
+            meta: overall.title,
+            severity: overall.severity,
+        },
+        {
+            label: "Запас",
+            value: capacity.state,
+            help: "Показывает, есть ли подтверждённая свободная chat capacity для следующей задачи.",
+            meta: capacity.reason,
+            severity: capacity.severity,
+        },
+        {
+            label: "Очередь",
             value: formatNumber(summary.queue_depth),
             help: "Сколько задач ещё ждут admission/start и не начали выполняться.",
+            meta: Number(summary.chat_backlog || 0) > 0
+                ? `chat backlog: ${formatNumber(summary.chat_backlog)}`
+                : "Новых chat-задач в ожидании не видно",
             severity: queueSeverity(summary),
         },
         {
-            label: "Задач в обработке",
+            label: "Активные задачи",
             value: formatNumber(summary.active_jobs),
             help: "Сколько задач уже находятся в active runtime state.",
+            meta: Number(summary.active_jobs || 0) > 0 ? "Есть выполняющиеся задачи" : "Сейчас активных задач нет",
             severity: Number(summary.active_jobs || 0) > 0 ? "ok" : "neutral",
         },
         {
-            label: "Активно работают / всего воркеров",
+            label: "Воркеры",
             value: `${formatNumber(summary.workers_working)} / ${formatNumber(summary.workers_total)}`,
             help: "Worker — процесс, который забирает задачу из dispatch и выполняет её.",
+            meta: "Активно работают / всего видимых воркеров",
             severity: workersSeverity(summary),
         },
         {
-            label: "Доступные вычислительные цели",
+            label: "Цели",
             value: formatNumber(summary.targets),
             help: "Target — цель исполнения, на которую scheduler может допустить задачу.",
+            meta: "Видимые вычислительные цели исполнения",
             severity: targetsSeverity(summary),
         },
         {
-            label: "Ошибки обработки",
-            value: formatNumber(summary.failures),
-            help: "Накопительный счётчик завершений с ошибкой в текущем runtime.",
-            severity: counterSeverity(summary.failures),
-        },
-        {
-            label: "Отклонённые запросы",
-            value: formatNumber(summary.rejected),
-            help: "Сколько задач было отклонено admission-логикой.",
-            severity: counterSeverity(summary.rejected),
-        },
-        {
-            label: "Среднее время обработки",
+            label: "Среднее время",
             value: formatLatency(summary.avg_latency_ms),
-            help: "Считается только если реально есть latency counters; иначе показываем 'Нет данных'.",
-            severity: Number.isFinite(Number(summary.avg_latency_ms)) ? "neutral" : "warn",
-        },
-        {
-            label: "Свободная мощность для chat",
-            value: summary.capacity ? "Есть" : "Нет",
-            help: "Показывает, может ли система сейчас принять новые chat-задачи без ожидания.",
-            severity: capacitySeverity(summary),
+            help: "Показывается только когда реально есть latency counters. Если значимых данных нет, панель честно выводит 'Нет данных'.",
+            meta: Number(summary.avg_latency_ms || 0) > 0 ? "По завершённым задачам" : "Нет данных по latency",
+            severity: Number(summary.avg_latency_ms || 0) > 0 ? "neutral" : "warn",
         },
     ];
 }
@@ -863,6 +928,73 @@ export function buildRuntimeRows(summary) {
     ];
 }
 
+export function deriveWorkerSnapshotNote(summary, workers) {
+    const reportedWorking = Number(summary.workers_working || 0);
+    const totalActiveJobs = Number(summary.active_jobs || 0);
+    const heartbeatWorking = Array.isArray(workers)
+        ? workers.filter((worker) => worker?.status === "working").length
+        : 0;
+
+    if (reportedWorking > heartbeatWorking) {
+        return `Aggregate summary видит ${formatNumber(reportedWorking)} working worker, но heartbeat snapshot по строкам сейчас показывает ${formatNumber(heartbeatWorking)}. Это может кратковременно отставать от live state.`;
+    }
+
+    if (totalActiveJobs > 0 && heartbeatWorking <= 0) {
+        return "Есть активные задачи, но heartbeat snapshot ещё не показал working worker. Это может быть кратковременная задержка публикации heartbeat.";
+    }
+
+    return "Статус в таблице — это heartbeat snapshot по каждому worker. Он может кратковременно отставать от aggregate summary.";
+}
+
+export function buildObservedTargetWorkloads(summary) {
+    const observed = new Map();
+    for (const worker of Array.isArray(summary.worker_rows) ? summary.worker_rows : []) {
+        const targetId = String(worker?.target_id || "").trim();
+        if (!targetId) {
+            continue;
+        }
+        const workload = String(worker?.pool || "").trim();
+        if (!workload) {
+            continue;
+        }
+        if (!observed.has(targetId)) {
+            observed.set(targetId, new Set());
+        }
+        observed.get(targetId).add(humanizeWorkload(workload));
+    }
+    return observed;
+}
+
+export function buildTargetWorkloadPresentation(summary, target) {
+    const observedByTarget = buildObservedTargetWorkloads(summary);
+    const targetId = String(target?.target_id || "").trim();
+    const observedSet = targetId && observedByTarget.has(targetId) ? observedByTarget.get(targetId) : new Set();
+    const reported = Array.isArray(target?.supports_workloads)
+        ? target.supports_workloads.map((item) => humanizeWorkload(item))
+        : [];
+    const observed = Array.from(observedSet);
+
+    return {
+        reported,
+        observed,
+        note: observed.length
+            ? "Capabilities показаны отдельно от наблюдаемой нагрузки по worker heartbeat."
+            : "Наблюдаемая нагрузка по worker heartbeat сейчас не видна; это не означает, что target не может обслуживать chat.",
+    };
+}
+
+export function deriveTargetsSectionNote(summary, targets) {
+    const visibleTargets = Array.isArray(targets) ? targets.length : 0;
+    const observedTargets = buildObservedTargetWorkloads(summary).size;
+    if (visibleTargets <= 0) {
+        return "";
+    }
+    if (observedTargets <= 0) {
+        return "Capabilities и наблюдаемая нагрузка показаны отдельно. Если наблюдаемая нагрузка пустая, это значит только то, что worker heartbeat её сейчас не reported.";
+    }
+    return "Capabilities показаны отдельно от наблюдаемой нагрузки, чтобы не путать поддерживаемые workload и фактическое текущее использование.";
+}
+
 export function buildQueueOverview(summary) {
     const pressure = deriveQueuePressure(summary);
     return [
@@ -956,7 +1088,9 @@ class AdminDashboardApp {
             queueBreakdown: document.getElementById("queueBreakdown"),
             workloadBreakdown: document.getElementById("workloadBreakdown"),
             runtimeSummary: document.getElementById("runtimeSummary"),
+            workersSectionNote: document.getElementById("workersSectionNote"),
             workersTableBody: document.getElementById("workersTableBody"),
+            targetsSectionNote: document.getElementById("targetsSectionNote"),
             targetsTableBody: document.getElementById("targetsTableBody"),
         };
         this.refreshTimer = null;
@@ -993,9 +1127,9 @@ class AdminDashboardApp {
         const queuePressure = deriveQueuePressure(summary);
         const readiness = deriveReadinessView(summary);
         const health = deriveHealthView(summary);
-        const scaling = deriveScalingHint(summary);
+        const nextChat = deriveNextChatExpectation(summary);
         const schedulerSeverity = summary.scheduler_status === "healthy" ? "ok" : "critical";
-        this.elements.heroMeaning.textContent = overall.description;
+        this.elements.heroMeaning.textContent = `${capacity.state}. ${derivePrimaryBottleneck(summary).title}.`;
         this.elements.overallStatusTitle.textContent = overall.title;
         this.elements.overallStatusBadge.className = `status-badge ${severityClass(overall.severity)}`;
         this.elements.overallStatusBadge.textContent = overall.badge;
@@ -1004,8 +1138,7 @@ class AdminDashboardApp {
             summary.scheduler_status === "healthy"
                 ? `Планировщик актуален · ${formatAge(summary.scheduler_age_seconds)}`
                 : `Планировщик устарел · ${formatAge(summary.scheduler_age_seconds)}`;
-        this.elements.statusSupportText.textContent =
-            `${capacity.reason} ${scaling.detail}`;
+        this.elements.statusSupportText.textContent = nextChat.detail;
         this.elements.lastRefreshLabel.textContent = formatTimestamp(summary.last_refresh);
         this.elements.readinessStatusValue.textContent = readiness.value;
         this.elements.healthStatusValue.textContent = health.value;
@@ -1019,8 +1152,8 @@ class AdminDashboardApp {
         this.renderQueueBreakdown(summary);
         this.renderWorkloadBreakdown(summary);
         this.renderRuntimeSummary(summary);
-        this.renderWorkers(summary.worker_rows || []);
-        this.renderTargets(summary.target_rows || []);
+        this.renderWorkers(summary, summary.worker_rows || []);
+        this.renderTargets(summary, summary.target_rows || []);
     }
 
     renderSummaryStrip(summary) {
@@ -1042,9 +1175,12 @@ class AdminDashboardApp {
             .map(
                 (item) => `
                     <article class="kpi-card ${severityClass(item.severity)}">
-                        <div class="kpi-label">${escapeHtml(item.label)}</div>
+                        <div class="kpi-head">
+                            <div class="kpi-label">${escapeHtml(item.label)}</div>
+                            <span class="info-chip" title="${escapeHtml(item.help)}">i</span>
+                        </div>
                         <div class="kpi-value">${escapeHtml(item.value)}</div>
-                        <div class="kpi-help">${escapeHtml(item.help)}</div>
+                        <div class="kpi-meta">${escapeHtml(item.meta || "")}</div>
                     </article>
                 `,
             )
@@ -1055,13 +1191,12 @@ class AdminDashboardApp {
         this.elements.alertList.innerHTML = buildAlertItems(summary)
             .map(
                 (item) => `
-                    <article class="alert-card ${severityClass(item.severity)}">
+                    <article class="alert-card ${severityClass(item.severity)}" title="${escapeHtml(item.recommendation)}">
                         <div class="alert-title">
                             <span class="alert-title-dot"></span>
                             ${escapeHtml(item.title)}
                         </div>
                         <div class="alert-detail">${escapeHtml(item.detail)}</div>
-                        <div class="alert-recommendation">${escapeHtml(item.recommendation)}</div>
                     </article>
                 `,
             )
@@ -1133,22 +1268,26 @@ class AdminDashboardApp {
                 (item) => `
                     <article class="runtime-card ${severityClass(item.severity)}">
                         <div class="runtime-card-head">
-                            <div class="runtime-key">${escapeHtml(item.label)}</div>
+                            <div class="runtime-key-wrap">
+                                <div class="runtime-key">${escapeHtml(item.label)}</div>
+                                <span class="info-chip" title="${escapeHtml(item.help)}">i</span>
+                            </div>
                             <div class="runtime-value">${escapeHtml(item.value)}</div>
                         </div>
-                        <div class="runtime-help">${escapeHtml(item.help)}</div>
                     </article>
                 `,
             )
             .join("");
     }
 
-    renderWorkers(workers) {
+    renderWorkers(summary, workers) {
         if (!Array.isArray(workers) || !workers.length) {
+            this.elements.workersSectionNote.textContent = "";
             this.elements.workersTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">Нет активных worker heartbeat данных</td></tr>';
             return;
         }
 
+        this.elements.workersSectionNote.textContent = deriveWorkerSnapshotNote(summary, workers);
         this.elements.workersTableBody.innerHTML = workers
             .map((worker) => {
                 const severity =
@@ -1162,7 +1301,7 @@ class AdminDashboardApp {
                         <td>
                             <div class="table-primary">
                                 <strong class="mono">${escapeHtml(worker.worker_id || "-")}</strong>
-                                <div class="table-secondary">Статус heartbeat: ${escapeHtml(statusText(worker.status))}</div>
+                                <div class="table-secondary">Heartbeat snapshot: ${escapeHtml(statusText(worker.status))}</div>
                             </div>
                         </td>
                         <td>${escapeHtml(worker.pool || "Нет данных")}</td>
@@ -1177,15 +1316,18 @@ class AdminDashboardApp {
             .join("");
     }
 
-    renderTargets(targets) {
+    renderTargets(summary, targets) {
         if (!Array.isArray(targets) || !targets.length) {
+            this.elements.targetsSectionNote.textContent = "";
             this.elements.targetsTableBody.innerHTML = '<tr><td colspan="9" class="empty-state">Нет активных target heartbeat данных</td></tr>';
             return;
         }
 
+        this.elements.targetsSectionNote.textContent = deriveTargetsSectionNote(summary, targets);
         this.elements.targetsTableBody.innerHTML = targets
             .map((target) => {
                 const severity = target.status === "online" ? "ok" : "critical";
+                const workloadView = buildTargetWorkloadPresentation(summary, target);
                 return `
                     <tr>
                         <td>
@@ -1195,7 +1337,15 @@ class AdminDashboardApp {
                             </div>
                         </td>
                         <td>${escapeHtml(target.target_kind || "Нет данных")}</td>
-                        <td><div class="chip-row">${renderChips(target.supports_workloads, { mutedFallback: "Нет данных" })}</div></td>
+                        <td>
+                            <div class="table-primary">
+                                <div class="table-secondary">Reported возможности</div>
+                                <div class="chip-row">${renderChips(workloadView.reported, { mutedFallback: "Нет данных" })}</div>
+                                <div class="table-secondary">Наблюдаемая нагрузка</div>
+                                <div class="chip-row">${renderChips(workloadView.observed, { mutedFallback: "не видно по heartbeat" })}</div>
+                                <div class="table-secondary">${escapeHtml(workloadView.note)}</div>
+                            </div>
+                        </td>
                         <td>${formatNumber(target.base_capacity_tokens)}</td>
                         <td>${Number.isFinite(Number(target.cpu_percent)) ? `${Number(target.cpu_percent).toFixed(1)}%` : "Нет данных"}</td>
                         <td>${Number(target.ram_free_mb || 0) > 0 ? `${formatNumber(target.ram_free_mb)} MB` : "Нет данных"}</td>
@@ -1215,13 +1365,12 @@ class AdminDashboardApp {
         this.elements.overallStatusBadge.className = `status-badge ${severityClass("critical")}`;
         this.elements.overallStatusBadge.textContent = "Ошибка";
         this.elements.alertList.innerHTML = `
-            <article class="alert-card ${severityClass("critical")}">
+            <article class="alert-card ${severityClass("critical")}" title="Проверьте доступность dashboard API и состояние runtime.">
                 <div class="alert-title">
                     <span class="alert-title-dot"></span>
                     Не удалось обновить dashboard
                 </div>
                 <div class="alert-detail">${escapeHtml(message)}</div>
-                <div class="alert-recommendation">Проверьте доступность dashboard API и состояние runtime.</div>
             </article>
         `;
     }

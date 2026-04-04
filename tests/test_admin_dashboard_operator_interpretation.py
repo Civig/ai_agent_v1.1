@@ -25,6 +25,7 @@ def evaluate_dashboard_interpretation(summary: dict) -> dict:
           overall: mod.deriveOverallState(summary),
           capacity: mod.deriveCapacityAssessment(summary),
           bottleneck: mod.derivePrimaryBottleneck(summary),
+          nextChat: mod.deriveNextChatExpectation(summary),
           scaling: mod.deriveScalingHint(summary),
           queuePressure: mod.deriveQueuePressure(summary),
         }}));
@@ -66,6 +67,7 @@ class AdminDashboardOperatorInterpretationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["title"], "Система работает штатно")
         self.assertEqual(result["capacity"]["state"], "Запас есть")
         self.assertEqual(result["bottleneck"]["title"], "Явных ограничений не видно")
+        self.assertEqual(result["nextChat"]["title"], "Примется без ожидания")
         self.assertIn("может принимать новые chat-запросы", result["scaling"]["title"])
         self.assertEqual(result["queuePressure"]["state"], "Нет давления")
 
@@ -93,6 +95,7 @@ class AdminDashboardOperatorInterpretationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["title"], "Система занята, но работает")
         self.assertEqual(result["capacity"]["state"], "Запас ограничен")
         self.assertIn("следующий chat-запрос может ждать", result["capacity"]["reason"])
+        self.assertEqual(result["nextChat"]["title"], "Вероятно подождёт")
         self.assertEqual(result["queuePressure"]["state"], "Система занята")
         self.assertIn("Очередь пустая, потому что задача уже выполняется", result["queuePressure"]["detail"])
         self.assertIn("Следующий chat-запрос вероятно будет ждать", result["scaling"]["title"])
@@ -121,6 +124,7 @@ class AdminDashboardOperatorInterpretationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["title"], "Новые chat-задачи будут ждать")
         self.assertEqual(result["capacity"]["state"], "Запас исчерпан")
         self.assertEqual(result["bottleneck"]["title"], "Свободная chat capacity уже занята")
+        self.assertEqual(result["nextChat"]["title"], "Будет ждать в очереди")
         self.assertIn("дополнительная вычислительная цель", result["scaling"]["title"])
         self.assertEqual(result["queuePressure"]["state"], "Высокое давление")
 
@@ -148,6 +152,7 @@ class AdminDashboardOperatorInterpretationTests(unittest.TestCase):
         self.assertEqual(result["overall"]["title"], "Данных недостаточно для точной оценки")
         self.assertEqual(result["capacity"]["state"], "Оценка запаса недоступна")
         self.assertEqual(result["bottleneck"]["title"], "Планировщик публикует устаревший heartbeat")
+        self.assertEqual(result["nextChat"]["title"], "Нельзя честно оценить ожидание")
         self.assertEqual(result["scaling"]["title"], "Недостаточно данных для точной оценки запаса")
 
 
