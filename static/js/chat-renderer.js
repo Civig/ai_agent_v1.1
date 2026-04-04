@@ -64,15 +64,17 @@ export class ChatRenderer {
         const fragment = document.createDocumentFragment();
 
         for (const thread of threads) {
-            const button = createElement("button", "thread-item");
-            button.type = "button";
-            button.dataset.threadId = thread.id;
+            const item = createElement("div", "thread-item");
             if (thread.id === activeThreadId) {
-                button.classList.add("is-active");
+                item.classList.add("is-active");
             }
             if (thread.id === liveThreadId) {
-                button.classList.add("is-live");
+                item.classList.add("is-live");
             }
+
+            const button = createElement("button", "thread-item-main");
+            button.type = "button";
+            button.dataset.threadId = thread.id;
 
             const title = createElement("span", "thread-title", thread.title);
             const meta = createElement(
@@ -82,7 +84,16 @@ export class ChatRenderer {
             );
 
             button.append(title, meta);
-            fragment.appendChild(button);
+
+            const deleteButton = createElement("button", "thread-delete-btn", "Удалить");
+            deleteButton.type = "button";
+            deleteButton.dataset.action = "delete-thread";
+            deleteButton.dataset.threadId = thread.id;
+            deleteButton.setAttribute("aria-label", `Удалить диалог ${thread.title}`);
+            deleteButton.title = "Удалить диалог полностью";
+
+            item.append(button, deleteButton);
+            fragment.appendChild(item);
         }
 
         this.elements.threadList.replaceChildren(fragment);

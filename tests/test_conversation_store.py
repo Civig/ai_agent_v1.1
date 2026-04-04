@@ -66,6 +66,26 @@ class ConversationStoreTests(unittest.TestCase):
             finally:
                 close_conversation_persistence(runtime)
 
+    def test_delete_thread_removes_target_thread_and_keeps_other_threads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime = init_conversation_persistence(f"sqlite+pysqlite:///{tmpdir}/delete.db")
+            try:
+                store = ConversationStore(runtime.session_factory)
+
+                store.append_message("alice", "default", "user", "Первый")
+                store.append_message("alice", "default", "assistant", "Ответ")
+                store.append_message("alice", "other", "user", "Соседний")
+
+                deleted = store.delete_thread("alice", "default")
+
+                self.assertEqual(deleted, 1)
+                self.assertIsNone(store.get_thread("alice", "default"))
+                self.assertEqual(store.get_messages("alice", "default"), [])
+                self.assertEqual(len(store.get_messages("alice", "other")), 1)
+                self.assertEqual([thread.thread_id for thread in store.list_threads("alice")], ["other"])
+            finally:
+                close_conversation_persistence(runtime)
+
     def test_store_validates_required_arguments(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             runtime = init_conversation_persistence(f"sqlite+pysqlite:///{tmpdir}/validation.db")

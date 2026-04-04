@@ -43,6 +43,7 @@ class FakeDbStore:
         self.create_or_get_thread_calls: list[tuple[str, str]] = []
         self.append_message_calls: list[tuple[str, str, str, str]] = []
         self.delete_thread_messages_calls: list[tuple[str, str]] = []
+        self.delete_thread_calls: list[tuple[str, str]] = []
         self.replace_thread_snapshot_calls: list[tuple[str, str, list[dict[str, str]]]] = []
 
     def create_or_get_thread(self, username: str, thread_id: str) -> object:
@@ -59,6 +60,12 @@ class FakeDbStore:
 
     def delete_thread_messages(self, username: str, thread_id: str) -> int:
         self.delete_thread_messages_calls.append((username, thread_id))
+        if self.fail_operation == "clear_thread":
+            raise RuntimeError("db clear failed")
+        return 1
+
+    def delete_thread(self, username: str, thread_id: str) -> int:
+        self.delete_thread_calls.append((username, thread_id))
         if self.fail_operation == "clear_thread":
             raise RuntimeError("db clear failed")
         return 1
@@ -102,12 +109,14 @@ class ConversationWriteDualWriteTests(unittest.IsolatedAsyncioTestCase):
 
         await coordinator.append_message("alice", "assistant", "Ответ", thread_id="case-1")
         await coordinator.clear_thread("alice", thread_id="case-1")
+        await coordinator.clear_thread("alice", thread_id="case-2", preserve_thread=False)
 
         self.assertEqual(
             db_store.append_message_calls,
             [("alice", "case-1", "assistant", "Ответ")],
         )
         self.assertEqual(db_store.delete_thread_messages_calls, [("alice", "case-1")])
+        self.assertEqual(db_store.delete_thread_calls, [("alice", "case-2")])
 
     async def test_replace_thread_snapshot_dual_writes_once_via_replace_snapshot(self):
         chat_store = FakeChatStore()
@@ -151,6 +160,7 @@ class ConversationWriteDualWriteTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(db_store.append_message_calls, [])
         self.assertEqual(db_store.delete_thread_messages_calls, [])
+        self.assertEqual(db_store.delete_thread_calls, [])
 
     async def test_db_secondary_write_failures_are_logged_and_swallowed(self):
         chat_store = FakeChatStore()

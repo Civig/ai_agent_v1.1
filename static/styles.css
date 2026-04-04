@@ -187,8 +187,8 @@ input {
 
 .thread-item {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-2xs);
+    align-items: flex-start;
+    gap: var(--space-sm);
     width: 100%;
     padding: 0.9rem 1rem;
     border: 1px solid rgba(255, 255, 255, 0.04);
@@ -215,6 +215,26 @@ input {
     color: #9ec2ff;
 }
 
+.thread-item-main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.thread-item-main:focus-visible,
+.thread-delete-btn:focus-visible {
+    outline: 2px solid rgba(79, 140, 255, 0.6);
+    outline-offset: 2px;
+}
+
 .thread-title {
     display: block;
     font-weight: 600;
@@ -227,6 +247,24 @@ input {
 .thread-meta {
     color: var(--text-muted);
     font-size: 0.8rem;
+}
+
+.thread-delete-btn {
+    flex: 0 0 auto;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+.thread-delete-btn:hover {
+    border-color: rgba(255, 120, 120, 0.28);
+    background: rgba(255, 120, 120, 0.12);
+    color: #ffd0d0;
 }
 
 .sidebar-footer {

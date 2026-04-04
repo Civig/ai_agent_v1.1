@@ -172,6 +172,10 @@ class ThreadScopedRequest(BaseModel):
     thread_id: Optional[str] = None
 
 
+class ThreadDeleteRequest(BaseModel):
+    active_thread_id: Optional[str] = None
+
+
 class MarkdownRequest(BaseModel):
     text: str
 
@@ -1749,6 +1753,54 @@ async def get_chat_thread_messages(
             "thread": thread,
             "messages": prepare_messages(response_history),
             "thread_id": thread["id"],
+        }
+    )
+
+
+@app.delete("/api/threads/{thread_id}")
+async def delete_chat_thread(
+    thread_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_required),
+):
+    enforce_csrf(request)
+    try:
+        payload = ThreadDeleteRequest(**await request.json())
+    except Exception:
+        payload = ThreadDeleteRequest()
+
+    username = current_user["username"]
+    normalized_thread_id = normalize_chat_thread_id(thread_id)
+    requested_active_thread_id = normalize_chat_thread_id(payload.active_thread_id)
+    chat_store = request.app.state.chat_store
+    conversation_writer = build_conversation_writer(request.app.state)
+
+    await conversation_writer.clear_thread(
+        username,
+        thread_id=normalized_thread_id,
+        preserve_thread=False,
+    )
+
+    redis_threads = [serialize_thread_summary(thread) for thread in await chat_store.list_threads(username)]
+    if not redis_threads:
+        await conversation_writer.ensure_thread(
+            username,
+            thread_id=f"thread-{uuid.uuid4().hex}",
+        )
+        redis_threads = [serialize_thread_summary(thread) for thread in await chat_store.list_threads(username)]
+
+    threads = await resolve_thread_summaries_for_read_response(
+        request,
+        username=username,
+        redis_threads=redis_threads,
+    )
+    active_thread_id = resolve_active_thread_id(requested_active_thread_id, threads)
+    return JSONResponse(
+        {
+            "ok": True,
+            "thread_id": normalized_thread_id,
+            "threads": threads,
+            "active_thread_id": active_thread_id,
         }
     )
 

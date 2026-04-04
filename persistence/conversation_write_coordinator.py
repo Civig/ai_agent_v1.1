@@ -41,6 +41,9 @@ class ConversationWriteMirrorStore(Protocol):
     def delete_thread_messages(self, username: str, thread_id: str) -> int:
         ...
 
+    def delete_thread(self, username: str, thread_id: str) -> int:
+        ...
+
     def replace_thread_snapshot(
         self,
         username: str,
@@ -104,11 +107,15 @@ class RedisConversationWriteCoordinator:
             preserve_thread=preserve_thread,
         )
         effective_thread_id = self._normalize_thread_id(thread_id)
+        if preserve_thread:
+            mirror_action = lambda: self.db_store.delete_thread_messages(username, effective_thread_id)
+        else:
+            mirror_action = lambda: self.db_store.delete_thread(username, effective_thread_id)
         await self._mirror_best_effort(
             "clear_thread",
             username=username,
             thread_id=effective_thread_id,
-            action=lambda: self.db_store.delete_thread_messages(username, effective_thread_id),
+            action=mirror_action,
         )
 
     async def replace_thread_snapshot(

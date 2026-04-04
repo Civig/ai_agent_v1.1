@@ -138,6 +138,16 @@ class CorporateAIApp {
         });
 
         this.elements.threadList?.addEventListener("click", (event) => {
+            const deleteTarget = event.target.closest("[data-action='delete-thread']");
+            if (deleteTarget) {
+                if ([ChatLifecycle.SENDING, ChatLifecycle.STREAMING].includes(this.chatStore.getState().status)) {
+                    this.renderer.showNotification("Во время генерации диалог нельзя удалить. Сначала остановите ответ или дождитесь завершения.", "warning");
+                    return;
+                }
+                this.handleDeleteThread(deleteTarget.dataset.threadId);
+                return;
+            }
+
             const target = event.target.closest("[data-thread-id]");
             if (!target) {
                 return;
@@ -484,6 +494,55 @@ class CorporateAIApp {
             this.renderer.showNotification("Активный чат очищен и серверный контекст сброшен.", "info");
         } catch (error) {
             const message = error instanceof APIError ? error.message : "Не удалось очистить активный чат";
+            this.renderer.showNotification(message, "error");
+        }
+    }
+
+    async handleDeleteThread(threadId) {
+        const normalizedThreadId = String(threadId || "").trim();
+        if (!normalizedThreadId) {
+            return;
+        }
+
+        const thread = this.threadStore.findThread(normalizedThreadId);
+        const threadLabel = thread?.title || "этот диалог";
+        const confirmed = window.confirm(
+            `Удалить диалог «${threadLabel}» полностью? Это действие удалит его из списка и сотрёт историю без возможности восстановления.`,
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        const activeThreadId = this.threadStore.activeThreadId || "default";
+
+        try {
+            const payload = await this.apiClient.requestJSON(`/api/threads/${encodeURIComponent(normalizedThreadId)}`, {
+                method: "DELETE",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ active_thread_id: activeThreadId }),
+                timeout: 15000,
+            });
+            const resolvedActiveThreadId = payload?.active_thread_id || activeThreadId;
+            const deletingActiveThread = activeThreadId === normalizedThreadId;
+
+            this.threadStore.replaceThreads(
+                payload?.threads || [],
+                deletingActiveThread ? resolvedActiveThreadId : activeThreadId,
+            );
+
+            if (deletingActiveThread) {
+                this.elements.promptInput.value = "";
+                this.autoResize();
+                await this.handleThreadSelection(resolvedActiveThreadId);
+            } else {
+                this.renderLayout();
+            }
+
+            this.renderer.showNotification("Диалог удалён.", "info");
+        } catch (error) {
+            const message = error instanceof APIError ? error.message : "Не удалось удалить диалог";
             this.renderer.showNotification(message, "error");
         }
     }

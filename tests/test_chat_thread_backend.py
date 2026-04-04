@@ -8,6 +8,7 @@ os.environ.setdefault("COOKIE_SECURE", "false")
 
 import app as app_module
 from llm_gateway import AsyncChatStore, DEFAULT_CHAT_THREAD_ID
+from persistence.conversation_write_coordinator import create_conversation_write_coordinator
 
 
 class FakePipeline:
@@ -363,7 +364,8 @@ class AsyncChatStoreThreadingTests(unittest.IsolatedAsyncioTestCase):
             await store.append_message("alice", message["role"], message["content"], thread_id="thread-b")
 
         await store.append_message("alice", "user", "transient-file-request", thread_id="thread-a")
-        await app_module.restore_chat_history(store, "alice", "thread-a", original_thread_a)
+        coordinator = create_conversation_write_coordinator(store)
+        await app_module.restore_chat_history(coordinator, "alice", "thread-a", original_thread_a)
 
         self.assertEqual(await store.get_history("alice", thread_id="thread-a"), original_thread_a)
         self.assertEqual(await store.get_history("alice", thread_id="thread-b"), original_thread_b)
@@ -432,8 +434,51 @@ class ChatThreadBackendContractTests(unittest.IsolatedAsyncioTestCase):
             response = await app_module.clear_chat(request, current_user={"username": "alice"})
 
         self.assertEqual(response.status_code, 200)
-        chat_store.clear_history.assert_awaited_once_with("alice", thread_id="thread-clear")
+        chat_store.clear_history.assert_awaited_once_with("alice", thread_id="thread-clear", preserve_thread=True)
         self.assertIn(b'"thread_id":"thread-clear"', response.body)
+
+    async def test_delete_thread_endpoint_returns_updated_thread_list_for_active_delete(self):
+        chat_store = type("ChatStore", (), {})()
+        chat_store.list_threads = AsyncMock(
+            side_effect=[
+                [],
+                [{"thread_id": "thread-fallback", "updated_at": 12, "title": "Новый чат", "message_count": 0}],
+            ]
+        )
+        writer = type("Writer", (), {})()
+        writer.clear_thread = AsyncMock(return_value=None)
+        writer.ensure_thread = AsyncMock(return_value="thread-fallback")
+        request = self.build_request(
+            json_payload={"active_thread_id": "thread-active"},
+            chat_store=chat_store,
+            gateway=None,
+        )
+
+        with patch.object(app_module, "enforce_csrf", return_value=None), patch.object(
+            app_module,
+            "build_conversation_writer",
+            return_value=writer,
+        ), patch.object(
+            app_module,
+            "resolve_thread_summaries_for_read_response",
+            AsyncMock(side_effect=lambda request, username, redis_threads: redis_threads),
+        ), patch.object(
+            app_module.uuid,
+            "uuid4",
+            return_value=type("UUID", (), {"hex": "fallback"})(),
+        ):
+            response = await app_module.delete_chat_thread(
+                "thread-active",
+                request,
+                current_user={"username": "alice"},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        writer.clear_thread.assert_awaited_once_with("alice", thread_id="thread-active", preserve_thread=False)
+        writer.ensure_thread.assert_awaited_once_with("alice", thread_id="thread-fallback")
+        self.assertEqual(payload["active_thread_id"], "thread-fallback")
+        self.assertEqual([thread["id"] for thread in payload["threads"]], ["thread-fallback"])
 
     async def test_chat_page_bootstraps_requested_thread_history(self):
         chat_store = type("ChatStore", (), {})()

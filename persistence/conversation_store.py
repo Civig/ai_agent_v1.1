@@ -153,6 +153,23 @@ class ConversationStore:
             session.commit()
             return deleted_count
 
+    def delete_thread(self, username: str, thread_id: str) -> int:
+        normalized_username = username.strip()
+        normalized_thread_id = thread_id.strip()
+        if not normalized_username:
+            raise ValueError("username must not be empty")
+        if not normalized_thread_id:
+            raise ValueError("thread_id must not be empty")
+
+        with self.session_factory() as session:
+            thread = self._find_thread(session, normalized_username, normalized_thread_id)
+            if thread is None:
+                return 0
+
+            session.delete(thread)
+            session.commit()
+            return 1
+
     def import_thread_snapshot(
         self,
         username: str,

@@ -65,6 +65,11 @@ class FakeConversationWriter:
         preserve_thread: bool = True,
     ) -> None:
         self.clear_thread_calls.append((username, thread_id, preserve_thread))
+        if self.chat_store is not None and not preserve_thread:
+            normalized_thread_id = thread_id or "default"
+            self.chat_store.threads = [
+                thread for thread in self.chat_store.threads if thread.get("thread_id") != normalized_thread_id
+            ]
 
     async def replace_thread_snapshot(
         self,
@@ -75,19 +80,28 @@ class FakeConversationWriter:
         self.replace_snapshot_calls.append((username, thread_id, list(messages)))
 
 
-def build_request(*, path: str, query_string: bytes = b"") -> Request:
+def build_request(
+    *,
+    path: str,
+    query_string: bytes = b"",
+    method: str = "POST",
+    chat_store: object | None = None,
+    json_payload: dict[str, object] | None = None,
+) -> Request:
     app = FastAPI()
-    app.state.chat_store = object()
-    return Request(
+    app.state.chat_store = chat_store if chat_store is not None else object()
+    request = Request(
         {
             "type": "http",
-            "method": "POST",
+            "method": method,
             "path": path,
             "headers": [],
             "query_string": query_string,
             "app": app,
         }
     )
+    request.json = AsyncMock(return_value=json_payload or {})
+    return request
 
 
 class AppConversationWritePathTests(unittest.IsolatedAsyncioTestCase):
@@ -151,6 +165,78 @@ class AppConversationWritePathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.body), {"ok": True, "thread_id": "case-1"})
         self.assertEqual(writer.clear_thread_calls, [("alice", "case-1", True)])
+
+    async def test_delete_thread_endpoint_removes_thread_and_keeps_requested_active_thread(self):
+        chat_store = FakeChatStore()
+        chat_store.threads = [
+            {"thread_id": "case-1", "updated_at": 20, "title": "Первый", "message_count": 2},
+            {"thread_id": "case-2", "updated_at": 10, "title": "Второй", "message_count": 1},
+        ]
+        writer = FakeConversationWriter(chat_store)
+        request = build_request(
+            path="/api/threads/case-1",
+            method="DELETE",
+            chat_store=chat_store,
+            json_payload={"active_thread_id": "case-2"},
+        )
+
+        with (
+            patch.object(app_module, "create_conversation_write_coordinator", return_value=writer),
+            patch.object(app_module, "enforce_csrf"),
+            patch.object(
+                app_module,
+                "resolve_thread_summaries_for_read_response",
+                AsyncMock(side_effect=lambda request, username, redis_threads: redis_threads),
+            ),
+        ):
+            response = await app_module.delete_chat_thread(
+                "case-1",
+                request,
+                current_user={"username": "alice"},
+            )
+
+        body = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(writer.clear_thread_calls, [("alice", "case-1", False)])
+        self.assertEqual(body["thread_id"], "case-1")
+        self.assertEqual(body["active_thread_id"], "case-2")
+        self.assertEqual([thread["id"] for thread in body["threads"]], ["case-2"])
+
+    async def test_delete_thread_endpoint_bootstraps_fallback_when_last_thread_removed(self):
+        chat_store = FakeChatStore()
+        chat_store.threads = [
+            {"thread_id": "default", "updated_at": 10, "title": "Новый чат", "message_count": 0},
+        ]
+        writer = FakeConversationWriter(chat_store)
+        request = build_request(
+            path="/api/threads/default",
+            method="DELETE",
+            chat_store=chat_store,
+            json_payload={"active_thread_id": "default"},
+        )
+
+        with (
+            patch.object(app_module, "create_conversation_write_coordinator", return_value=writer),
+            patch.object(app_module, "enforce_csrf"),
+            patch.object(app_module.uuid, "uuid4", return_value=type("UUID", (), {"hex": "fallback"})()),
+            patch.object(
+                app_module,
+                "resolve_thread_summaries_for_read_response",
+                AsyncMock(side_effect=lambda request, username, redis_threads: redis_threads),
+            ),
+        ):
+            response = await app_module.delete_chat_thread(
+                "default",
+                request,
+                current_user={"username": "alice"},
+            )
+
+        body = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(writer.clear_thread_calls, [("alice", "default", False)])
+        self.assertEqual(writer.ensure_thread_calls, [("alice", "thread-fallback")])
+        self.assertEqual(body["active_thread_id"], "thread-fallback")
+        self.assertEqual([thread["id"] for thread in body["threads"]], ["thread-fallback"])
 
 
 if __name__ == "__main__":
