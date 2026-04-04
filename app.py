@@ -143,6 +143,8 @@ RESERVED_AUTH_PROXY_HEADERS = frozenset(
         "x-authenticated-groups",
     }
 )
+ADMIN_DASHBOARD_ALLOWED_USERS = frozenset({"aitest"})
+ADMIN_DASHBOARD_REFRESH_INTERVAL_MS = 8000
 
 sanitize_upload_filename = parser_stage.sanitize_upload_filename
 detect_extension = parser_stage.detect_extension
@@ -651,6 +653,19 @@ def user_is_admin(user_info: Dict[str, Any]) -> bool:
         or "admin" in group
         for group in groups
     )
+
+
+def user_can_access_admin_dashboard(user_info: Dict[str, Any]) -> bool:
+    username = normalize_username(user_info.get("username") or "")
+    return username in ADMIN_DASHBOARD_ALLOWED_USERS
+
+
+async def get_admin_dashboard_user_required(
+    current_user: Dict[str, Any] = Depends(get_current_user_required),
+) -> Dict[str, Any]:
+    if not user_can_access_admin_dashboard(current_user):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return current_user
 
 
 def get_or_create_csrf_token(request: Request) -> str:
@@ -1165,6 +1180,132 @@ async def build_ready_payload(gateway: LLMGateway) -> Dict[str, Any]:
     }
 
 
+def build_pending_by_workload(pending: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    by_workload: Dict[str, Dict[str, Any]] = {}
+    for queue_key, raw_value in pending.items():
+        workload, _, priority = str(queue_key).partition(":")
+        count = max(0, int(raw_value or 0))
+        bucket = by_workload.setdefault(workload or "unknown", {"total": 0, "by_priority": {}})
+        bucket["total"] += count
+        if priority:
+            bucket["by_priority"][priority] = count
+    return by_workload
+
+
+def compute_average_latency_ms(metrics: Dict[str, Any]) -> Optional[float]:
+    total_ms = int(metrics.get("job_latency_total_ms") or 0)
+    count = int(metrics.get("job_latency_count") or 0)
+    if count <= 0:
+        return None
+    return round(total_ms / count, 1)
+
+
+def compute_worker_runtime_status(worker: Dict[str, Any], *, now_ts: int) -> Dict[str, Any]:
+    active_jobs = max(0, int(worker.get("active_jobs") or 0))
+    age_seconds = max(0, now_ts - int(worker.get("last_seen") or 0))
+    if age_seconds > settings.WORKER_HEARTBEAT_TTL_SECONDS:
+        status = "stale"
+    elif active_jobs > 0:
+        status = "working"
+    else:
+        status = "idle"
+    return {
+        "worker_id": str(worker.get("worker_id") or ""),
+        "pool": str(worker.get("worker_pool") or ""),
+        "target_id": str(worker.get("target_id") or ""),
+        "target_kind": str(worker.get("target_kind") or ""),
+        "active_jobs": active_jobs,
+        "last_seen_age_seconds": age_seconds,
+        "status": status,
+    }
+
+
+def compute_target_runtime_status(target: Dict[str, Any], *, now_ts: int) -> Dict[str, Any]:
+    age_seconds = max(0, now_ts - int(target.get("last_seen") or 0))
+    status = "stale" if age_seconds > settings.TARGET_HEARTBEAT_TTL_SECONDS else "online"
+    return {
+        "target_id": str(target.get("target_id") or ""),
+        "target_kind": str(target.get("target_kind") or ""),
+        "supports_workloads": list(target.get("supports_workloads") or []),
+        "base_capacity_tokens": max(0, int(target.get("base_capacity_tokens") or 0)),
+        "cpu_percent": float(target.get("cpu_percent") or 0.0),
+        "ram_free_mb": max(0, int(target.get("ram_free_mb") or 0)),
+        "vram_free_mb": max(0, int(target.get("vram_free_mb") or 0)),
+        "loaded_models": list(target.get("loaded_models") or []),
+        "last_seen_age_seconds": age_seconds,
+        "status": status,
+    }
+
+
+def build_dashboard_warnings(*, ready_payload: Dict[str, Any], pending: Dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    if not ready_payload.get("redis"):
+        warnings.append("Redis недоступен")
+    if not ready_payload.get("scheduler"):
+        warnings.append("Scheduler heartbeat устарел")
+    if not ready_payload.get("capacity"):
+        warnings.append("Свободная chat capacity недоступна")
+    if int(ready_payload.get("workers_working") or 0) <= 0:
+        warnings.append("Нет активных chat workers")
+    chat_backlog = sum(count for key, count in pending.items() if str(key).startswith("chat:"))
+    if chat_backlog > 0:
+        warnings.append(f"В очереди chat ожидают {chat_backlog} задач")
+    return warnings
+
+
+async def build_admin_dashboard_summary(gateway: LLMGateway) -> Dict[str, Any]:
+    ready_payload = await build_ready_payload(gateway)
+    pending = dict(ready_payload.get("pending") or {})
+    metrics = dict(ready_payload.get("metrics") or {})
+    active_workers = await gateway.list_active_workers()
+    active_targets = await gateway.list_active_targets()
+    now_ts = int(time.time())
+    ready = (
+        bool(ready_payload.get("redis"))
+        and bool(ready_payload.get("scheduler"))
+        and int(ready_payload.get("workers_working") or 0) > 0
+        and bool(ready_payload.get("capacity"))
+    )
+    worker_rows = [compute_worker_runtime_status(worker, now_ts=now_ts) for worker in active_workers]
+    target_rows = [compute_target_runtime_status(target, now_ts=now_ts) for target in active_targets]
+    active_models = sorted(
+        {
+            model_name
+            for target in target_rows
+            for model_name in target.get("loaded_models", [])
+            if str(model_name).strip()
+        }
+    )
+    return {
+        "overall_status": "ready" if ready else "degraded",
+        "readiness_status": "ready" if ready else "not_ready",
+        "health_status": "ok" if ready_payload.get("redis") and ready_payload.get("scheduler") else "degraded",
+        "redis": bool(ready_payload.get("redis")),
+        "scheduler": bool(ready_payload.get("scheduler")),
+        "scheduler_status": "healthy" if ready_payload.get("scheduler") else "stale",
+        "scheduler_age_seconds": ready_payload.get("scheduler_age_seconds"),
+        "queue_depth": max(0, int(metrics.get("queue_depth") or 0)),
+        "active_jobs": max(0, int(ready_payload.get("active_jobs") or 0)),
+        "workers_total": max(0, int(ready_payload.get("workers_total") or 0)),
+        "workers_working": max(0, int(ready_payload.get("workers_working") or 0)),
+        "targets": max(0, int(ready_payload.get("targets") or 0)),
+        "capacity": bool(ready_payload.get("capacity")),
+        "capacity_scope": WORKLOAD_CHAT,
+        "failures": max(0, int(metrics.get("failed_jobs") or 0)),
+        "rejected": max(0, int(metrics.get("rejected_jobs") or 0)),
+        "avg_latency_ms": compute_average_latency_ms(metrics),
+        "last_refresh": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_ts)),
+        "pending": pending,
+        "by_workload": build_pending_by_workload(pending),
+        "chat_backlog": sum(count for key, count in pending.items() if str(key).startswith("chat:")),
+        "parser_backlog": sum(count for key, count in pending.items() if str(key).startswith("parse:")),
+        "worker_rows": worker_rows,
+        "target_rows": target_rows,
+        "active_models": active_models,
+        "warnings": build_dashboard_warnings(ready_payload=ready_payload, pending=pending),
+    }
+
+
 async def wait_for_terminal_job(gateway: LLMGateway, job_id: str, timeout_seconds: int) -> Dict[str, Any]:
     deadline = perf_counter() + timeout_seconds
     while perf_counter() < deadline:
@@ -1470,6 +1611,35 @@ async def chat_page(
             "threads": threads,
         },
     )
+
+
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+async def admin_dashboard_page(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+):
+    return templates.TemplateResponse(
+        request,
+        "admin_dashboard.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "is_authenticated": True,
+            "dashboard_api_url": "/api/admin/dashboard/summary",
+            "dashboard_refresh_interval_ms": ADMIN_DASHBOARD_REFRESH_INTERVAL_MS,
+        },
+    )
+
+
+@app.get("/api/admin/dashboard/summary")
+async def get_admin_dashboard_summary(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+):
+    gateway: LLMGateway = request.app.state.llm_gateway
+    payload = await build_admin_dashboard_summary(gateway)
+    payload["current_user"] = current_user["username"]
+    return JSONResponse(payload)
 
 
 @app.get("/api/user")
