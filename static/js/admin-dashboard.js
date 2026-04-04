@@ -1,9 +1,25 @@
 import { APIClient, APIError } from "./api-client.js";
 
-function getCsrfToken() {
-    const match = document.cookie.match(/(?:^|; )csrf_token=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : "";
-}
+const DEFAULT_REFRESH_MS = 8000;
+
+const STATUS_TEXT = {
+    ready: "Норма",
+    degraded: "Внимание",
+    not_ready: "Не готова",
+    ok: "Базовые компоненты отвечают",
+    healthy: "Актуален",
+    stale: "Устарел",
+    working: "Работает",
+    idle: "Ожидает задачи",
+    online: "Доступна",
+};
+
+const WORKLOAD_LABELS = {
+    chat: "chat",
+    parse: "parser",
+    siem: "siem",
+    batch: "batch",
+};
 
 function parseBootstrap() {
     const bootstrapElement = document.getElementById("adminDashboardBootstrap");
@@ -19,263 +35,1354 @@ function parseBootstrap() {
     }
 }
 
-function formatNumber(value) {
-    if (value === null || value === undefined || Number.isNaN(Number(value))) {
-        return "—";
-    }
-    return new Intl.NumberFormat("ru-RU").format(Number(value));
+function getCsrfToken() {
+    const match = document.cookie.match(/(?:^|; )csrf_token=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
 }
 
-function formatTimestamp(value) {
-    if (!value) {
-        return "—";
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-        return "—";
-    }
-    return new Intl.DateTimeFormat("ru-RU", {
-        dateStyle: "short",
-        timeStyle: "medium",
-        timeZone: "UTC",
-    }).format(date) + " UTC";
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
 }
 
-function formatLastSeen(seconds) {
-    if (seconds === null || seconds === undefined) {
-        return "—";
+export function formatNumber(value, fallback = "Нет данных") {
+    return Number.isFinite(Number(value)) ? new Intl.NumberFormat("ru-RU").format(Number(value)) : fallback;
+}
+
+export function formatLatency(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? `${numeric.toFixed(1)} мс` : "Нет данных";
+}
+
+export function formatAge(value) {
+    if (!Number.isFinite(Number(value))) {
+        return "Нет данных";
     }
+
+    const seconds = Math.max(0, Math.floor(Number(value)));
     if (seconds < 60) {
-        return `${seconds} сек назад`;
+        return `${seconds} с`;
     }
+
     const minutes = Math.floor(seconds / 60);
-    return `${minutes} мин назад`;
+    const restSeconds = seconds % 60;
+    if (minutes < 60) {
+        return restSeconds ? `${minutes} мин ${restSeconds} с` : `${minutes} мин`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    const restMinutes = minutes % 60;
+    return restMinutes ? `${hours} ч ${restMinutes} мин` : `${hours} ч`;
 }
 
-function formatLatency(value) {
-    if (value === null || value === undefined) {
-        return "Недоступно";
+export function formatTimestamp(value) {
+    if (!value) {
+        return "Нет данных";
     }
-    return `${formatNumber(value)} ms`;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return String(value);
+    }
+    return parsed.toLocaleString("ru-RU", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
 }
 
-function renderCollection(container, items, renderItem, emptyMessage) {
-    if (!container) {
-        return;
+export function severityClass(level) {
+    const normalized = String(level || "neutral").toLowerCase();
+    if (normalized === "ok") {
+        return "severity-ok";
     }
-    if (!Array.isArray(items) || items.length === 0) {
-        container.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
-        return;
+    if (normalized === "warn") {
+        return "severity-warn";
     }
-    container.replaceChildren(...items.map(renderItem));
+    if (normalized === "critical") {
+        return "severity-critical";
+    }
+    return "severity-neutral";
+}
+
+export function humanizeWorkload(workload) {
+    return WORKLOAD_LABELS[String(workload || "").toLowerCase()] || String(workload || "unknown");
+}
+
+function statusText(status) {
+    return STATUS_TEXT[String(status || "").toLowerCase()] || String(status || "Нет данных");
+}
+
+function queueSeverity(summary) {
+    const queueDepth = Number(summary.queue_depth || 0);
+    if (queueDepth <= 0) {
+        return "ok";
+    }
+    return summary.capacity ? "warn" : "critical";
+}
+
+function capacitySeverity(summary) {
+    return summary.capacity ? "ok" : "critical";
+}
+
+function workersSeverity(summary) {
+    if (Number(summary.workers_total || 0) <= 0 || Number(summary.workers_working || 0) <= 0) {
+        return "critical";
+    }
+    return "ok";
+}
+
+function targetsSeverity(summary) {
+    return Number(summary.targets || 0) > 0 ? "ok" : "critical";
+}
+
+function counterSeverity(value) {
+    return Number(value || 0) > 0 ? "warn" : "ok";
+}
+
+function hasSchedulerGap(summary) {
+    return summary.scheduler_status !== "healthy";
+}
+
+function hasRedisGap(summary) {
+    return !summary.redis;
+}
+
+function hasWorkerGap(summary) {
+    return Number(summary.workers_working || 0) <= 0;
+}
+
+function hasTargetVisibilityGap(summary) {
+    return Number(summary.targets || 0) <= 0;
+}
+
+function hasActiveModelVisibilityGap(summary) {
+    return !Array.isArray(summary.active_models) || summary.active_models.length <= 0;
+}
+
+function queueTotals(summary) {
+    return {
+        queueDepth: Number(summary.queue_depth || 0),
+        activeJobs: Number(summary.active_jobs || 0),
+        chatBacklog: Number(summary.chat_backlog || 0),
+        parserBacklog: Number(summary.parser_backlog || 0),
+    };
+}
+
+export function deriveCapacityAssessment(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary)) {
+        return {
+            state: "Оценка запаса недоступна",
+            severity: "critical",
+            reason: "Redis сейчас недоступен, поэтому оценка очередей и admission-state может быть неполной.",
+        };
+    }
+
+    if (hasSchedulerGap(summary)) {
+        return {
+            state: "Оценка запаса недоступна",
+            severity: "critical",
+            reason: "Scheduler heartbeat устарел, поэтому admission-сигнал уже может не отражать реальное состояние мощности.",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            state: "Оценка запаса недоступна",
+            severity: "warn",
+            reason: "Не видно активных вычислительных целей, поэтому честно оценить запас для новых chat-задач нельзя.",
+        };
+    }
+
+    if (summary.capacity) {
+        if (queueDepth <= 0) {
+            return {
+                state: "Запас есть",
+                severity: "ok",
+                reason: "Система может принимать новые chat-задачи без ожидания в очереди.",
+            };
+        }
+        return {
+            state: "Запас ограничен",
+            severity: "warn",
+            reason: "Свободная chat capacity ещё reported, но очередь уже не пустая и рост нагрузки нужно наблюдать внимательнее.",
+        };
+    }
+
+    if (chatBacklog > 0 || queueDepth > 0) {
+        return {
+            state: "Запас исчерпан",
+            severity: "critical",
+            reason: "Chat-задачи уже накапливаются в очереди, значит следующая chat-нагрузка почти наверняка будет ждать.",
+        };
+    }
+
+    if (activeJobs > 0) {
+        return {
+            state: "Запас ограничен",
+            severity: "warn",
+            reason: "Текущая chat-мощность занята активной задачей; следующий chat-запрос может ждать освобождения этого слота.",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            state: "Запас исчерпан",
+            severity: "critical",
+            reason: "Сейчас нет активных chat workers, которые могли бы взять следующую задачу в обработку.",
+        };
+    }
+
+    return {
+        state: "Запас исчерпан",
+        severity: "critical",
+        reason: "Scheduler не видит свободной chat capacity для следующей задачи.",
+    };
+}
+
+export function derivePrimaryBottleneck(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary)) {
+        return {
+            title: "Control-plane visibility ограничена",
+            detail: "Redis недоступен, поэтому runtime state и очереди могут быть отражены неполно.",
+            severity: "critical",
+        };
+    }
+
+    if (hasSchedulerGap(summary)) {
+        return {
+            title: "Планировщик публикует устаревший heartbeat",
+            detail: "Без свежего scheduler heartbeat admission-state уже может быть неактуален.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            title: "Нет активных chat workers",
+            detail: "Даже если запрос принят, без working worker он может дольше оставаться до реальной обработки.",
+            severity: "critical",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            title: "Не видно активных вычислительных целей",
+            detail: "Scheduler не может честно оценить запас, если в runtime не reported ни одной живой цели исполнения.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            title: "Свободная chat capacity уже занята",
+            detail: "Chat backlog уже появился, значит спрос на chat path превысил текущий свободный admission-запас.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            title: "Текущая chat-мощность занята активной задачей",
+            detail: "Очередь пока пустая, но следующий chat-запрос может ждать, пока освободится текущая мощность.",
+            severity: "warn",
+        };
+    }
+
+    if (hasActiveModelVisibilityGap(summary)) {
+        return {
+            title: "Нет reported active models",
+            detail: "Цели видны, но активные модели не опубликованы, поэтому оператору сложнее оценить фактическую готовность target path.",
+            severity: "warn",
+        };
+    }
+
+    if (queueDepth > 0) {
+        return {
+            title: "Очередь уже формируется",
+            detail: "В системе есть pending-задачи, хотя свободная chat capacity ещё reported доступной.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        title: "Явных ограничений не видно",
+        detail: "По текущим полям не видно признаков bottleneck, который уже мешает новым chat-задачам.",
+        severity: "ok",
+    };
+}
+
+export function deriveScalingHint(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary) || hasSchedulerGap(summary)) {
+        return {
+            title: "Недостаточно данных для точной оценки запаса",
+            detail: "Сначала восстановите свежий control-plane сигнал, иначе говорить о масштабе роста нагрузки будет не совсем честно.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            title: "Сначала восстановите активные chat workers",
+            detail: "Пока в системе нет working worker, дополнительная нагрузка будет только накапливаться в ожидании.",
+            severity: "critical",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            title: "Сначала восстановите visibility по вычислительным целям",
+            detail: "Без живых target heartbeat нельзя честно оценить, какой запас мощности остаётся для роста нагрузки.",
+            severity: "critical",
+        };
+    }
+
+    if (summary.capacity && queueDepth <= 0) {
+        return {
+            title: "Система может принимать новые chat-запросы без ожидания",
+            detail: "Очередь пустая, свободная chat capacity есть, поэтому текущий запас выглядит нормальным.",
+            severity: "ok",
+        };
+    }
+
+    if (summary.capacity && queueDepth > 0) {
+        return {
+            title: "Система пока выдерживает нагрузку, но запас уже не пустой",
+            detail: "Новые chat-задачи ещё могут приниматься, однако рост очереди стоит наблюдать до появления устойчивого backlog.",
+            severity: "warn",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            title: "Chat capacity уже занята; для роста нагрузки может потребоваться дополнительная вычислительная цель",
+            detail: "Backlog уже виден в chat queue, поэтому следующий рост входящих chat-запросов будет увеличивать ожидание.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            title: "Следующий chat-запрос вероятно будет ждать освобождения текущей мощности",
+            detail: "Система занята полезной работой, но резерв для следующей chat-задачи прямо сейчас не просматривается.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        title: "Точный запас оценить нельзя",
+        detail: "Текущие поля не позволяют безопасно сказать, выдержит ли система рост chat-нагрузки без ожидания.",
+        severity: "warn",
+    };
+}
+
+export function deriveNextChatExpectation(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary) || hasSchedulerGap(summary)) {
+        return {
+            title: "Нельзя честно оценить ожидание",
+            detail: "Сначала нужно восстановить надёжный control-plane сигнал по scheduler и очередям.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            title: "Следующий chat-запрос под вопросом",
+            detail: "Без active chat worker новый запрос может застрять до реальной обработки.",
+            severity: "critical",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            title: "Ожидание нельзя подтвердить",
+            detail: "Не видно живых target heartbeat, поэтому admission-сигнал недостаточно надёжен.",
+            severity: "warn",
+        };
+    }
+
+    if (summary.capacity && queueDepth <= 0) {
+        return {
+            title: "Примется без ожидания",
+            detail: "Свободная chat capacity есть, а очередь не давит на admission.",
+            severity: "ok",
+        };
+    }
+
+    if (summary.capacity && queueDepth > 0) {
+        return {
+            title: "Вероятно примется, но очередь уже есть",
+            detail: "Система ещё reported имеет запас, но ждать подтверждения admission уже может понадобиться.",
+            severity: "warn",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            title: "Будет ждать в очереди",
+            detail: "Chat backlog уже появился, поэтому новый запрос почти наверняка не стартует сразу.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            title: "Вероятно подождёт",
+            detail: "Текущая chat-мощность занята активной задачей и свободный слот ещё не виден.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        title: "Ожидание не подтверждено",
+        detail: "Текущие поля не дают надёжного ответа, примется ли новый chat-запрос сразу.",
+        severity: "warn",
+    };
+}
+
+export function deriveQueuePressure(summary) {
+    const { queueDepth, activeJobs, chatBacklog, parserBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary)) {
+        return {
+            state: "Оценка давления неполна",
+            detail: "Redis недоступен, поэтому queue pressure и backlog нельзя считать полностью надёжными.",
+            severity: "critical",
+        };
+    }
+
+    if (queueDepth <= 0 && activeJobs <= 0) {
+        return {
+            state: "Нет давления",
+            detail: "Очередь пуста и активных задач сейчас нет: новых запросов в ожидании не видно.",
+            severity: "ok",
+        };
+    }
+
+    if (queueDepth <= 0 && activeJobs > 0 && !summary.capacity) {
+        return {
+            state: "Система занята",
+            detail: "Очередь пустая, потому что задача уже выполняется, но свободной chat-мощности для следующей задачи сейчас нет.",
+            severity: "warn",
+        };
+    }
+
+    if (queueDepth <= 0 && activeJobs > 0 && summary.capacity) {
+        return {
+            state: "Под контролем",
+            detail: "Задачи уже выполняются, но свободная chat capacity ещё видна и явного накопления ожидания нет.",
+            severity: "ok",
+        };
+    }
+
+    if (chatBacklog > 0 && !summary.capacity) {
+        return {
+            state: "Высокое давление",
+            detail: "Chat-задачи уже ждут в очереди: admission или свободная мощность не успевают за входящим спросом.",
+            severity: "critical",
+        };
+    }
+
+    if (queueDepth > 0 && summary.capacity) {
+        return {
+            state: "Умеренное давление",
+            detail: "Очередь уже есть, но система всё ещё reported имеет запас для новых chat-задач.",
+            severity: "warn",
+        };
+    }
+
+    if (parserBacklog > 0 && chatBacklog <= 0) {
+        return {
+            state: "Локальная очередь parser",
+            detail: "Давление сейчас видно в parser/document path, а не в chat path.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        state: "Есть давление",
+        detail: "В очередях уже есть задачи, поэтому admission и workers стоит наблюдать внимательнее.",
+        severity: queueSeverity(summary),
+    };
+}
+
+export function deriveReadinessView(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (summary.readiness_status === "ready") {
+        return {
+            value: "Готовность нормальная",
+            help: "Новые chat-задачи могут приниматься без явного ожидания по текущему readiness-сигналу.",
+            severity: "ok",
+        };
+    }
+
+    if (hasRedisGap(summary) || hasSchedulerGap(summary)) {
+        return {
+            value: "Готовность нарушена",
+            help: "Нет надёжного control-plane сигнала, поэтому readiness нельзя считать устойчивой.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            value: "Готовность нарушена: нет активных chat workers",
+            help: "Запросы могут быть приняты, но без active worker реальная обработка новых chat-задач не начнётся штатно.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            value: "Готовность ограничена: chat-задачи уже ждут",
+            help: "Система остаётся живой, но новые chat-задачи уже сталкиваются с ожиданием в очереди.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            value: "Готовность ограничена: система занята",
+            help: "Очередь ещё не растёт, но свободной chat-мощности для следующей задачи прямо сейчас нет.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        value: "Готовность ограничена",
+        help: "Сервис отвечает, но не все сигналы подтверждают запас для новых chat-задач.",
+        severity: "warn",
+    };
+}
+
+export function deriveHealthView(summary) {
+    if (summary.health_status === "ok") {
+        return {
+            value: "Базовые компоненты отвечают",
+            help: "Health не обещает свободную мощность, но показывает, что control-plane и scheduler сейчас в живом состоянии.",
+            severity: "ok",
+        };
+    }
+
+    if (hasRedisGap(summary) && hasSchedulerGap(summary)) {
+        return {
+            value: "Проблема в Redis и scheduler",
+            help: "И очереди, и admission-сигнал могут быть неполными, поэтому operator-картина уже ненадёжна.",
+            severity: "critical",
+        };
+    }
+
+    if (hasRedisGap(summary)) {
+        return {
+            value: "Проблема в Redis",
+            help: "Control-plane данные по очередям и состоянию runtime могут быть неполными.",
+            severity: "critical",
+        };
+    }
+
+    return {
+        value: "Проблема в scheduler heartbeat",
+        help: "Без свежего scheduler heartbeat readiness и запас мощности могут быть оценены неточно.",
+        severity: "critical",
+    };
+}
+
+export function deriveOverallState(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (summary.overall_status === "ready" && queueDepth <= 0 && summary.capacity) {
+        return {
+            severity: "ok",
+            title: "Система работает штатно",
+            badge: "Норма",
+            description: "Система может принимать новые chat-задачи без ожидания, а очередь сейчас не сигнализирует о давлении.",
+        };
+    }
+
+    if (hasRedisGap(summary)) {
+        return {
+            severity: "critical",
+            title: "Данных недостаточно для точной оценки",
+            badge: "Нет сигнала",
+            description: "Redis недоступен, поэтому часть control-plane картины по очередям и запасу мощности может быть неполной.",
+        };
+    }
+
+    if (hasSchedulerGap(summary)) {
+        return {
+            severity: "critical",
+            title: "Данных недостаточно для точной оценки",
+            badge: "Heartbeat устарел",
+            description: "Scheduler heartbeat устарел, поэтому admission-state и оценка свободной chat capacity уже могут быть неточными.",
+        };
+    }
+
+    if (hasWorkerGap(summary) || hasTargetVisibilityGap(summary)) {
+        return {
+            severity: "critical",
+            title: "Есть деградация chat capacity",
+            badge: "Нужно действие",
+            description: "Видимость по worker/target path сейчас неполная или деградировала, поэтому штатная обработка новых chat-задач под вопросом.",
+        };
+    }
+
+    if (summary.capacity && queueDepth > 0) {
+        return {
+            severity: "warn",
+            title: "Система занята, но работает",
+            badge: "Под нагрузкой",
+            description: "Очередь уже есть, но по текущим сигналам система ещё может принимать новые chat-задачи без полного исчерпания запаса.",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0 && !hasRedisGap(summary) && !hasSchedulerGap(summary) && !hasWorkerGap(summary)) {
+        return {
+            severity: "warn",
+            title: "Система занята, но работает",
+            badge: "Занята",
+            description: "Очередь пока пустая, потому что задача уже выполняется, но следующая chat-задача может подождать освобождения текущей мощности.",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            severity: "critical",
+            title: "Новые chat-задачи будут ждать",
+            badge: "Очередь растёт",
+            description: "Свободная chat capacity уже закончилась, и backlog подтверждает, что новая chat-нагрузка накапливается в очереди.",
+        };
+    }
+
+    return {
+        severity: "warn",
+        title: "Состояние требует наблюдения",
+        badge: "Наблюдение",
+        description: "Базовые компоненты отвечают, но часть сигналов уже показывает ограничения по мощности или неполную visibility runtime.",
+    };
+}
+
+export function buildOperationalSummary(summary) {
+    const bottleneck = derivePrimaryBottleneck(summary);
+    const nextChat = deriveNextChatExpectation(summary);
+    const scaling = deriveScalingHint(summary);
+
+    return [
+        {
+            label: "Что ограничивает систему сейчас",
+            value: bottleneck.title,
+            detail: bottleneck.detail,
+            severity: bottleneck.severity,
+        },
+        {
+            label: "Следующий chat-запрос",
+            value: nextChat.title,
+            detail: nextChat.detail,
+            severity: nextChat.severity,
+        },
+        {
+            label: "Масштабирование",
+            value: scaling.title,
+            detail: scaling.detail,
+            severity: scaling.severity,
+        },
+    ];
+}
+
+export function buildKpiCards(summary) {
+    const overall = deriveOverallState(summary);
+    const capacity = deriveCapacityAssessment(summary);
+    return [
+        {
+            label: "Состояние",
+            value: overall.badge,
+            help: "Главный operator-сигнал: всё штатно, система занята, новые chat-задачи будут ждать или данных недостаточно.",
+            meta: overall.title,
+            severity: overall.severity,
+        },
+        {
+            label: "Запас",
+            value: capacity.state,
+            help: "Показывает, есть ли подтверждённая свободная chat capacity для следующей задачи.",
+            meta: capacity.reason,
+            severity: capacity.severity,
+        },
+        {
+            label: "Очередь",
+            value: formatNumber(summary.queue_depth),
+            help: "Сколько задач ещё ждут admission/start и не начали выполняться.",
+            meta: Number(summary.chat_backlog || 0) > 0
+                ? `chat backlog: ${formatNumber(summary.chat_backlog)}`
+                : "Новых chat-задач в ожидании не видно",
+            severity: queueSeverity(summary),
+        },
+        {
+            label: "Активные задачи",
+            value: formatNumber(summary.active_jobs),
+            help: "Сколько задач уже находятся в active runtime state.",
+            meta: Number(summary.active_jobs || 0) > 0 ? "Есть выполняющиеся задачи" : "Сейчас активных задач нет",
+            severity: Number(summary.active_jobs || 0) > 0 ? "ok" : "neutral",
+        },
+        {
+            label: "Воркеры",
+            value: `${formatNumber(summary.workers_working)} / ${formatNumber(summary.workers_total)}`,
+            help: "Worker — процесс, который забирает задачу из dispatch и выполняет её.",
+            meta: "Активно работают / всего видимых воркеров",
+            severity: workersSeverity(summary),
+        },
+        {
+            label: "Цели",
+            value: formatNumber(summary.targets),
+            help: "Target — цель исполнения, на которую scheduler может допустить задачу.",
+            meta: "Видимые вычислительные цели исполнения",
+            severity: targetsSeverity(summary),
+        },
+        {
+            label: "Среднее время",
+            value: formatLatency(summary.avg_latency_ms),
+            help: "Показывается только когда реально есть latency counters. Если значимых данных нет, панель честно выводит 'Нет данных'.",
+            meta: Number(summary.avg_latency_ms || 0) > 0 ? "По завершённым задачам" : "Нет данных по latency",
+            severity: Number(summary.avg_latency_ms || 0) > 0 ? "neutral" : "warn",
+        },
+    ];
+}
+
+export function buildAlertItems(summary) {
+    const items = [];
+
+    if (!summary.redis) {
+        items.push({
+            severity: "critical",
+            title: "Redis недоступен",
+            detail: "Control-plane состояние и очереди могут быть недоступны или неполными.",
+            recommendation: "Проверьте состояние Redis и сетевую доступность приложения к нему.",
+        });
+    }
+
+    if (summary.scheduler_status !== "healthy") {
+        items.push({
+            severity: "critical",
+            title: "Данные scheduler устарели",
+            detail: `Последний heartbeat планировщика: ${formatAge(summary.scheduler_age_seconds)} назад.`,
+            recommendation: "Проверьте heartbeat и логи scheduler: без актуального scheduler admission может быть непредсказуем.",
+        });
+    }
+
+    if (Number(summary.workers_working || 0) <= 0) {
+        items.push({
+            severity: "critical",
+            title: "Нет активных chat workers",
+            detail: "Даже если сервис отвечает, новые chat-задачи могут застрять до этапа реальной обработки.",
+            recommendation: "Проверьте chat worker heartbeat, binding к target и его runtime-состояние.",
+        });
+    }
+
+    if (Number(summary.targets || 0) <= 0) {
+        items.push({
+            severity: "critical",
+            title: "Не видно активных вычислительных целей",
+            detail: "Target heartbeat данные отсутствуют, поэтому запас мощности и маршрут admission оцениваются неполно.",
+            recommendation: "Проверьте target visibility и убедитесь, что вычислительные цели публикуют heartbeat.",
+        });
+    }
+
+    if (!summary.capacity) {
+        items.push({
+            severity: Number(summary.chat_backlog || 0) > 0 ? "critical" : "warn",
+            title: "Свободная мощность для chat сейчас недоступна",
+            detail: "Новые chat-задачи сейчас могут ждать admission и дольше оставаться в очереди.",
+            recommendation: "Сверьте backlog, количество working workers и доступные targets.",
+        });
+    }
+
+    if (Number(summary.chat_backlog || 0) > 0) {
+        items.push({
+            severity: summary.capacity ? "warn" : "critical",
+            title: `Есть ожидающие chat-задачи: ${formatNumber(summary.chat_backlog)}`,
+            detail: "Часть пользовательских chat-запросов ещё не начала выполняться.",
+            recommendation: "Следите за ростом очереди и проверьте, есть ли свободная мощность для новых задач.",
+        });
+    }
+
+    if (Number(summary.parser_backlog || 0) > 0) {
+        items.push({
+            severity: "warn",
+            title: `Есть parser backlog: ${formatNumber(summary.parser_backlog)}`,
+            detail: "Задачи разбора документов ожидают своего выполнения.",
+            recommendation: "Если backlog растёт, проверьте parser pool и текущую загрузку document path.",
+        });
+    }
+
+    if (Array.isArray(summary.active_models) && summary.active_models.length <= 0) {
+        items.push({
+            severity: "warn",
+            title: "Нет reported active models",
+            detail: "Список активных моделей пуст, поэтому готовность target path видна не полностью.",
+            recommendation: "Сверьте target heartbeat и проверьте, публикуются ли loaded models там, где это ожидается.",
+        });
+    }
+
+    if (Number(summary.failures || 0) > 0) {
+        items.push({
+            severity: "warn",
+            title: `Есть ошибки обработки: ${formatNumber(summary.failures)}`,
+            detail: "Runtime уже зафиксировал завершения с ошибкой.",
+            recommendation: "Проверьте свежие ошибки в assistant / worker / scheduler логах и сравните с queue state.",
+        });
+    }
+
+    if (Number(summary.rejected || 0) > 0) {
+        items.push({
+            severity: "warn",
+            title: `Есть отклонённые запросы: ${formatNumber(summary.rejected)}`,
+            detail: "Admission logic уже отклоняла часть задач.",
+            recommendation: "Сопоставьте объём очереди с доступной мощностью и admission pressure.",
+        });
+    }
+
+    if (!items.length) {
+        items.push({
+            severity: "ok",
+            title: "Критических предупреждений нет",
+            detail: "По текущим runtime-полям система выглядит штатно: базовые компоненты отвечают, а очередь не сигнализирует о проблеме.",
+            recommendation: "Продолжайте наблюдать за queue depth, capacity и heartbeat, но срочных действий не требуется.",
+        });
+    }
+
+    return items;
+}
+
+export function buildRuntimeRows(summary) {
+    const readiness = deriveReadinessView(summary);
+    const health = deriveHealthView(summary);
+    const capacity = deriveCapacityAssessment(summary);
+    const scaling = deriveScalingHint(summary);
+    const activeModels = Array.isArray(summary.active_models) && summary.active_models.length
+        ? summary.active_models.join(", ")
+        : "Нет данных";
+
+    return [
+        {
+            label: "Готовность системы",
+            value: readiness.value,
+            help: readiness.help,
+            severity: readiness.severity,
+        },
+        {
+            label: "Жизнеспособность",
+            value: health.value,
+            help: health.help,
+            severity: health.severity,
+        },
+        {
+            label: "Планировщик",
+            value: summary.scheduler_status === "healthy" ? "Heartbeat актуален" : "Heartbeat устарел",
+            help: "Scheduler управляет admission и dispatch, поэтому stale heartbeat требует отдельной проверки.",
+            severity: summary.scheduler_status === "healthy" ? "ok" : "critical",
+        },
+        {
+            label: "Возраст heartbeat планировщика",
+            value: formatAge(summary.scheduler_age_seconds),
+            help: "Чем больше возраст, тем выше риск, что информация scheduler уже неактуальна.",
+            severity: summary.scheduler_status === "healthy" ? "neutral" : "warn",
+        },
+        {
+            label: "Оценка запаса для chat",
+            value: capacity.state,
+            help: capacity.reason,
+            severity: capacity.severity,
+        },
+        {
+            label: "Подсказка по масштабированию",
+            value: scaling.title,
+            help: scaling.detail,
+            severity: scaling.severity,
+        },
+        {
+            label: "Активные модели",
+            value: activeModels,
+            help: "Показываются только модели, которые реально reported активными целями. Если данных нет, мы это не скрываем.",
+            severity: activeModels === "Нет данных" ? "warn" : "neutral",
+        },
+        {
+            label: "Последнее обновление панели",
+            value: formatTimestamp(summary.last_refresh),
+            help: "Панель автоматически обновляется и всегда показывает только последнее полученное состояние.",
+            severity: "neutral",
+        },
+    ];
+}
+
+export function deriveWorkerSnapshotNote(summary, workers) {
+    const reportedWorking = Number(summary.workers_working || 0);
+    const totalActiveJobs = Number(summary.active_jobs || 0);
+    const heartbeatWorking = Array.isArray(workers)
+        ? workers.filter((worker) => worker?.status === "working").length
+        : 0;
+
+    if (reportedWorking > heartbeatWorking) {
+        return `Aggregate summary видит ${formatNumber(reportedWorking)} working worker, но heartbeat snapshot по строкам сейчас показывает ${formatNumber(heartbeatWorking)}. Это может кратковременно отставать от live state.`;
+    }
+
+    if (totalActiveJobs > 0 && heartbeatWorking <= 0) {
+        return "Есть активные задачи, но heartbeat snapshot ещё не показал working worker. Это может быть кратковременная задержка публикации heartbeat.";
+    }
+
+    return "Статус в таблице — это heartbeat snapshot по каждому worker. Он может кратковременно отставать от aggregate summary.";
+}
+
+export function buildObservedTargetWorkloads(summary) {
+    const observed = new Map();
+    for (const worker of Array.isArray(summary.worker_rows) ? summary.worker_rows : []) {
+        const targetId = String(worker?.target_id || "").trim();
+        if (!targetId) {
+            continue;
+        }
+        const workload = String(worker?.pool || "").trim();
+        if (!workload) {
+            continue;
+        }
+        if (!observed.has(targetId)) {
+            observed.set(targetId, new Set());
+        }
+        observed.get(targetId).add(humanizeWorkload(workload));
+    }
+    return observed;
+}
+
+export function buildTargetWorkloadPresentation(summary, target) {
+    const observedByTarget = buildObservedTargetWorkloads(summary);
+    const targetId = String(target?.target_id || "").trim();
+    const observedSet = targetId && observedByTarget.has(targetId) ? observedByTarget.get(targetId) : new Set();
+    const reported = Array.isArray(target?.supports_workloads)
+        ? target.supports_workloads.map((item) => humanizeWorkload(item))
+        : [];
+    const observed = Array.from(observedSet);
+
+    return {
+        reported,
+        observed,
+        note: observed.length
+            ? "Capabilities показаны отдельно от наблюдаемой нагрузки по worker heartbeat."
+            : "Наблюдаемая нагрузка по worker heartbeat сейчас не видна; это не означает, что target не может обслуживать chat.",
+    };
+}
+
+export function deriveTargetsSectionNote(summary, targets) {
+    const visibleTargets = Array.isArray(targets) ? targets.length : 0;
+    const observedTargets = buildObservedTargetWorkloads(summary).size;
+    if (visibleTargets <= 0) {
+        return "";
+    }
+    if (observedTargets <= 0) {
+        return "Capabilities и наблюдаемая нагрузка показаны отдельно. Если наблюдаемая нагрузка пустая, это значит только то, что worker heartbeat её сейчас не reported.";
+    }
+    return "Capabilities показаны отдельно от наблюдаемой нагрузки, чтобы не путать поддерживаемые workload и фактическое текущее использование.";
+}
+
+export function buildQueueOverview(summary) {
+    const pressure = deriveQueuePressure(summary);
+    return [
+        {
+            label: "Всего задач в очередях",
+            value: formatNumber(summary.queue_depth),
+            detail: "Все pending queues по workloads и приоритетам",
+            severity: queueSeverity(summary),
+        },
+        {
+            label: "Давление очереди",
+            value: pressure.state,
+            detail: pressure.detail,
+            severity: pressure.severity,
+        },
+        {
+            label: "Ожидающие chat-задачи",
+            value: formatNumber(summary.chat_backlog),
+            detail: "Сколько chat-задач ждёт admission/start",
+            severity: Number(summary.chat_backlog || 0) > 0 ? (summary.capacity ? "warn" : "critical") : "ok",
+        },
+        {
+            label: "Ожидающие parser-задачи",
+            value: formatNumber(summary.parser_backlog),
+            detail: "Сколько document/parser задач ещё ждёт обработки",
+            severity: Number(summary.parser_backlog || 0) > 0 ? "warn" : "ok",
+        },
+    ];
+}
+
+export function buildQueueEntries(summary) {
+    return Object.entries(summary.pending || {}).map(([queueKey, count]) => {
+        const [workload, priority = ""] = queueKey.split(":");
+        const numericCount = Number(count || 0);
+        return {
+            queueKey,
+            title: `${humanizeWorkload(workload)} · приоритет ${priority || "n/a"}`,
+            value: numericCount,
+            help: numericCount > 0 ? "В этой очереди есть ожидающие задачи." : "Ожидающих задач сейчас нет.",
+            severity: numericCount > 0 ? (workload === "chat" && !summary.capacity ? "critical" : "warn") : "ok",
+        };
+    });
+}
+
+export function buildWorkloadEntries(summary) {
+    return Object.entries(summary.by_workload || {}).map(([workload, payload]) => {
+        const priorities = Object.entries(payload.by_priority || {})
+            .map(([priority, count]) => `${priority}: ${formatNumber(count)}`)
+            .join(" · ");
+        return {
+            workload: humanizeWorkload(workload),
+            total: Number(payload.total || 0),
+            priorities: priorities || "Нет разбивки по приоритетам",
+            severity: Number(payload.total || 0) > 0 ? (workload === "chat" && !summary.capacity ? "critical" : "warn") : "ok",
+        };
+    });
+}
+
+function renderChips(items, { mutedFallback = "Нет данных" } = {}) {
+    const values = Array.isArray(items) ? items.filter((item) => String(item || "").trim()) : [];
+    if (!values.length) {
+        return `<span class="chip chip--muted">${escapeHtml(mutedFallback)}</span>`;
+    }
+    return values.map((item) => `<span class="chip">${escapeHtml(item)}</span>`).join("");
 }
 
 class AdminDashboardApp {
     constructor(bootstrap) {
         this.bootstrap = bootstrap;
         this.apiClient = new APIClient({
-            getCsrfToken: () => getCsrfToken(),
+            getCsrfToken,
             onUnauthorized: () => {
                 window.location.href = "/login";
             },
         });
-        this.refreshTimer = null;
         this.elements = {
-            error: document.getElementById("adminDashboardError"),
-            lastRefresh: document.getElementById("adminLastRefresh"),
-            overallStatus: document.getElementById("adminOverallStatus"),
-            summaryQueueDepth: document.getElementById("summaryQueueDepth"),
-            summaryActiveJobs: document.getElementById("summaryActiveJobs"),
-            summaryWorkers: document.getElementById("summaryWorkers"),
-            summaryTargets: document.getElementById("summaryTargets"),
-            summaryFailures: document.getElementById("summaryFailures"),
-            chatBacklogValue: document.getElementById("chatBacklogValue"),
-            parserBacklogValue: document.getElementById("parserBacklogValue"),
-            pendingQueuesList: document.getElementById("pendingQueuesList"),
+            heroMeaning: document.getElementById("heroMeaning"),
+            overallStatusTitle: document.getElementById("overallStatusTitle"),
+            overallStatusBadge: document.getElementById("overallStatusBadge"),
+            schedulerHealthBadge: document.getElementById("schedulerHealthBadge"),
+            statusSupportText: document.getElementById("statusSupportText"),
+            lastRefreshLabel: document.getElementById("lastRefreshLabel"),
+            readinessStatusValue: document.getElementById("readinessStatusValue"),
             healthStatusValue: document.getElementById("healthStatusValue"),
-            schedulerStatusValue: document.getElementById("schedulerStatusValue"),
-            capacityValue: document.getElementById("capacityValue"),
-            avgLatencyValue: document.getElementById("avgLatencyValue"),
-            activeModelsList: document.getElementById("activeModelsList"),
-            workersMeta: document.getElementById("workersMeta"),
+            capacityStatusValue: document.getElementById("capacityStatusValue"),
+            queueStatusValue: document.getElementById("queueStatusValue"),
+            operatorSummaryStrip: document.getElementById("operatorSummaryStrip"),
+            kpiGrid: document.getElementById("kpiGrid"),
+            alertList: document.getElementById("alertList"),
+            queueOverview: document.getElementById("queueOverview"),
+            queueBreakdown: document.getElementById("queueBreakdown"),
+            workloadBreakdown: document.getElementById("workloadBreakdown"),
+            runtimeSummary: document.getElementById("runtimeSummary"),
+            workersSectionNote: document.getElementById("workersSectionNote"),
             workersTableBody: document.getElementById("workersTableBody"),
-            targetsGrid: document.getElementById("targetsGrid"),
+            targetsSectionNote: document.getElementById("targetsSectionNote"),
+            targetsTableBody: document.getElementById("targetsTableBody"),
         };
+        this.refreshTimer = null;
+        this.loading = false;
     }
 
     async init() {
         await this.refresh();
-        const interval = Number(this.bootstrap?.refreshIntervalMs || 0);
-        if (interval > 0) {
-            this.refreshTimer = window.setInterval(() => {
-                this.refresh().catch((error) => {
-                    console.error("Dashboard refresh failed:", error);
-                });
-            }, interval);
-        }
+        this.refreshTimer = window.setInterval(() => {
+            void this.refresh();
+        }, Math.max(5000, Number(this.bootstrap.refreshIntervalMs) || DEFAULT_REFRESH_MS));
     }
 
     async refresh() {
+        if (this.loading) {
+            return;
+        }
+
+        this.loading = true;
         try {
-            const payload = await this.apiClient.requestJSON(this.bootstrap.apiUrl, { method: "GET", timeout: 10000 });
-            this.render(payload);
-            this.hideError();
+            const summary = await this.apiClient.requestJSON(this.bootstrap.apiUrl, { method: "GET", timeout: 10000 });
+            this.render(summary);
         } catch (error) {
-            const message = error instanceof APIError ? `${error.message} (HTTP ${error.status})` : "Не удалось обновить dashboard";
-            this.showError(message);
+            console.error("Admin dashboard refresh failed:", error);
+            this.renderError(error);
+        } finally {
+            this.loading = false;
         }
     }
 
-    render(payload) {
-        const summary = payload.summary || {};
-        const queues = payload.queues || {};
-        const metrics = payload.metrics || {};
-        const health = payload.health || {};
+    render(summary) {
+        const overall = deriveOverallState(summary);
+        const capacity = deriveCapacityAssessment(summary);
+        const queuePressure = deriveQueuePressure(summary);
+        const readiness = deriveReadinessView(summary);
+        const health = deriveHealthView(summary);
+        const nextChat = deriveNextChatExpectation(summary);
+        const schedulerSeverity = summary.scheduler_status === "healthy" ? "ok" : "critical";
+        this.elements.heroMeaning.textContent = `${capacity.state}. ${derivePrimaryBottleneck(summary).title}.`;
+        this.elements.overallStatusTitle.textContent = overall.title;
+        this.elements.overallStatusBadge.className = `status-badge ${severityClass(overall.severity)}`;
+        this.elements.overallStatusBadge.textContent = overall.badge;
+        this.elements.schedulerHealthBadge.className = `status-badge ${severityClass(schedulerSeverity)}`;
+        this.elements.schedulerHealthBadge.textContent =
+            summary.scheduler_status === "healthy"
+                ? `Планировщик актуален · ${formatAge(summary.scheduler_age_seconds)}`
+                : `Планировщик устарел · ${formatAge(summary.scheduler_age_seconds)}`;
+        this.elements.statusSupportText.textContent = nextChat.detail;
+        this.elements.lastRefreshLabel.textContent = formatTimestamp(summary.last_refresh);
+        this.elements.readinessStatusValue.textContent = readiness.value;
+        this.elements.healthStatusValue.textContent = health.value;
+        this.elements.capacityStatusValue.textContent = capacity.state;
+        this.elements.queueStatusValue.textContent = queuePressure.state;
 
-        this.elements.lastRefresh.textContent = formatTimestamp(payload.last_refresh);
-        this.elements.overallStatus.textContent = this.describeStatus(payload.overall_status);
-        this.elements.overallStatus.dataset.status = payload.overall_status || "degraded";
+        this.renderSummaryStrip(summary);
+        this.renderKpis(summary);
+        this.renderAlerts(summary);
+        this.renderQueueOverview(summary);
+        this.renderQueueBreakdown(summary);
+        this.renderWorkloadBreakdown(summary);
+        this.renderRuntimeSummary(summary);
+        this.renderWorkers(summary, summary.worker_rows || []);
+        this.renderTargets(summary, summary.target_rows || []);
+    }
 
-        this.elements.summaryQueueDepth.textContent = formatNumber(summary.queue_depth);
-        this.elements.summaryActiveJobs.textContent = formatNumber(summary.active_jobs);
-        this.elements.summaryWorkers.textContent = `${formatNumber(summary.workers_working)} / ${formatNumber(summary.workers_total)}`;
-        this.elements.summaryTargets.textContent = formatNumber(summary.targets);
-        this.elements.summaryFailures.textContent = `${formatNumber(summary.failed_jobs)} / ${formatNumber(summary.rejected_jobs)}`;
+    renderSummaryStrip(summary) {
+        this.elements.operatorSummaryStrip.innerHTML = buildOperationalSummary(summary)
+            .map(
+                (item) => `
+                    <article class="summary-card ${severityClass(item.severity)}">
+                        <div class="summary-label">${escapeHtml(item.label)}</div>
+                        <div class="summary-value">${escapeHtml(item.value)}</div>
+                        <div class="summary-detail">${escapeHtml(item.detail)}</div>
+                    </article>
+                `,
+            )
+            .join("");
+    }
 
-        this.elements.chatBacklogValue.textContent = formatNumber(queues.chat_backlog);
-        this.elements.parserBacklogValue.textContent = formatNumber(queues.parser_backlog);
+    renderKpis(summary) {
+        this.elements.kpiGrid.innerHTML = buildKpiCards(summary)
+            .map(
+                (item) => `
+                    <article class="kpi-card ${severityClass(item.severity)}">
+                        <div class="kpi-head">
+                            <div class="kpi-label">${escapeHtml(item.label)}</div>
+                            <span class="info-chip" title="${escapeHtml(item.help)}">i</span>
+                        </div>
+                        <div class="kpi-value">${escapeHtml(item.value)}</div>
+                        <div class="kpi-meta">${escapeHtml(item.meta || "")}</div>
+                    </article>
+                `,
+            )
+            .join("");
+    }
 
-        this.elements.healthStatusValue.textContent = health.status || "—";
-        this.elements.schedulerStatusValue.textContent = this.describeScheduler(health.scheduler, health.scheduler_age_seconds);
-        this.elements.capacityValue.textContent = health.capacity ? "Available" : "Constrained";
-        this.elements.avgLatencyValue.textContent = formatLatency(metrics.avg_latency_ms);
-        this.elements.workersMeta.textContent = `${formatNumber(summary.workers_working)} активных worker(-ов) на ${formatNumber(summary.targets)} target(-ах)`;
+    renderAlerts(summary) {
+        this.elements.alertList.innerHTML = buildAlertItems(summary)
+            .map(
+                (item) => `
+                    <article class="alert-card ${severityClass(item.severity)}" title="${escapeHtml(item.recommendation)}">
+                        <div class="alert-title">
+                            <span class="alert-title-dot"></span>
+                            ${escapeHtml(item.title)}
+                        </div>
+                        <div class="alert-detail">${escapeHtml(item.detail)}</div>
+                    </article>
+                `,
+            )
+            .join("");
+    }
 
-        renderCollection(
-            this.elements.pendingQueuesList,
-            Object.entries(queues.pending || {}),
-            ([queueName, count]) => {
-                const row = document.createElement("div");
-                row.className = "queue-row";
-                row.innerHTML = `
-                    <span class="queue-row-label">${queueName}</span>
-                    <span class="queue-row-value">${formatNumber(count)}</span>
+    renderQueueOverview(summary) {
+        this.elements.queueOverview.innerHTML = buildQueueOverview(summary)
+            .map(
+                (item) => `
+                    <article class="summary-card ${severityClass(item.severity)}">
+                        <div class="summary-label">${escapeHtml(item.label)}</div>
+                        <div class="summary-value">${escapeHtml(item.value)}</div>
+                        <div class="summary-detail">${escapeHtml(item.detail)}</div>
+                    </article>
+                `,
+            )
+            .join("");
+    }
+
+    renderQueueBreakdown(summary) {
+        const items = buildQueueEntries(summary);
+        if (!items.length) {
+            this.elements.queueBreakdown.innerHTML = '<div class="empty-state">Нет данных по очередям</div>';
+            return;
+        }
+
+        this.elements.queueBreakdown.innerHTML = items
+            .map(
+                (item) => `
+                    <article class="queue-card ${severityClass(item.severity)}">
+                        <div class="queue-card-head">
+                            <div class="queue-key">${escapeHtml(item.title)}</div>
+                            <div class="queue-value">${formatNumber(item.value)}</div>
+                        </div>
+                        <div class="queue-raw">${escapeHtml(item.queueKey)}</div>
+                        <div class="queue-help">${escapeHtml(item.help)}</div>
+                    </article>
+                `,
+            )
+            .join("");
+    }
+
+    renderWorkloadBreakdown(summary) {
+        const items = buildWorkloadEntries(summary);
+        if (!items.length) {
+            this.elements.workloadBreakdown.innerHTML = '<div class="empty-state">Нет breakdown по workload</div>';
+            return;
+        }
+
+        this.elements.workloadBreakdown.innerHTML = items
+            .map(
+                (item) => `
+                    <article class="queue-card ${severityClass(item.severity)}">
+                        <div class="queue-card-head">
+                            <div class="queue-key">${escapeHtml(item.workload)}</div>
+                            <div class="queue-value">${formatNumber(item.total)}</div>
+                        </div>
+                        <div class="queue-help">${escapeHtml(item.priorities)}</div>
+                    </article>
+                `,
+            )
+            .join("");
+    }
+
+    renderRuntimeSummary(summary) {
+        this.elements.runtimeSummary.innerHTML = buildRuntimeRows(summary)
+            .map(
+                (item) => `
+                    <article class="runtime-card ${severityClass(item.severity)}">
+                        <div class="runtime-card-head">
+                            <div class="runtime-key-wrap">
+                                <div class="runtime-key">${escapeHtml(item.label)}</div>
+                                <span class="info-chip" title="${escapeHtml(item.help)}">i</span>
+                            </div>
+                            <div class="runtime-value">${escapeHtml(item.value)}</div>
+                        </div>
+                    </article>
+                `,
+            )
+            .join("");
+    }
+
+    renderWorkers(summary, workers) {
+        if (!Array.isArray(workers) || !workers.length) {
+            this.elements.workersSectionNote.textContent = "";
+            this.elements.workersTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">Нет активных worker heartbeat данных</td></tr>';
+            return;
+        }
+
+        this.elements.workersSectionNote.textContent = deriveWorkerSnapshotNote(summary, workers);
+        this.elements.workersTableBody.innerHTML = workers
+            .map((worker) => {
+                const severity =
+                    worker.status === "working"
+                        ? "ok"
+                        : worker.status === "idle"
+                            ? "warn"
+                            : "critical";
+                return `
+                    <tr>
+                        <td>
+                            <div class="table-primary">
+                                <strong class="mono">${escapeHtml(worker.worker_id || "-")}</strong>
+                                <div class="table-secondary">Heartbeat snapshot: ${escapeHtml(statusText(worker.status))}</div>
+                            </div>
+                        </td>
+                        <td>${escapeHtml(worker.pool || "Нет данных")}</td>
+                        <td class="mono">${escapeHtml(worker.target_id || "Нет данных")}</td>
+                        <td>${escapeHtml(worker.target_kind || "Нет данных")}</td>
+                        <td>${formatNumber(worker.active_jobs)}</td>
+                        <td>${formatAge(worker.last_seen_age_seconds)}</td>
+                        <td><span class="table-badge ${severityClass(severity)}">${escapeHtml(statusText(worker.status))}</span></td>
+                    </tr>
                 `;
-                return row;
-            },
-            "Pending queues пока не reported.",
-        );
+            })
+            .join("");
+    }
 
-        renderCollection(
-            this.elements.activeModelsList,
-            metrics.active_models || [],
-            (modelName) => {
-                const row = document.createElement("div");
-                row.className = "metric-row";
-                row.innerHTML = `
-                    <span class="metric-row-label">${modelName}</span>
-                    <span class="metric-row-value">reported by targets</span>
+    renderTargets(summary, targets) {
+        if (!Array.isArray(targets) || !targets.length) {
+            this.elements.targetsSectionNote.textContent = "";
+            this.elements.targetsTableBody.innerHTML = '<tr><td colspan="9" class="empty-state">Нет активных target heartbeat данных</td></tr>';
+            return;
+        }
+
+        this.elements.targetsSectionNote.textContent = deriveTargetsSectionNote(summary, targets);
+        this.elements.targetsTableBody.innerHTML = targets
+            .map((target) => {
+                const severity = target.status === "online" ? "ok" : "critical";
+                const workloadView = buildTargetWorkloadPresentation(summary, target);
+                return `
+                    <tr>
+                        <td>
+                            <div class="table-primary">
+                                <strong class="mono">${escapeHtml(target.target_id || "-")}</strong>
+                                <div class="table-secondary"><span class="table-badge ${severityClass(severity)}">${escapeHtml(statusText(target.status))}</span></div>
+                            </div>
+                        </td>
+                        <td>${escapeHtml(target.target_kind || "Нет данных")}</td>
+                        <td>
+                            <div class="table-primary">
+                                <div class="table-secondary">Reported возможности</div>
+                                <div class="chip-row">${renderChips(workloadView.reported, { mutedFallback: "Нет данных" })}</div>
+                                <div class="table-secondary">Наблюдаемая нагрузка</div>
+                                <div class="chip-row">${renderChips(workloadView.observed, { mutedFallback: "не видно по heartbeat" })}</div>
+                                <div class="table-secondary">${escapeHtml(workloadView.note)}</div>
+                            </div>
+                        </td>
+                        <td>${formatNumber(target.base_capacity_tokens)}</td>
+                        <td>${Number.isFinite(Number(target.cpu_percent)) ? `${Number(target.cpu_percent).toFixed(1)}%` : "Нет данных"}</td>
+                        <td>${Number(target.ram_free_mb || 0) > 0 ? `${formatNumber(target.ram_free_mb)} MB` : "Нет данных"}</td>
+                        <td>${Number(target.vram_free_mb || 0) > 0 ? `${formatNumber(target.vram_free_mb)} MB` : "Нет данных"}</td>
+                        <td><div class="chip-row">${renderChips(target.loaded_models, { mutedFallback: "Нет reported моделей" })}</div></td>
+                        <td>${formatAge(target.last_seen_age_seconds)}</td>
+                    </tr>
                 `;
-                return row;
-            },
-            "Нет данных о загруженных моделях.",
-        );
-
-        this.renderWorkers(payload.workers || []);
-        renderCollection(
-            this.elements.targetsGrid,
-            payload.targets || [],
-            (target) => {
-                const card = document.createElement("article");
-                card.className = "target-card";
-                card.innerHTML = `
-                    <div class="target-card-title">${target.target_id}</div>
-                    <div class="target-card-subtitle">${target.target_kind} / ${target.runtime_label}</div>
-                    <div class="target-card-metrics">
-                        <div>Capacity tokens: ${formatNumber(target.base_capacity_tokens)}</div>
-                        <div>Supports: ${(target.supports_workloads || []).join(", ") || "—"}</div>
-                        <div>Loaded models: ${(target.loaded_models || []).join(", ") || "Нет данных"}</div>
-                        <div>CPU: ${formatNumber(target.cpu_percent)}%</div>
-                        <div>RAM free: ${formatNumber(target.ram_free_mb)} MB</div>
-                        <div>VRAM free: ${formatNumber(target.vram_free_mb)} MB</div>
-                        <div>Last seen: ${formatLastSeen(target.last_seen_age_seconds)}</div>
-                    </div>
-                `;
-                return card;
-            },
-            "Активные targets сейчас не reported.",
-        );
+            })
+            .join("");
     }
 
-    renderWorkers(workers) {
-        const tbody = this.elements.workersTableBody;
-        if (!tbody) {
-            return;
-        }
-        if (!Array.isArray(workers) || workers.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">Активные workers сейчас не reported.</div></td></tr>`;
-            return;
-        }
-        const rows = workers.map((worker) => {
-            const row = document.createElement("tr");
-            row.innerHTML = `
-                <td>${worker.worker_id}</td>
-                <td>${worker.worker_pool}</td>
-                <td><span class="worker-status" data-status="${worker.status}">${worker.status}</span></td>
-                <td>${worker.target_id || "—"}</td>
-                <td>${worker.target_kind}</td>
-                <td>${formatNumber(worker.active_jobs)}</td>
-                <td>${formatLastSeen(worker.last_seen_age_seconds)}</td>
-            `;
-            return row;
-        });
-        tbody.replaceChildren(...rows);
-    }
-
-    describeStatus(status) {
-        if (status === "ready") {
-            return "Готов к приёму нагрузки";
-        }
-        if (status === "not_ready") {
-            return "Не готов";
-        }
-        return "Деградирован, но жив";
-    }
-
-    describeScheduler(status, ageSeconds) {
-        if (status === "healthy") {
-            return ageSeconds === null || ageSeconds === undefined
-                ? "healthy"
-                : `healthy • ${formatLastSeen(ageSeconds)}`;
-        }
-        return ageSeconds === null || ageSeconds === undefined
-            ? "stale"
-            : `stale • ${formatLastSeen(ageSeconds)}`;
-    }
-
-    showError(message) {
-        if (!this.elements.error) {
-            return;
-        }
-        this.elements.error.hidden = false;
-        this.elements.error.textContent = message;
-    }
-
-    hideError() {
-        if (!this.elements.error) {
-            return;
-        }
-        this.elements.error.hidden = true;
-        this.elements.error.textContent = "";
+    renderError(error) {
+        const message = error instanceof APIError ? error.message : "Не удалось обновить операторскую сводку";
+        this.elements.heroMeaning.textContent = "Панель не смогла получить новую сводку. Последние данные могли устареть.";
+        this.elements.overallStatusTitle.textContent = "Сводка недоступна";
+        this.elements.overallStatusBadge.className = `status-badge ${severityClass("critical")}`;
+        this.elements.overallStatusBadge.textContent = "Ошибка";
+        this.elements.alertList.innerHTML = `
+            <article class="alert-card ${severityClass("critical")}" title="Проверьте доступность dashboard API и состояние runtime.">
+                <div class="alert-title">
+                    <span class="alert-title-dot"></span>
+                    Не удалось обновить dashboard
+                </div>
+                <div class="alert-detail">${escapeHtml(message)}</div>
+            </article>
+        `;
     }
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
-    const bootstrap = parseBootstrap();
-    if (!bootstrap?.apiUrl) {
-        return;
-    }
-
-    const app = new AdminDashboardApp(bootstrap);
-    await app.init();
-});
+if (typeof document !== "undefined") {
+    document.addEventListener("DOMContentLoaded", () => {
+        const bootstrap = parseBootstrap();
+        if (!bootstrap) {
+            return;
+        }
+        const app = new AdminDashboardApp(bootstrap);
+        void app.init();
+    });
+}
