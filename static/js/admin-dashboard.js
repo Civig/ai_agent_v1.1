@@ -146,76 +146,500 @@ function counterSeverity(value) {
     return Number(value || 0) > 0 ? "warn" : "ok";
 }
 
+function hasSchedulerGap(summary) {
+    return summary.scheduler_status !== "healthy";
+}
+
+function hasRedisGap(summary) {
+    return !summary.redis;
+}
+
+function hasWorkerGap(summary) {
+    return Number(summary.workers_working || 0) <= 0;
+}
+
+function hasTargetVisibilityGap(summary) {
+    return Number(summary.targets || 0) <= 0;
+}
+
+function hasActiveModelVisibilityGap(summary) {
+    return !Array.isArray(summary.active_models) || summary.active_models.length <= 0;
+}
+
+function queueTotals(summary) {
+    return {
+        queueDepth: Number(summary.queue_depth || 0),
+        activeJobs: Number(summary.active_jobs || 0),
+        chatBacklog: Number(summary.chat_backlog || 0),
+        parserBacklog: Number(summary.parser_backlog || 0),
+    };
+}
+
+export function deriveCapacityAssessment(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary)) {
+        return {
+            state: "Оценка запаса недоступна",
+            severity: "critical",
+            reason: "Redis сейчас недоступен, поэтому оценка очередей и admission-state может быть неполной.",
+        };
+    }
+
+    if (hasSchedulerGap(summary)) {
+        return {
+            state: "Оценка запаса недоступна",
+            severity: "critical",
+            reason: "Scheduler heartbeat устарел, поэтому admission-сигнал уже может не отражать реальное состояние мощности.",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            state: "Оценка запаса недоступна",
+            severity: "warn",
+            reason: "Не видно активных вычислительных целей, поэтому честно оценить запас для новых chat-задач нельзя.",
+        };
+    }
+
+    if (summary.capacity) {
+        if (queueDepth <= 0) {
+            return {
+                state: "Запас есть",
+                severity: "ok",
+                reason: "Система может принимать новые chat-задачи без ожидания в очереди.",
+            };
+        }
+        return {
+            state: "Запас ограничен",
+            severity: "warn",
+            reason: "Свободная chat capacity ещё reported, но очередь уже не пустая и рост нагрузки нужно наблюдать внимательнее.",
+        };
+    }
+
+    if (chatBacklog > 0 || queueDepth > 0) {
+        return {
+            state: "Запас исчерпан",
+            severity: "critical",
+            reason: "Chat-задачи уже накапливаются в очереди, значит следующая chat-нагрузка почти наверняка будет ждать.",
+        };
+    }
+
+    if (activeJobs > 0) {
+        return {
+            state: "Запас ограничен",
+            severity: "warn",
+            reason: "Текущая chat-мощность занята активной задачей; следующий chat-запрос может ждать освобождения этого слота.",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            state: "Запас исчерпан",
+            severity: "critical",
+            reason: "Сейчас нет активных chat workers, которые могли бы взять следующую задачу в обработку.",
+        };
+    }
+
+    return {
+        state: "Запас исчерпан",
+        severity: "critical",
+        reason: "Scheduler не видит свободной chat capacity для следующей задачи.",
+    };
+}
+
+export function derivePrimaryBottleneck(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary)) {
+        return {
+            title: "Control-plane visibility ограничена",
+            detail: "Redis недоступен, поэтому runtime state и очереди могут быть отражены неполно.",
+            severity: "critical",
+        };
+    }
+
+    if (hasSchedulerGap(summary)) {
+        return {
+            title: "Планировщик публикует устаревший heartbeat",
+            detail: "Без свежего scheduler heartbeat admission-state уже может быть неактуален.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            title: "Нет активных chat workers",
+            detail: "Даже если запрос принят, без working worker он может дольше оставаться до реальной обработки.",
+            severity: "critical",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            title: "Не видно активных вычислительных целей",
+            detail: "Scheduler не может честно оценить запас, если в runtime не reported ни одной живой цели исполнения.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            title: "Свободная chat capacity уже занята",
+            detail: "Chat backlog уже появился, значит спрос на chat path превысил текущий свободный admission-запас.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            title: "Текущая chat-мощность занята активной задачей",
+            detail: "Очередь пока пустая, но следующий chat-запрос может ждать, пока освободится текущая мощность.",
+            severity: "warn",
+        };
+    }
+
+    if (hasActiveModelVisibilityGap(summary)) {
+        return {
+            title: "Нет reported active models",
+            detail: "Цели видны, но активные модели не опубликованы, поэтому оператору сложнее оценить фактическую готовность target path.",
+            severity: "warn",
+        };
+    }
+
+    if (queueDepth > 0) {
+        return {
+            title: "Очередь уже формируется",
+            detail: "В системе есть pending-задачи, хотя свободная chat capacity ещё reported доступной.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        title: "Явных ограничений не видно",
+        detail: "По текущим полям не видно признаков bottleneck, который уже мешает новым chat-задачам.",
+        severity: "ok",
+    };
+}
+
+export function deriveScalingHint(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary) || hasSchedulerGap(summary)) {
+        return {
+            title: "Недостаточно данных для точной оценки запаса",
+            detail: "Сначала восстановите свежий control-plane сигнал, иначе говорить о масштабе роста нагрузки будет не совсем честно.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            title: "Сначала восстановите активные chat workers",
+            detail: "Пока в системе нет working worker, дополнительная нагрузка будет только накапливаться в ожидании.",
+            severity: "critical",
+        };
+    }
+
+    if (hasTargetVisibilityGap(summary)) {
+        return {
+            title: "Сначала восстановите visibility по вычислительным целям",
+            detail: "Без живых target heartbeat нельзя честно оценить, какой запас мощности остаётся для роста нагрузки.",
+            severity: "critical",
+        };
+    }
+
+    if (summary.capacity && queueDepth <= 0) {
+        return {
+            title: "Система может принимать новые chat-запросы без ожидания",
+            detail: "Очередь пустая, свободная chat capacity есть, поэтому текущий запас выглядит нормальным.",
+            severity: "ok",
+        };
+    }
+
+    if (summary.capacity && queueDepth > 0) {
+        return {
+            title: "Система пока выдерживает нагрузку, но запас уже не пустой",
+            detail: "Новые chat-задачи ещё могут приниматься, однако рост очереди стоит наблюдать до появления устойчивого backlog.",
+            severity: "warn",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            title: "Chat capacity уже занята; для роста нагрузки может потребоваться дополнительная вычислительная цель",
+            detail: "Backlog уже виден в chat queue, поэтому следующий рост входящих chat-запросов будет увеличивать ожидание.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            title: "Следующий chat-запрос вероятно будет ждать освобождения текущей мощности",
+            detail: "Система занята полезной работой, но резерв для следующей chat-задачи прямо сейчас не просматривается.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        title: "Точный запас оценить нельзя",
+        detail: "Текущие поля не позволяют безопасно сказать, выдержит ли система рост chat-нагрузки без ожидания.",
+        severity: "warn",
+    };
+}
+
+export function deriveQueuePressure(summary) {
+    const { queueDepth, activeJobs, chatBacklog, parserBacklog } = queueTotals(summary);
+
+    if (hasRedisGap(summary)) {
+        return {
+            state: "Оценка давления неполна",
+            detail: "Redis недоступен, поэтому queue pressure и backlog нельзя считать полностью надёжными.",
+            severity: "critical",
+        };
+    }
+
+    if (queueDepth <= 0 && activeJobs <= 0) {
+        return {
+            state: "Нет давления",
+            detail: "Очередь пуста и активных задач сейчас нет: новых запросов в ожидании не видно.",
+            severity: "ok",
+        };
+    }
+
+    if (queueDepth <= 0 && activeJobs > 0 && !summary.capacity) {
+        return {
+            state: "Система занята",
+            detail: "Очередь пустая, потому что задача уже выполняется, но свободной chat-мощности для следующей задачи сейчас нет.",
+            severity: "warn",
+        };
+    }
+
+    if (queueDepth <= 0 && activeJobs > 0 && summary.capacity) {
+        return {
+            state: "Под контролем",
+            detail: "Задачи уже выполняются, но свободная chat capacity ещё видна и явного накопления ожидания нет.",
+            severity: "ok",
+        };
+    }
+
+    if (chatBacklog > 0 && !summary.capacity) {
+        return {
+            state: "Высокое давление",
+            detail: "Chat-задачи уже ждут в очереди: admission или свободная мощность не успевают за входящим спросом.",
+            severity: "critical",
+        };
+    }
+
+    if (queueDepth > 0 && summary.capacity) {
+        return {
+            state: "Умеренное давление",
+            detail: "Очередь уже есть, но система всё ещё reported имеет запас для новых chat-задач.",
+            severity: "warn",
+        };
+    }
+
+    if (parserBacklog > 0 && chatBacklog <= 0) {
+        return {
+            state: "Локальная очередь parser",
+            detail: "Давление сейчас видно в parser/document path, а не в chat path.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        state: "Есть давление",
+        detail: "В очередях уже есть задачи, поэтому admission и workers стоит наблюдать внимательнее.",
+        severity: queueSeverity(summary),
+    };
+}
+
+export function deriveReadinessView(summary) {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (summary.readiness_status === "ready") {
+        return {
+            value: "Готовность нормальная",
+            help: "Новые chat-задачи могут приниматься без явного ожидания по текущему readiness-сигналу.",
+            severity: "ok",
+        };
+    }
+
+    if (hasRedisGap(summary) || hasSchedulerGap(summary)) {
+        return {
+            value: "Готовность нарушена",
+            help: "Нет надёжного control-plane сигнала, поэтому readiness нельзя считать устойчивой.",
+            severity: "critical",
+        };
+    }
+
+    if (hasWorkerGap(summary)) {
+        return {
+            value: "Готовность нарушена: нет активных chat workers",
+            help: "Запросы могут быть приняты, но без active worker реальная обработка новых chat-задач не начнётся штатно.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            value: "Готовность ограничена: chat-задачи уже ждут",
+            help: "Система остаётся живой, но новые chat-задачи уже сталкиваются с ожиданием в очереди.",
+            severity: "critical",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0) {
+        return {
+            value: "Готовность ограничена: система занята",
+            help: "Очередь ещё не растёт, но свободной chat-мощности для следующей задачи прямо сейчас нет.",
+            severity: "warn",
+        };
+    }
+
+    return {
+        value: "Готовность ограничена",
+        help: "Сервис отвечает, но не все сигналы подтверждают запас для новых chat-задач.",
+        severity: "warn",
+    };
+}
+
+export function deriveHealthView(summary) {
+    if (summary.health_status === "ok") {
+        return {
+            value: "Базовые компоненты отвечают",
+            help: "Health не обещает свободную мощность, но показывает, что control-plane и scheduler сейчас в живом состоянии.",
+            severity: "ok",
+        };
+    }
+
+    if (hasRedisGap(summary) && hasSchedulerGap(summary)) {
+        return {
+            value: "Проблема в Redis и scheduler",
+            help: "И очереди, и admission-сигнал могут быть неполными, поэтому operator-картина уже ненадёжна.",
+            severity: "critical",
+        };
+    }
+
+    if (hasRedisGap(summary)) {
+        return {
+            value: "Проблема в Redis",
+            help: "Control-plane данные по очередям и состоянию runtime могут быть неполными.",
+            severity: "critical",
+        };
+    }
+
+    return {
+        value: "Проблема в scheduler heartbeat",
+        help: "Без свежего scheduler heartbeat readiness и запас мощности могут быть оценены неточно.",
+        severity: "critical",
+    };
+}
+
 export function deriveOverallState(summary) {
-    if (summary.overall_status === "ready") {
+    const { queueDepth, activeJobs, chatBacklog } = queueTotals(summary);
+
+    if (summary.overall_status === "ready" && queueDepth <= 0 && summary.capacity) {
         return {
             severity: "ok",
-            title: "Система готова",
+            title: "Система работает штатно",
             badge: "Норма",
-            description:
-                Number(summary.queue_depth || 0) > 0
-                    ? "Система принимает chat-задачи и уже обрабатывает часть очереди."
-                    : "Система готова принимать новые chat-задачи, очередь сейчас не накапливается.",
+            description: "Система может принимать новые chat-задачи без ожидания, а очередь сейчас не сигнализирует о давлении.",
         };
     }
 
-    if (!summary.redis || summary.scheduler_status !== "healthy" || Number(summary.workers_working || 0) <= 0) {
+    if (hasRedisGap(summary)) {
         return {
             severity: "critical",
-            title: "Требует немедленного внимания",
-            badge: "Проблема",
-            description: "Есть проблема в базовых компонентах или worker-path, которая может мешать штатной обработке chat-задач.",
+            title: "Данных недостаточно для точной оценки",
+            badge: "Нет сигнала",
+            description: "Redis недоступен, поэтому часть control-plane картины по очередям и запасу мощности может быть неполной.",
         };
     }
 
-    if (!summary.capacity) {
+    if (hasSchedulerGap(summary)) {
         return {
-            severity: Number(summary.chat_backlog || 0) > 0 ? "critical" : "warn",
-            title: "Есть ограничения по мощности",
-            badge: "Внимание",
-            description: "Сервис отвечает, но новые chat-задачи могут ждать в очереди из-за нехватки свободной мощности.",
+            severity: "critical",
+            title: "Данных недостаточно для точной оценки",
+            badge: "Heartbeat устарел",
+            description: "Scheduler heartbeat устарел, поэтому admission-state и оценка свободной chat capacity уже могут быть неточными.",
+        };
+    }
+
+    if (hasWorkerGap(summary) || hasTargetVisibilityGap(summary)) {
+        return {
+            severity: "critical",
+            title: "Есть деградация chat capacity",
+            badge: "Нужно действие",
+            description: "Видимость по worker/target path сейчас неполная или деградировала, поэтому штатная обработка новых chat-задач под вопросом.",
+        };
+    }
+
+    if (summary.capacity && queueDepth > 0) {
+        return {
+            severity: "warn",
+            title: "Система занята, но работает",
+            badge: "Под нагрузкой",
+            description: "Очередь уже есть, но по текущим сигналам система ещё может принимать новые chat-задачи без полного исчерпания запаса.",
+        };
+    }
+
+    if (!summary.capacity && activeJobs > 0 && queueDepth <= 0 && !hasRedisGap(summary) && !hasSchedulerGap(summary) && !hasWorkerGap(summary)) {
+        return {
+            severity: "warn",
+            title: "Система занята, но работает",
+            badge: "Занята",
+            description: "Очередь пока пустая, потому что задача уже выполняется, но следующая chat-задача может подождать освобождения текущей мощности.",
+        };
+    }
+
+    if (!summary.capacity && chatBacklog > 0) {
+        return {
+            severity: "critical",
+            title: "Новые chat-задачи будут ждать",
+            badge: "Очередь растёт",
+            description: "Свободная chat capacity уже закончилась, и backlog подтверждает, что новая chat-нагрузка накапливается в очереди.",
         };
     }
 
     return {
         severity: "warn",
         title: "Состояние требует наблюдения",
-        badge: "Внимание",
-        description: "Базовые компоненты отвечают, но часть сигналов указывает, что системе нужно внимание оператора.",
+        badge: "Наблюдение",
+        description: "Базовые компоненты отвечают, но часть сигналов уже показывает ограничения по мощности или неполную visibility runtime.",
     };
 }
 
 export function buildOperationalSummary(summary) {
-    const queueDepth = Number(summary.queue_depth || 0);
-    const chatBacklog = Number(summary.chat_backlog || 0);
-    const parserBacklog = Number(summary.parser_backlog || 0);
+    const overall = deriveOverallState(summary);
+    const capacity = deriveCapacityAssessment(summary);
+    const bottleneck = derivePrimaryBottleneck(summary);
+    const scaling = deriveScalingHint(summary);
+
     return [
         {
-            label: "Что происходит сейчас",
-            value: deriveOverallState(summary).title,
-            detail: deriveOverallState(summary).description,
-            severity: deriveOverallState(summary).severity,
+            label: "Состояние системы",
+            value: overall.title,
+            detail: overall.description,
+            severity: overall.severity,
         },
         {
-            label: "Очереди",
-            value: queueDepth > 0 ? `${formatNumber(queueDepth)} задач` : "Очереди пусты",
-            detail:
-                queueDepth > 0
-                    ? `chat: ${formatNumber(chatBacklog)} · parser: ${formatNumber(parserBacklog)}`
-                    : "Новых задач в ожидании нет",
-            severity: queueSeverity(summary),
+            label: "Оценка запаса",
+            value: capacity.state,
+            detail: capacity.reason,
+            severity: capacity.severity,
         },
         {
-            label: "Свободная мощность",
-            value: summary.capacity ? "Есть запас" : "Запас исчерпан",
-            detail: summary.capacity ? "Новые chat-задачи могут приниматься штатно" : "Новые chat-задачи могут ждать admission",
-            severity: capacitySeverity(summary),
+            label: "Что ограничивает систему сейчас",
+            value: bottleneck.title,
+            detail: bottleneck.detail,
+            severity: bottleneck.severity,
         },
         {
-            label: "Воркеры и цели",
-            value: `${formatNumber(summary.workers_working)} / ${formatNumber(summary.workers_total)} воркеров · ${formatNumber(summary.targets)} целей`,
-            detail: "Показывает, есть ли живые исполнители и доступные цели для admission",
-            severity: workersSeverity(summary) === "critical" || targetsSeverity(summary) === "critical" ? "critical" : "ok",
+            label: "Что это значит для масштабирования",
+            value: scaling.title,
+            detail: scaling.detail,
+            severity: scaling.severity,
         },
     ];
 }
@@ -303,6 +727,15 @@ export function buildAlertItems(summary) {
         });
     }
 
+    if (Number(summary.targets || 0) <= 0) {
+        items.push({
+            severity: "critical",
+            title: "Не видно активных вычислительных целей",
+            detail: "Target heartbeat данные отсутствуют, поэтому запас мощности и маршрут admission оцениваются неполно.",
+            recommendation: "Проверьте target visibility и убедитесь, что вычислительные цели публикуют heartbeat.",
+        });
+    }
+
     if (!summary.capacity) {
         items.push({
             severity: Number(summary.chat_backlog || 0) > 0 ? "critical" : "warn",
@@ -327,6 +760,15 @@ export function buildAlertItems(summary) {
             title: `Есть parser backlog: ${formatNumber(summary.parser_backlog)}`,
             detail: "Задачи разбора документов ожидают своего выполнения.",
             recommendation: "Если backlog растёт, проверьте parser pool и текущую загрузку document path.",
+        });
+    }
+
+    if (Array.isArray(summary.active_models) && summary.active_models.length <= 0) {
+        items.push({
+            severity: "warn",
+            title: "Нет reported active models",
+            detail: "Список активных моделей пуст, поэтому готовность target path видна не полностью.",
+            recommendation: "Сверьте target heartbeat и проверьте, публикуются ли loaded models там, где это ожидается.",
         });
     }
 
@@ -361,6 +803,10 @@ export function buildAlertItems(summary) {
 }
 
 export function buildRuntimeRows(summary) {
+    const readiness = deriveReadinessView(summary);
+    const health = deriveHealthView(summary);
+    const capacity = deriveCapacityAssessment(summary);
+    const scaling = deriveScalingHint(summary);
     const activeModels = Array.isArray(summary.active_models) && summary.active_models.length
         ? summary.active_models.join(", ")
         : "Нет данных";
@@ -368,15 +814,15 @@ export function buildRuntimeRows(summary) {
     return [
         {
             label: "Готовность системы",
-            value: summary.readiness_status === "ready" ? "Готова принимать chat-задачи" : "Сейчас не готова принимать новые chat-задачи",
-            help: "Readiness учитывает Redis, scheduler, активные chat workers и свободную мощность.",
-            severity: summary.readiness_status === "ready" ? "ok" : "critical",
+            value: readiness.value,
+            help: readiness.help,
+            severity: readiness.severity,
         },
         {
             label: "Жизнеспособность",
-            value: summary.health_status === "ok" ? "Базовые компоненты отвечают" : "Есть проблема в базовых компонентах",
-            help: "Health показывает базовую доступность runtime даже если мощности для новых задач может не хватать.",
-            severity: summary.health_status === "ok" ? "ok" : "critical",
+            value: health.value,
+            help: health.help,
+            severity: health.severity,
         },
         {
             label: "Планировщик",
@@ -391,10 +837,16 @@ export function buildRuntimeRows(summary) {
             severity: summary.scheduler_status === "healthy" ? "neutral" : "warn",
         },
         {
-            label: "Свободная мощность",
-            value: summary.capacity ? "Есть запас для новых chat-задач" : "Новые chat-задачи могут ждать admission",
-            help: "Capacity относится только к chat workload и не означает отсутствие других очередей.",
-            severity: capacitySeverity(summary),
+            label: "Оценка запаса для chat",
+            value: capacity.state,
+            help: capacity.reason,
+            severity: capacity.severity,
+        },
+        {
+            label: "Подсказка по масштабированию",
+            value: scaling.title,
+            help: scaling.detail,
+            severity: scaling.severity,
         },
         {
             label: "Активные модели",
@@ -412,21 +864,28 @@ export function buildRuntimeRows(summary) {
 }
 
 export function buildQueueOverview(summary) {
+    const pressure = deriveQueuePressure(summary);
     return [
         {
-            label: "Всего в очередях",
+            label: "Всего задач в очередях",
             value: formatNumber(summary.queue_depth),
             detail: "Все pending queues по workloads и приоритетам",
             severity: queueSeverity(summary),
         },
         {
-            label: "Chat backlog",
+            label: "Давление очереди",
+            value: pressure.state,
+            detail: pressure.detail,
+            severity: pressure.severity,
+        },
+        {
+            label: "Ожидающие chat-задачи",
             value: formatNumber(summary.chat_backlog),
             detail: "Сколько chat-задач ждёт admission/start",
             severity: Number(summary.chat_backlog || 0) > 0 ? (summary.capacity ? "warn" : "critical") : "ok",
         },
         {
-            label: "Parser backlog",
+            label: "Ожидающие parser-задачи",
             value: formatNumber(summary.parser_backlog),
             detail: "Сколько document/parser задач ещё ждёт обработки",
             severity: Number(summary.parser_backlog || 0) > 0 ? "warn" : "ok",
@@ -530,6 +989,11 @@ class AdminDashboardApp {
 
     render(summary) {
         const overall = deriveOverallState(summary);
+        const capacity = deriveCapacityAssessment(summary);
+        const queuePressure = deriveQueuePressure(summary);
+        const readiness = deriveReadinessView(summary);
+        const health = deriveHealthView(summary);
+        const scaling = deriveScalingHint(summary);
         const schedulerSeverity = summary.scheduler_status === "healthy" ? "ok" : "critical";
         this.elements.heroMeaning.textContent = overall.description;
         this.elements.overallStatusTitle.textContent = overall.title;
@@ -541,20 +1005,12 @@ class AdminDashboardApp {
                 ? `Планировщик актуален · ${formatAge(summary.scheduler_age_seconds)}`
                 : `Планировщик устарел · ${formatAge(summary.scheduler_age_seconds)}`;
         this.elements.statusSupportText.textContent =
-            summary.overall_status === "ready"
-                ? "Система выглядит готовой к приёму новых chat-задач. Ниже можно быстро понять, где есть очередь и какой запас мощности остаётся."
-                : "Ниже показано, что именно мешает штатной работе: очередь, мощность, воркеры, цели или свежесть scheduler heartbeat.";
+            `${capacity.reason} ${scaling.detail}`;
         this.elements.lastRefreshLabel.textContent = formatTimestamp(summary.last_refresh);
-        this.elements.readinessStatusValue.textContent =
-            summary.readiness_status === "ready" ? "Готова" : "Не готова";
-        this.elements.healthStatusValue.textContent =
-            summary.health_status === "ok" ? "Базовые компоненты отвечают" : "Есть проблемы";
-        this.elements.capacityStatusValue.textContent =
-            summary.capacity ? "Есть запас" : "Запас исчерпан";
-        this.elements.queueStatusValue.textContent =
-            Number(summary.queue_depth || 0) > 0
-                ? `${formatNumber(summary.queue_depth)} в ожидании`
-                : "Очереди пусты";
+        this.elements.readinessStatusValue.textContent = readiness.value;
+        this.elements.healthStatusValue.textContent = health.value;
+        this.elements.capacityStatusValue.textContent = capacity.state;
+        this.elements.queueStatusValue.textContent = queuePressure.state;
 
         this.renderSummaryStrip(summary);
         this.renderKpis(summary);
@@ -706,11 +1162,12 @@ class AdminDashboardApp {
                         <td>
                             <div class="table-primary">
                                 <strong class="mono">${escapeHtml(worker.worker_id || "-")}</strong>
+                                <div class="table-secondary">Статус heartbeat: ${escapeHtml(statusText(worker.status))}</div>
                             </div>
                         </td>
-                        <td>${escapeHtml(worker.pool || "-")}</td>
-                        <td class="mono">${escapeHtml(worker.target_id || "-")}</td>
-                        <td>${escapeHtml(worker.target_kind || "-")}</td>
+                        <td>${escapeHtml(worker.pool || "Нет данных")}</td>
+                        <td class="mono">${escapeHtml(worker.target_id || "Нет данных")}</td>
+                        <td>${escapeHtml(worker.target_kind || "Нет данных")}</td>
                         <td>${formatNumber(worker.active_jobs)}</td>
                         <td>${formatAge(worker.last_seen_age_seconds)}</td>
                         <td><span class="table-badge ${severityClass(severity)}">${escapeHtml(statusText(worker.status))}</span></td>
@@ -737,13 +1194,13 @@ class AdminDashboardApp {
                                 <div class="table-secondary"><span class="table-badge ${severityClass(severity)}">${escapeHtml(statusText(target.status))}</span></div>
                             </div>
                         </td>
-                        <td>${escapeHtml(target.target_kind || "-")}</td>
+                        <td>${escapeHtml(target.target_kind || "Нет данных")}</td>
                         <td><div class="chip-row">${renderChips(target.supports_workloads, { mutedFallback: "Нет данных" })}</div></td>
                         <td>${formatNumber(target.base_capacity_tokens)}</td>
                         <td>${Number.isFinite(Number(target.cpu_percent)) ? `${Number(target.cpu_percent).toFixed(1)}%` : "Нет данных"}</td>
                         <td>${Number(target.ram_free_mb || 0) > 0 ? `${formatNumber(target.ram_free_mb)} MB` : "Нет данных"}</td>
                         <td>${Number(target.vram_free_mb || 0) > 0 ? `${formatNumber(target.vram_free_mb)} MB` : "Нет данных"}</td>
-                        <td><div class="chip-row">${renderChips(target.loaded_models, { mutedFallback: "Нет данных" })}</div></td>
+                        <td><div class="chip-row">${renderChips(target.loaded_models, { mutedFallback: "Нет reported моделей" })}</div></td>
                         <td>${formatAge(target.last_seen_age_seconds)}</td>
                     </tr>
                 `;

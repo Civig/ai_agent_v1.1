@@ -384,7 +384,7 @@
     }
 
     .queue-overview {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         margin-bottom: 0.9rem;
     }
 
@@ -526,11 +526,12 @@
                 <div class="hero-eyebrow">Admin Dashboard</div>
                 <h1 class="hero-title">Управление нагрузкой</h1>
                 <p class="hero-subtitle">
-                    Панель показывает текущее состояние очередей, воркеров и вычислительных целей.
-                    Она работает только в режиме чтения: ничего не меняет в runtime и не содержит управляющих кнопок.
+                    Панель помогает быстро понять, может ли система принять новые chat-задачи прямо сейчас,
+                    где появляется давление в очередях и что именно ограничивает запас мощности.
+                    Она работает только в режиме чтения и не меняет runtime.
                 </p>
                 <div class="hero-meaning" id="heroMeaning">
-                    Собираем операторскую сводку по readiness, очередям и свободной мощности.
+                    Собираем операторскую сводку по readiness, запасу chat capacity, очередям и видимым runtime-ограничениям.
                 </div>
                 <div class="hero-meta">
                     <span class="meta-pill">Пользователь: {{ current_user.username }}</span>
@@ -551,31 +552,56 @@
                 </p>
                 <div class="status-detail-grid">
                     <div class="status-detail">
-                        <span>Готовность системы</span>
+                        <span>Готовность для новых chat-задач</span>
                         <strong id="readinessStatusValue">ожидание</strong>
                     </div>
                     <div class="status-detail">
-                        <span>Жизнеспособность</span>
+                        <span>Базовые компоненты</span>
                         <strong id="healthStatusValue">ожидание</strong>
                     </div>
                     <div class="status-detail">
-                        <span>Свободная мощность</span>
+                        <span>Оценка запаса</span>
                         <strong id="capacityStatusValue">ожидание</strong>
                     </div>
                     <div class="status-detail">
-                        <span>Очереди</span>
+                        <span>Давление очереди</span>
                         <strong id="queueStatusValue">ожидание</strong>
                     </div>
                 </div>
             </article>
         </section>
 
-        <section class="summary-strip" id="operatorSummaryStrip">
-            <article class="summary-card">
-                <div class="summary-label">Сейчас</div>
-                <div class="summary-value">Ожидание</div>
-                <div class="summary-detail">Собираем оперативную сводку.</div>
-            </article>
+        <section class="panel section-panel">
+            <div class="section-head">
+                <div class="section-kicker">Оперативная оценка</div>
+                <h2 class="section-title">Что происходит с мощностью и очередями прямо сейчас</h2>
+                <p class="section-description">
+                    Четыре кратких ответа для оператора: общее состояние, запас для новых chat-задач,
+                    текущее ограничение и честная подсказка по масштабированию.
+                </p>
+            </div>
+            <div class="summary-strip" id="operatorSummaryStrip">
+                <article class="summary-card">
+                    <div class="summary-label">Состояние системы</div>
+                    <div class="summary-value">Ожидание</div>
+                    <div class="summary-detail">Собираем операторскую сводку.</div>
+                </article>
+                <article class="summary-card">
+                    <div class="summary-label">Оценка запаса</div>
+                    <div class="summary-value">Ожидание</div>
+                    <div class="summary-detail">Пока нет данных о запасе для новых chat-задач.</div>
+                </article>
+                <article class="summary-card">
+                    <div class="summary-label">Что ограничивает систему сейчас</div>
+                    <div class="summary-value">Ожидание</div>
+                    <div class="summary-detail">После загрузки появится главное текущее ограничение.</div>
+                </article>
+                <article class="summary-card">
+                    <div class="summary-label">Что это значит для масштабирования</div>
+                    <div class="summary-value">Ожидание</div>
+                    <div class="summary-detail">После загрузки появится честная оценка запаса для роста нагрузки.</div>
+                </article>
+            </div>
         </section>
 
         <section class="kpi-grid" id="kpiGrid">
@@ -592,7 +618,8 @@
                     <div class="section-kicker">Оперативное внимание</div>
                     <h2 class="section-title">Предупреждения и рекомендации</h2>
                     <p class="section-description">
-                        Здесь выводятся только те предупреждения, которые можно честно вывести из текущих runtime-полей.
+                        Здесь выводятся только те предупреждения, которые можно честно вывести из текущих runtime-полей,
+                        без искусственных алармов и без скрытия ограничений по chat capacity.
                     </p>
                 </div>
                 <div class="alert-list" id="alertList">
@@ -611,41 +638,33 @@
                     <div class="section-kicker">Как читать панель</div>
                     <h2 class="section-title">Ключевые понятия</h2>
                     <p class="section-description">
-                        Короткие пояснения, чтобы понять состояние системы без знания всех внутренних деталей.
+                        Короткие пояснения, чтобы за 5–10 секунд понять, нормально ли работает система и нужен ли операторский отклик.
                     </p>
                 </div>
                 <div class="definition-list">
                     <div class="definition-card">
                         <strong>Готовность</strong>
-                        <div class="definition-text">Показывает, готова ли система прямо сейчас принимать и обрабатывать новые chat-задачи.</div>
+                        <div class="definition-text">Показывает, может ли система сейчас принять новые chat-задачи без дополнительного ожидания.</div>
                     </div>
                     <div class="definition-card">
                         <strong>Жизнеспособность</strong>
-                        <div class="definition-text">Показывает, отвечают ли базовые компоненты, даже если мощности для новых задач может не хватать.</div>
+                        <div class="definition-text">Показывает, отвечают ли базовые компоненты, даже если свободной chat-мощности сейчас мало.</div>
                     </div>
                     <div class="definition-card">
                         <strong>Воркер</strong>
-                        <div class="definition-text">Процесс, который забирает задачу из dispatch и выполняет её.</div>
+                        <div class="definition-text">Процесс, который реально забирает задачу из dispatch и доводит её до terminal state.</div>
                     </div>
                     <div class="definition-card">
                         <strong>Цель исполнения</strong>
-                        <div class="definition-text">Runtime endpoint, на который scheduler может допустить задачу.</div>
+                        <div class="definition-text">Вычислительная цель, на которую scheduler может допустить задачу после admission.</div>
                     </div>
                     <div class="definition-card">
-                        <strong>Всего задач в очередях</strong>
-                        <div class="definition-text">Сколько задач ещё ждут admission/start и не начали выполняться.</div>
+                        <strong>Давление очереди</strong>
+                        <div class="definition-text">Объясняет, означает ли текущая очередь реальное накопление задач или система просто занята активной работой.</div>
                     </div>
                     <div class="definition-card">
-                        <strong>Свободная мощность</strong>
-                        <div class="definition-text">Есть ли запас для новых chat-задач без ожидания в очереди.</div>
-                    </div>
-                    <div class="definition-card">
-                        <strong>Возраст heartbeat планировщика</strong>
-                        <div class="definition-text">Сколько времени прошло с последнего подтверждения, что scheduler жив и публикует heartbeat.</div>
-                    </div>
-                    <div class="definition-card">
-                        <strong>Активные модели</strong>
-                        <div class="definition-text">Какие модели реально reported активными целями. Если список пуст, мы честно показываем “нет данных”.</div>
+                        <strong>Запас и масштабирование</strong>
+                        <div class="definition-text">Показывают, есть ли резерв для следующего chat-запроса и можно ли честно говорить о запасе без догадок.</div>
                     </div>
                 </div>
             </article>
@@ -657,10 +676,32 @@
                     <div class="section-kicker">Очереди</div>
                     <h2 class="section-title">Очереди и backlog</h2>
                     <p class="section-description">
-                        Где именно накапливаются задачи и как backlog распределён по workload и приоритетам.
+                        Показывает не только размер очереди, но и её смысл: это нормальная занятость, локальный parser backlog
+                        или уже давление на chat path.
                     </p>
                 </div>
-                <div class="queue-overview" id="queueOverview"></div>
+                <div class="queue-overview" id="queueOverview">
+                    <article class="summary-card">
+                        <div class="summary-label">Всего задач в очередях</div>
+                        <div class="summary-value">-</div>
+                        <div class="summary-detail">Собираем queue depth.</div>
+                    </article>
+                    <article class="summary-card">
+                        <div class="summary-label">Давление очереди</div>
+                        <div class="summary-value">Ожидание</div>
+                        <div class="summary-detail">После загрузки появится объяснение, является ли очередь деградацией или нормальной занятостью.</div>
+                    </article>
+                    <article class="summary-card">
+                        <div class="summary-label">Ожидающие chat-задачи</div>
+                        <div class="summary-value">-</div>
+                        <div class="summary-detail">Сколько chat-задач ждёт admission/start.</div>
+                    </article>
+                    <article class="summary-card">
+                        <div class="summary-label">Ожидающие parser-задачи</div>
+                        <div class="summary-value">-</div>
+                        <div class="summary-detail">Сколько parser/document задач ещё не начали выполняться.</div>
+                    </article>
+                </div>
                 <div class="queue-summary">
                     <div class="queue-list" id="queueBreakdown"></div>
                     <div class="workload-grid" id="workloadBreakdown"></div>
@@ -672,7 +713,7 @@
                     <div class="section-kicker">Runtime</div>
                     <h2 class="section-title">Состояние runtime</h2>
                     <p class="section-description">
-                        Readiness, health и capacity собраны в одном месте с короткими пояснениями, что это означает для оператора.
+                        Readiness, health, scheduler, запас мощности и reported active models собраны в одном месте с операторскими пояснениями.
                     </p>
                 </div>
                 <div class="runtime-list" id="runtimeSummary"></div>
@@ -685,7 +726,7 @@
                     <div class="section-kicker">Воркеры</div>
                     <h2 class="section-title">Активные воркеры</h2>
                     <p class="section-description">
-                        Видимые worker heartbeat записи: какой пул работает, к какой цели он привязан и есть ли у него активные задачи.
+                        Видимые worker heartbeat записи: какой пул активен, к какой цели привязан worker и есть ли у него текущая работа.
                     </p>
                 </div>
                 <table class="data-table" id="workersTable">
@@ -693,8 +734,8 @@
                         <tr>
                             <th>Воркер</th>
                             <th>Пул</th>
-                            <th>Цель</th>
-                            <th>Тип</th>
+                            <th>Привязка к цели</th>
+                            <th>Тип цели</th>
                             <th>Активные задачи</th>
                             <th>Последний heartbeat</th>
                             <th>Состояние</th>
@@ -711,7 +752,8 @@
                     <div class="section-kicker">Цели исполнения</div>
                     <h2 class="section-title">Доступные вычислительные цели</h2>
                     <p class="section-description">
-                        Показаны только реально reported target heartbeat данные: поддерживаемые workload, базовая мощность и доступные ресурсы.
+                        Показаны только реально reported target heartbeat данные: какие workload поддерживаются, сколько базовой мощности видно
+                        и есть ли активные модели.
                     </p>
                 </div>
                 <table class="data-table" id="targetsTable">
@@ -719,12 +761,12 @@
                         <tr>
                             <th>Цель</th>
                             <th>Тип</th>
-                            <th>Поддерживаемые workload</th>
-                            <th>Базовая мощность</th>
+                            <th>Поддержка workload</th>
+                            <th>Базовая вместимость</th>
                             <th>CPU</th>
                             <th>Свободная RAM</th>
                             <th>Свободная VRAM</th>
-                            <th>Загруженные модели</th>
+                            <th>Активные модели</th>
                             <th>Последний heartbeat</th>
                         </tr>
                     </thead>
