@@ -1,0 +1,64 @@
+{
+  "profiles": [
+    {
+      "name": "5",
+      "concurrency": 5,
+      "recommended_mode": "shared-session",
+      "default_ramp_up_seconds": 5,
+      "default_max_time_seconds": 180,
+      "default_warmup": true,
+      "default_quiet_window_seconds": 15,
+      "notes": "Smoke / staircase profile."
+    },
+    {
+      "name": "10",
+      "concurrency": 10,
+      "recommended_mode": "shared-session",
+      "default_ramp_up_seconds": 10,
+      "default_max_time_seconds": 180,
+      "default_warmup": true,
+      "default_quiet_window_seconds": 30,
+      "notes": "Shared-session short ramp."
+    },
+    {
+      "name": "20",
+      "concurrency": 20,
+      "recommended_mode": "shared-session",
+      "default_ramp_up_seconds": 20,
+      "default_max_time_seconds": 180,
+      "default_warmup": true,
+      "default_quiet_window_seconds": 65,
+      "notes": "Upper safe one-shot shared-session benchmark."
+    },
+    {
+      "name": "50",
+      "concurrency": 50,
+      "recommended_mode": "multi-session",
+      "default_ramp_up_seconds": 50,
+      "default_max_time_seconds": 240,
+      "default_warmup": true,
+      "default_quiet_window_seconds": 65,
+      "notes": "Use multi-session credentials to avoid single-user rate-limit skew."
+    },
+    {
+      "name": "100",
+      "concurrency": 100,
+      "recommended_mode": "multi-session",
+      "default_ramp_up_seconds": 100,
+      "default_max_time_seconds": 300,
+      "default_warmup": true,
+      "default_quiet_window_seconds": 65,
+      "notes": "Do not treat shared-session 429 saturation as capacity saturation."
+    },
+    {
+      "name": "200",
+      "concurrency": 200,
+      "recommended_mode": "multi-session",
+      "default_ramp_up_seconds": 200,
+      "default_max_time_seconds": 360,
+      "default_warmup": true,
+      "default_quiet_window_seconds": 65,
+      "notes": "Large-scale multi-session only."
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+# Формат: username:password
+# Используйте только на TEST / staging VM и не храните реальные пароли в репозитории.
+
+aitest01:change-me
+aitest02:change-me
+aitest03:change-me
+aitest04:change-me
+aitest05:change-me
