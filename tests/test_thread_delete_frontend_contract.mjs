@@ -75,7 +75,7 @@ test("thread list render adds dedicated delete action", () => {
 
     assert.equal(deleteButton.dataset.action, "delete-thread");
     assert.equal(deleteButton.dataset.threadId, "thread-a");
-    assert.equal(deleteButton.textContent, "×");
+    assert.equal(deleteButton.textContent, "");
     assert.equal(deleteButton.attributes.get("aria-label"), "Удалить диалог Первый");
 });
 
