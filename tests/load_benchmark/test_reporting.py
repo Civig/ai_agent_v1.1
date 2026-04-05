@@ -39,10 +39,15 @@ class LoadBenchmarkReportingTests(unittest.TestCase):
         self.assertEqual(summary["total_requests"], 3)
         self.assertEqual(summary["successful_requests"], 2)
         self.assertEqual(summary["failed_requests"], 1)
+        self.assertEqual(summary["accepted_requests"], 2)
+        self.assertEqual(summary["accepted_completed_requests"], 2)
+        self.assertEqual(summary["accepted_incomplete_requests"], 0)
         self.assertEqual(summary["max_queue_depth"], 2)
         self.assertEqual(summary["max_pending_chat_p1"], 2)
         self.assertEqual(summary["max_active_jobs"], 1)
         self.assertEqual(summary["capacity_false_samples"], 1)
+        self.assertTrue(summary["drained"])
+        self.assertEqual(summary["drain_seconds"], 0.5)
         self.assertEqual(summary["final_classification"], "completed_with_queue_pressure")
 
     def test_wait_table_and_summary_are_written_to_files(self):
