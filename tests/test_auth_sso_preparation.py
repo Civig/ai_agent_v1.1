@@ -31,12 +31,13 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
             return 1 if key in self.storage else 0
 
     @staticmethod
-    def make_request(*, headers=None, cookies=None, method="GET", path="/", app_state=None):
+    def make_request(*, headers=None, cookies=None, method="GET", path="/", app_state=None, client_host="127.0.0.1"):
         return types.SimpleNamespace(
             headers=headers or {},
             cookies=cookies or {},
             method=method,
             url=types.SimpleNamespace(scheme="https", path=path),
+            client=types.SimpleNamespace(host=client_host),
             app=types.SimpleNamespace(
                 state=app_state or types.SimpleNamespace(llm_gateway=types.SimpleNamespace(redis=None))
             ),
@@ -134,7 +135,9 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
             app_module.settings,
             "SSO_ENABLED",
             True,
-        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"):
+        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"), patch.object(
+            app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"
+        ):
             app_module.reject_untrusted_auth_proxy_headers(request)
 
     def test_reject_untrusted_auth_proxy_headers_rejects_reserved_headers_outside_sso_entry_path_even_when_enabled(self):
@@ -149,6 +152,26 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
             "SSO_ENABLED",
             True,
         ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"):
+            with self.assertRaises(HTTPException) as error:
+                app_module.reject_untrusted_auth_proxy_headers(request)
+
+        self.assertEqual(error.exception.status_code, 400)
+
+    def test_reject_untrusted_auth_proxy_headers_rejects_sso_entry_when_source_is_not_trusted(self):
+        request = self.make_request(
+            headers={"x-authenticated-user": "alice"},
+            method="GET",
+            path="/auth/sso/login",
+            client_host="203.0.113.10",
+        )
+
+        with patch.object(app_module.settings, "TRUSTED_AUTH_PROXY_ENABLED", True), patch.object(
+            app_module.settings,
+            "SSO_ENABLED",
+            True,
+        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"), patch.object(
+            app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"
+        ):
             with self.assertRaises(HTTPException) as error:
                 app_module.reject_untrusted_auth_proxy_headers(request)
 
@@ -177,7 +200,9 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
             app_module.settings,
             "SSO_ENABLED",
             True,
-        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"):
+        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"), patch.object(
+            app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"
+        ):
             identity = app_module.build_trusted_proxy_sso_identity(request)
 
         self.assertEqual(identity["username"], "alice")
@@ -199,11 +224,58 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
             app_module.settings,
             "SSO_ENABLED",
             True,
-        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"):
+        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"), patch.object(
+            app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"
+        ):
             with self.assertRaises(HTTPException) as error:
                 app_module.build_trusted_proxy_sso_identity(request)
 
         self.assertEqual(error.exception.status_code, 401)
+
+    def test_build_trusted_proxy_sso_identity_rejects_untrusted_source_even_on_sso_path(self):
+        request = self.make_request(
+            headers={
+                "x-authenticated-user": "alice",
+                "x-authenticated-principal": "alice@EXAMPLE.LOCAL",
+            },
+            method="GET",
+            path="/auth/sso/login",
+            client_host="203.0.113.10",
+        )
+
+        with patch.object(app_module.settings, "TRUSTED_AUTH_PROXY_ENABLED", True), patch.object(
+            app_module.settings,
+            "SSO_ENABLED",
+            True,
+        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"), patch.object(
+            app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"
+        ):
+            with self.assertRaises(HTTPException) as error:
+                app_module.build_trusted_proxy_sso_identity(request)
+
+        self.assertEqual(error.exception.status_code, 400)
+
+    def test_build_login_rate_subject_ignores_spoofed_forwarded_headers_without_trusted_proxy_source(self):
+        request = self.make_request(
+            headers={"x-forwarded-for": "198.51.100.7", "x-real-ip": "198.51.100.8"},
+            client_host="203.0.113.10",
+        )
+
+        with patch.object(app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"):
+            subject = app_module.build_login_rate_subject(request, "Alice")
+
+        self.assertEqual(subject, "203.0.113.10:alice")
+
+    def test_build_login_rate_subject_uses_forwarded_headers_for_trusted_proxy_source(self):
+        request = self.make_request(
+            headers={"x-forwarded-for": "198.51.100.7, 127.0.0.1", "x-real-ip": "198.51.100.8"},
+            client_host="127.0.0.1",
+        )
+
+        with patch.object(app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"):
+            subject = app_module.build_login_rate_subject(request, "Alice")
+
+        self.assertEqual(subject, "198.51.100.8:alice")
 
     def test_load_model_policy_catalog_reads_folder_based_policies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -388,6 +460,8 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
             "SSO_ENABLED",
             True,
         ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"), patch.object(
+            app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"
+        ), patch.object(
             app_module,
             "resolve_runtime_model",
             AsyncMock(return_value={"key": "phi3:mini", "name": "phi3:mini", "description": "General"}),
@@ -442,6 +516,29 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
                 await app_module.sso_login_entry(request, current_user=None)
 
         self.assertEqual(error.exception.status_code, 404)
+
+    async def test_sso_login_entry_rejects_untrusted_direct_source(self):
+        request = self.make_request(
+            headers={
+                "x-authenticated-user": "aitest",
+                "x-authenticated-principal": "aitest@EXAMPLE.LOCAL",
+            },
+            method="GET",
+            path="/auth/sso/login",
+            client_host="203.0.113.10",
+        )
+
+        with patch.object(app_module.settings, "TRUSTED_AUTH_PROXY_ENABLED", True), patch.object(
+            app_module.settings,
+            "SSO_ENABLED",
+            True,
+        ), patch.object(app_module.settings, "SSO_LOGIN_PATH", "/auth/sso/login"), patch.object(
+            app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"
+        ):
+            with self.assertRaises(HTTPException) as error:
+                await app_module.sso_login_entry(request, current_user=None)
+
+        self.assertEqual(error.exception.status_code, 400)
 
     async def test_get_current_user_returns_session_metadata_from_access_token(self):
         fake_redis = self.FakeRedis()

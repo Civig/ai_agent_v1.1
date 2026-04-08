@@ -1,4 +1,5 @@
 ﻿import asyncio
+import ipaddress
 import json
 import logging
 import re
@@ -9,6 +10,7 @@ import uuid
 import zipfile
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, Optional
@@ -639,12 +641,49 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie("csrf_token", path="/", domain=settings.COOKIE_DOMAIN)
 
 
-def build_login_rate_subject(request: Request, username: str) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    real_ip = request.headers.get("x-real-ip", "")
-    client_host = real_ip or (forwarded_for.split(",", 1)[0].strip() if forwarded_for else "")
+@lru_cache(maxsize=16)
+def parse_trusted_proxy_source_cidrs(raw_value: str) -> tuple[ipaddress._BaseNetwork, ...]:
+    cidrs: list[ipaddress._BaseNetwork] = []
+    for item in raw_value.split(","):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        cidrs.append(ipaddress.ip_network(candidate, strict=False))
+    return tuple(cidrs)
+
+
+def get_request_client_host(request: Request) -> str:
+    client = getattr(request, "client", None)
+    return str(getattr(client, "host", "") or "").strip()
+
+
+def request_comes_from_trusted_proxy_source(request: Request) -> bool:
+    client_host = get_request_client_host(request)
     if not client_host:
-        client_host = request.client.host if request.client and request.client.host else "unknown"
+        return False
+    trusted_cidrs = (settings.TRUSTED_PROXY_SOURCE_CIDRS or "").strip()
+    if not trusted_cidrs:
+        return False
+    try:
+        client_ip = ipaddress.ip_address(client_host)
+    except ValueError:
+        logger.warning("Rejected trusted proxy check for non-IP client host: %s", client_host)
+        return False
+    try:
+        return any(client_ip in network for network in parse_trusted_proxy_source_cidrs(trusted_cidrs))
+    except ValueError:
+        logger.warning("Invalid TRUSTED_PROXY_SOURCE_CIDRS value configured; trusted proxy checks are disabled")
+        return False
+
+
+def build_login_rate_subject(request: Request, username: str) -> str:
+    client_host = ""
+    if request_comes_from_trusted_proxy_source(request):
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        real_ip = request.headers.get("x-real-ip", "")
+        client_host = real_ip or (forwarded_for.split(",", 1)[0].strip() if forwarded_for else "")
+    if not client_host:
+        client_host = get_request_client_host(request) or "unknown"
     normalized = normalize_username(username) or username.strip().lower() or "anonymous"
     return f"{client_host}:{normalized[:128]}"
 
@@ -654,7 +693,7 @@ def user_is_admin(user_info: Dict[str, Any]) -> bool:
     return any(
         group in {"domain admins", "admins", "administrators", "ai-admins", "ai-admin"}
         or group.endswith("-admins")
-        or "admin" in group
+        or group.endswith("_admins")
         for group in groups
     )
 
@@ -714,7 +753,12 @@ def trusted_proxy_sso_enabled() -> bool:
 
 
 def request_allows_trusted_proxy_headers(request: Request) -> bool:
-    return trusted_proxy_sso_enabled() and get_request_method(request) == "GET" and get_request_path(request) == settings.SSO_LOGIN_PATH
+    return (
+        trusted_proxy_sso_enabled()
+        and get_request_method(request) == "GET"
+        and get_request_path(request) == settings.SSO_LOGIN_PATH
+        and request_comes_from_trusted_proxy_source(request)
+    )
 
 
 def reject_untrusted_auth_proxy_headers(request: Request) -> None:

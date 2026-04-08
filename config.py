@@ -2,10 +2,11 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,18 @@ INSECURE_SECRET_KEYS = {
     "change-this-secret-key",
     "change-me-to-a-long-random-secret",
 }
+INSECURE_PASSWORD_PLACEHOLDERS = {
+    "change-me",
+    "changeme",
+    "default",
+    "password",
+    "secret",
+    "test",
+    "demo",
+    "redis",
+    "postgres",
+}
+LOCALHOST_NAMES = {"localhost", "127.0.0.1", "::1"}
 MIN_SECRET_KEY_LENGTH = 32
 
 
@@ -29,6 +42,30 @@ def parse_group_mapping(value: Optional[str]) -> tuple[str, ...]:
         seen.add(key)
         normalized_groups.append(key)
     return tuple(normalized_groups)
+
+
+def secret_looks_like_placeholder(value: Optional[str]) -> bool:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return True
+    if normalized in INSECURE_PASSWORD_PLACEHOLDERS:
+        return True
+    return normalized.startswith("change-me") or normalized.startswith("changeme")
+
+
+def url_hostname(url: Optional[str]) -> str:
+    parsed = urlparse((url or "").strip())
+    return (parsed.hostname or "").strip().lower()
+
+
+def url_password(url: Optional[str]) -> str:
+    parsed = urlparse((url or "").strip())
+    return (parsed.password or "").strip()
+
+
+def is_non_local_service(url: Optional[str]) -> bool:
+    hostname = url_hostname(url)
+    return bool(hostname) and hostname not in LOCALHOST_NAMES
 
 
 def _load_environment_file() -> None:
@@ -71,6 +108,7 @@ class Settings(BaseSettings):
     COOKIE_SAMESITE: str = "lax"
     COOKIE_DOMAIN: Optional[str] = None
     TRUSTED_AUTH_PROXY_ENABLED: bool = False
+    TRUSTED_PROXY_SOURCE_CIDRS: str = "127.0.0.1/32,::1/128"
     SSO_ENABLED: bool = False
     SSO_LOGIN_PATH: str = "/auth/sso/login"
     SSO_SERVICE_PRINCIPAL: str = ""
@@ -100,6 +138,7 @@ class Settings(BaseSettings):
     REDIS_SENTINEL_MASTER: str = "mymaster"
     PERSISTENT_DB_ENABLED: bool = False
     PERSISTENT_DB_URL: str = ""
+    POSTGRES_PASSWORD: str = ""
     PERSISTENT_DB_ECHO: bool = False
     PERSISTENT_DB_POOL_PRE_PING: bool = True
     PERSISTENT_DB_BOOTSTRAP_SCHEMA: bool = False
@@ -190,6 +229,29 @@ class Settings(BaseSettings):
         if len(secret) < MIN_SECRET_KEY_LENGTH:
             raise ValueError(f"SECRET_KEY must be at least {MIN_SECRET_KEY_LENGTH} characters long")
         return secret
+
+    @field_validator("REDIS_PASSWORD", "POSTGRES_PASSWORD")
+    @classmethod
+    def validate_placeholder_passwords(cls, value: str) -> str:
+        secret = value.strip()
+        if secret and secret_looks_like_placeholder(secret):
+            raise ValueError("Password uses an insecure placeholder value and must be overridden")
+        return secret
+
+    @model_validator(mode="after")
+    def validate_service_secret_requirements(self) -> "Settings":
+        redis_url_secret = url_password(self.REDIS_URL)
+        if redis_url_secret and secret_looks_like_placeholder(redis_url_secret):
+            raise ValueError("REDIS_URL embeds an insecure placeholder password")
+        if is_non_local_service(self.REDIS_URL) and not self.REDIS_PASSWORD.strip():
+            raise ValueError("REDIS_PASSWORD must be set for non-local Redis deployments")
+
+        db_url_secret = url_password(self.PERSISTENT_DB_URL)
+        if db_url_secret and secret_looks_like_placeholder(db_url_secret):
+            raise ValueError("PERSISTENT_DB_URL embeds an insecure placeholder password")
+        if self.PERSISTENT_DB_ENABLED and is_non_local_service(self.PERSISTENT_DB_URL) and not self.POSTGRES_PASSWORD.strip():
+            raise ValueError("POSTGRES_PASSWORD must be set for non-local PostgreSQL deployments")
+        return self
 
     @field_validator("WORKER_POOL")
     @classmethod

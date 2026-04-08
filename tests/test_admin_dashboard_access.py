@@ -10,6 +10,16 @@ import app as app_module
 
 
 class AdminDashboardAccessTests(unittest.IsolatedAsyncioTestCase):
+    def test_user_is_admin_allows_expected_admin_groups(self):
+        self.assertTrue(app_module.user_is_admin({"groups": ["AI-Admins"]}))
+        self.assertTrue(app_module.user_is_admin({"groups": ["corp-admins"]}))
+        self.assertTrue(app_module.user_is_admin({"groups": ["Domain Admins"]}))
+
+    def test_user_is_admin_rejects_substring_false_positives(self):
+        self.assertFalse(app_module.user_is_admin({"groups": ["project-admin-reviewers"]}))
+        self.assertFalse(app_module.user_is_admin({"groups": ["readmin-team"]}))
+        self.assertFalse(app_module.user_is_admin({"groups": ["admin-console-users"]}))
+
     async def test_guard_allows_aitest(self):
         user = {"username": "aitest", "display_name": "AI Test"}
 
