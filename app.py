@@ -8,7 +8,7 @@ import time
 import tempfile
 import uuid
 import zipfile
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -41,6 +41,15 @@ from auth_kerberos import (
     normalize_username,
     revoke_token,
     settings,
+)
+from dashboard_telemetry import (
+    HISTORY_RANGE_SECONDS,
+    build_dashboard_event,
+    build_dashboard_events,
+    build_dashboard_history_payload,
+    build_dashboard_live_sample,
+    normalize_history_range,
+    sanitize_dashboard_live_sample,
 )
 from llm_gateway import (
     AsyncChatStore,
@@ -1286,8 +1295,17 @@ def compute_target_runtime_status(target: Dict[str, Any], *, now_ts: int) -> Dic
         "supports_workloads": list(target.get("supports_workloads") or []),
         "base_capacity_tokens": max(0, int(target.get("base_capacity_tokens") or 0)),
         "cpu_percent": float(target.get("cpu_percent") or 0.0),
+        "ram_total_mb": max(0, int(target.get("ram_total_mb") or 0)),
         "ram_free_mb": max(0, int(target.get("ram_free_mb") or 0)),
+        "gpu_utilization": float(target.get("gpu_utilization")) if target.get("gpu_utilization") is not None else None,
+        "gpu_temperature_c": (
+            float(target.get("gpu_temperature_c")) if target.get("gpu_temperature_c") is not None else None
+        ),
+        "network_rx_bytes": max(0, int(target.get("network_rx_bytes") or 0)) if target.get("network_rx_bytes") is not None else None,
+        "network_tx_bytes": max(0, int(target.get("network_tx_bytes") or 0)) if target.get("network_tx_bytes") is not None else None,
+        "network_scope": str(target.get("network_scope") or ""),
         "vram_free_mb": max(0, int(target.get("vram_free_mb") or 0)),
+        "vram_total_mb": max(0, int(target.get("vram_total_mb") or 0)),
         "loaded_models": list(target.get("loaded_models") or []),
         "last_seen_age_seconds": age_seconds,
         "status": status,
@@ -1363,6 +1381,49 @@ async def build_admin_dashboard_summary(gateway: LLMGateway) -> Dict[str, Any]:
     }
 
 
+async def run_dashboard_telemetry_sampler(gateway: LLMGateway, stop_event: asyncio.Event) -> None:
+    previous_sample: Optional[Dict[str, Any]] = None
+    last_error_signature: Optional[str] = None
+    interval_seconds = max(2, int(settings.ADMIN_DASHBOARD_TELEMETRY_INTERVAL_SECONDS))
+    while not stop_event.is_set():
+        try:
+            summary = await build_admin_dashboard_summary(gateway)
+            sample = build_dashboard_live_sample(summary, previous_sample=previous_sample)
+            public_sample = sanitize_dashboard_live_sample(sample)
+            if public_sample is not None:
+                await gateway.store_dashboard_live_sample(public_sample)
+                await gateway.append_dashboard_history_sample(public_sample)
+                for event in build_dashboard_events(previous_sample, public_sample):
+                    await gateway.append_dashboard_event(event)
+                previous_sample = sample
+            if last_error_signature is not None:
+                await gateway.append_dashboard_event(
+                    build_dashboard_event(
+                        severity="info",
+                        source="telemetry_sampler",
+                        message="Telemetry sampler recovered",
+                    )
+                )
+                last_error_signature = None
+        except Exception as exc:
+            logger.exception("Dashboard telemetry sampler failed")
+            signature = f"{type(exc).__name__}:{exc}"
+            if signature != last_error_signature:
+                await gateway.append_dashboard_event(
+                    build_dashboard_event(
+                        severity="error",
+                        source="telemetry_sampler",
+                        message="Telemetry sampler error",
+                        context={"error": str(exc)},
+                    )
+                )
+                last_error_signature = signature
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except asyncio.TimeoutError:
+            continue
+
+
 async def wait_for_terminal_job(gateway: LLMGateway, job_id: str, timeout_seconds: int) -> Dict[str, Any]:
     deadline = perf_counter() + timeout_seconds
     while perf_counter() < deadline:
@@ -1392,6 +1453,8 @@ async def lifespan(app: FastAPI):
         namespace="ratelimit:login",
     )
     app.state.llm_gateway = LLMGateway(settings.REDIS_URL)
+    app.state.dashboard_telemetry_stop = asyncio.Event()
+    app.state.dashboard_telemetry_task = None
 
     await app.state.chat_store.connect()
     await app.state.rate_limiter.connect()
@@ -1409,9 +1472,18 @@ async def lifespan(app: FastAPI):
     )
     if app.state.conversation_persistence is not None:
         app.state.conversation_db_store = app.state.conversation_persistence.store
+    app.state.dashboard_telemetry_task = asyncio.create_task(
+        run_dashboard_telemetry_sampler(app.state.llm_gateway, app.state.dashboard_telemetry_stop)
+    )
     try:
         yield
     finally:
+        app.state.dashboard_telemetry_stop.set()
+        dashboard_task = app.state.dashboard_telemetry_task
+        if dashboard_task is not None:
+            dashboard_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await dashboard_task
         await asyncio.to_thread(
             close_conversation_persistence_runtime,
             app.state.conversation_persistence,
@@ -1686,6 +1758,9 @@ async def admin_dashboard_page(
             "current_user": current_user,
             "is_authenticated": True,
             "dashboard_api_url": "/api/admin/dashboard/summary",
+            "dashboard_live_api_url": "/api/admin/dashboard/live",
+            "dashboard_history_api_url": "/api/admin/dashboard/history",
+            "dashboard_events_api_url": "/api/admin/dashboard/events",
             "dashboard_refresh_interval_ms": ADMIN_DASHBOARD_REFRESH_INTERVAL_MS,
         },
     )
@@ -1699,6 +1774,50 @@ async def get_admin_dashboard_summary(
     gateway: LLMGateway = request.app.state.llm_gateway
     payload = await build_admin_dashboard_summary(gateway)
     payload["current_user"] = current_user["username"]
+    return JSONResponse(payload)
+
+
+@app.get("/api/admin/dashboard/live")
+async def get_admin_dashboard_live(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+):
+    gateway: LLMGateway = request.app.state.llm_gateway
+    payload = await gateway.get_dashboard_live_sample()
+    if payload is None:
+        summary = await build_admin_dashboard_summary(gateway)
+        payload = sanitize_dashboard_live_sample(build_dashboard_live_sample(summary))
+    response_payload = dict(payload or {})
+    response_payload["current_user"] = current_user["username"]
+    return JSONResponse(response_payload)
+
+
+@app.get("/api/admin/dashboard/history")
+async def get_admin_dashboard_history(
+    request: Request,
+    range: str = "24h",
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+):
+    gateway: LLMGateway = request.app.state.llm_gateway
+    normalized_range = normalize_history_range(range)
+    since_ts = int(time.time()) - HISTORY_RANGE_SECONDS[normalized_range]
+    samples = await gateway.get_dashboard_history_samples(since_ts=since_ts)
+    payload = build_dashboard_history_payload(samples, range_key=normalized_range)
+    payload["current_user"] = current_user["username"]
+    return JSONResponse(payload)
+
+
+@app.get("/api/admin/dashboard/events")
+async def get_admin_dashboard_events(
+    request: Request,
+    limit: int = 50,
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+):
+    gateway: LLMGateway = request.app.state.llm_gateway
+    payload = {
+        "events": await gateway.get_dashboard_events(limit=limit),
+        "current_user": current_user["username"],
+    }
     return JSONResponse(payload)
 
 

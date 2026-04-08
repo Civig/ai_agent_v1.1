@@ -311,6 +311,15 @@ class LocalResourceMonitor:
             return min(100.0, (load / max(self.cpu_count, 1)) * 100.0)
         return 0.0
 
+    def _network_io_snapshot(self) -> tuple[Optional[int], Optional[int]]:
+        if psutil is None:
+            return None, None
+        try:
+            counters = psutil.net_io_counters()
+        except Exception:
+            return None, None
+        return int(counters.bytes_recv), int(counters.bytes_sent)
+
     async def _query_gpu(self) -> Optional[dict[str, Any]]:
         selected_index = settings.WORKER_GPU_INDEX or 0
         if pynvml is not None:
@@ -320,12 +329,14 @@ class LocalResourceMonitor:
                 handle = pynvml.nvmlDeviceGetHandleByIndex(index)
                 memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
                 return {
                     "gpu_index": index,
                     "vram_total_mb": int(memory.total / (1024 * 1024)),
                     "vram_free_mb": int(memory.free / (1024 * 1024)),
                     "used_vram_mb": int(memory.used / (1024 * 1024)),
                     "gpu_utilization": float(utilization.gpu),
+                    "gpu_temperature_c": float(temperature),
                 }
             except Exception:
                 logger.debug("pynvml is unavailable or failed, falling back to nvidia-smi", exc_info=True)
@@ -336,7 +347,7 @@ class LocalResourceMonitor:
         try:
             process = await asyncio.create_subprocess_exec(
                 "nvidia-smi",
-                "--query-gpu=index,memory.total,memory.free,memory.used,utilization.gpu",
+                "--query-gpu=index,memory.total,memory.free,memory.used,utilization.gpu,temperature.gpu",
                 "--format=csv,noheader,nounits",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -350,7 +361,7 @@ class LocalResourceMonitor:
 
         for line in stdout.decode("utf-8", errors="ignore").splitlines():
             parts = [item.strip() for item in line.split(",")]
-            if len(parts) != 5:
+            if len(parts) != 6:
                 continue
             gpu_index = int(parts[0])
             if settings.WORKER_GPU_INDEX is not None and gpu_index != settings.WORKER_GPU_INDEX:
@@ -361,12 +372,14 @@ class LocalResourceMonitor:
                 "vram_free_mb": int(parts[2]),
                 "used_vram_mb": int(parts[3]),
                 "gpu_utilization": float(parts[4]),
+                "gpu_temperature_c": float(parts[5]),
             }
         return None
 
     async def collect_target_report(self) -> Dict[str, Any]:
         ram_total_mb, ram_free_mb = self._memory_snapshot_mb()
         cpu_percent = self._cpu_percent()
+        network_rx_bytes, network_tx_bytes = self._network_io_snapshot()
         loaded_models = await self.ollama.fetch_loaded_models() if self.ollama is not None else []
         gpu = await self._query_gpu() if settings.WORKER_TARGET_KIND in {"auto", "gpu"} else None
 
@@ -390,6 +403,10 @@ class LocalResourceMonitor:
                 "vram_total_mb": gpu["vram_total_mb"],
                 "vram_free_mb": gpu["vram_free_mb"],
                 "gpu_utilization": gpu["gpu_utilization"],
+                "gpu_temperature_c": gpu.get("gpu_temperature_c"),
+                "network_rx_bytes": network_rx_bytes,
+                "network_tx_bytes": network_tx_bytes,
+                "network_scope": "runtime_namespace",
                 "loaded_models": loaded_models,
                 "base_capacity_tokens": base_capacity_tokens,
                 "ollama_url": settings.OLLAMA_URL,
@@ -414,7 +431,11 @@ class LocalResourceMonitor:
             "gpu_index": None,
             "vram_total_mb": 0,
             "vram_free_mb": 0,
-            "gpu_utilization": 0.0,
+            "gpu_utilization": None,
+            "gpu_temperature_c": None,
+            "network_rx_bytes": network_rx_bytes,
+            "network_tx_bytes": network_tx_bytes,
+            "network_scope": "runtime_namespace",
             "loaded_models": loaded_models,
             "base_capacity_tokens": base_capacity_tokens,
             "ollama_url": settings.OLLAMA_URL,

@@ -98,6 +98,40 @@ export function formatTimestamp(value) {
     });
 }
 
+export function formatBytesPerSecond(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+        return "Нет данных";
+    }
+    if (numeric < 1024) {
+        return `${numeric.toFixed(0)} B/s`;
+    }
+    if (numeric < 1024 * 1024) {
+        return `${(numeric / 1024).toFixed(1)} KB/s`;
+    }
+    if (numeric < 1024 * 1024 * 1024) {
+        return `${(numeric / (1024 * 1024)).toFixed(1)} MB/s`;
+    }
+    return `${(numeric / (1024 * 1024 * 1024)).toFixed(2)} GB/s`;
+}
+
+function formatMetricValue(value, unit) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return "Нет данных";
+    }
+    if (unit === "percent") {
+        return `${numeric.toFixed(1)}%`;
+    }
+    if (unit === "mb") {
+        return `${formatNumber(numeric)} MB`;
+    }
+    if (unit === "bytes_per_sec") {
+        return formatBytesPerSecond(numeric);
+    }
+    return formatNumber(numeric);
+}
+
 export function severityClass(level) {
     const normalized = String(level || "neutral").toLowerCase();
     if (normalized === "ok") {
@@ -1025,6 +1059,198 @@ export function buildQueueOverview(summary) {
     ];
 }
 
+export function buildResourceTelemetryCards(live, summary = {}) {
+    const activeModels = Array.isArray(live?.active_models) ? live.active_models.filter(Boolean) : [];
+    const cpuValue = Number(live?.cpu_percent);
+    const queueDepth = Number(live?.queue_depth || summary.queue_depth || 0);
+    const chatBacklog = Number(live?.chat_backlog || summary.chat_backlog || 0);
+    const parserBacklog = Number(live?.parser_backlog || summary.parser_backlog || 0);
+    const ramUsed = Number(live?.ram_used_mb);
+    const ramFree = Number(live?.ram_free_mb);
+    const gpuUtil = Number(live?.gpu_utilization_percent);
+    const vramFree = Number(live?.vram_free_mb);
+    const networkRx = Number(live?.network_rx_bytes_per_sec);
+    const networkTx = Number(live?.network_tx_bytes_per_sec);
+
+    return [
+        {
+            key: "cpu",
+            label: "CPU",
+            value: Number.isFinite(cpuValue) ? `${cpuValue.toFixed(1)}%` : "Нет данных",
+            detail: Number.isFinite(cpuValue)
+                ? "Средняя загрузка по online target heartbeat."
+                : "CPU telemetry не reported текущим target runtime.",
+            severity: Number.isFinite(cpuValue) ? (cpuValue >= 85 ? "warn" : "ok") : "neutral",
+            state: live?.cpu_availability || "unavailable",
+            fill: Number.isFinite(cpuValue) ? Math.max(6, Math.min(100, cpuValue)) : 0,
+        },
+        {
+            key: "ram",
+            label: "RAM",
+            value: Number.isFinite(ramUsed) ? `${formatNumber(ramUsed)} MB used` : "Нет данных",
+            detail: Number.isFinite(ramFree)
+                ? `Свободно ${formatNumber(ramFree)} MB по reported target memory snapshot.`
+                : "RAM telemetry не reported текущим target runtime.",
+            severity: Number.isFinite(ramUsed) ? "ok" : "neutral",
+            state: live?.ram_availability || "unavailable",
+            fill: Number.isFinite(ramUsed) && Number.isFinite(Number(live?.ram_total_mb)) && Number(live.ram_total_mb) > 0
+                ? Math.max(6, Math.min(100, (ramUsed / Number(live.ram_total_mb)) * 100))
+                : 0,
+        },
+        {
+            key: "gpu",
+            label: "GPU / VRAM",
+            value: Number.isFinite(gpuUtil) ? `${gpuUtil.toFixed(1)}%` : "Нет данных",
+            detail: Number.isFinite(vramFree)
+                ? `Свободно VRAM: ${formatNumber(vramFree)} MB${Number.isFinite(Number(live?.gpu_temperature_c)) ? ` · ${Number(live.gpu_temperature_c).toFixed(1)}°C` : ""}`
+                : "GPU telemetry unavailable или GPU target сейчас не reported.",
+            severity: Number.isFinite(gpuUtil) ? (gpuUtil >= 90 ? "warn" : "ok") : "neutral",
+            state: live?.gpu_availability || "not_configured",
+            fill: Number.isFinite(gpuUtil) ? Math.max(6, Math.min(100, gpuUtil)) : 0,
+        },
+        {
+            key: "network",
+            label: "Сеть",
+            value: Number.isFinite(networkRx) || Number.isFinite(networkTx)
+                ? `${formatBytesPerSecond(networkRx)} / ${formatBytesPerSecond(networkTx)}`
+                : "Нет данных",
+            detail: Number.isFinite(networkRx) || Number.isFinite(networkTx)
+                ? "rx / tx по reported target runtime namespace counters."
+                : "Сетевые counters ещё не прогрелись или недоступны в runtime namespace.",
+            severity: Number.isFinite(networkRx) || Number.isFinite(networkTx) ? "ok" : "neutral",
+            state: live?.network_availability || "unavailable",
+            fill: Number.isFinite(networkRx) || Number.isFinite(networkTx) ? 52 : 0,
+        },
+        {
+            key: "queue",
+            label: "Очередь",
+            value: formatNumber(queueDepth),
+            detail: queueDepth > 0
+                ? `chat backlog: ${formatNumber(chatBacklog)} · parser backlog: ${formatNumber(parserBacklog)}`
+                : "Очередь по текущему runtime summary без признаков давления.",
+            severity: queueDepth > 0 ? (summary.capacity ? "warn" : "critical") : "ok",
+            state: "runtime summary",
+            fill: queueDepth > 0 ? Math.min(100, 24 + queueDepth * 12) : 10,
+        },
+        {
+            key: "models",
+            label: "Активные модели",
+            value: activeModels.length ? formatNumber(activeModels.length) : "Нет данных",
+            detail: activeModels.length
+                ? activeModels.join(", ")
+                : "Active models ещё не были reported target heartbeat path.",
+            severity: activeModels.length ? "ok" : "neutral",
+            state: activeModels.length ? "reported" : "unavailable",
+            fill: activeModels.length ? Math.min(100, 24 + activeModels.length * 14) : 0,
+        },
+    ];
+}
+
+export function buildResourceSecondaryFacts(live, summary = {}) {
+    return [
+        {
+            label: "Queue pressure",
+            detail: "Берётся из текущего runtime summary и admission state.",
+            value: deriveQueuePressure(summary).state,
+        },
+        {
+            label: "Sampling cadence",
+            detail: "Насколько часто telemetry sampler сохраняет новую точку.",
+            value: Number.isFinite(Number(live?.sampling_interval_seconds))
+                ? `${formatNumber(live.sampling_interval_seconds)} с`
+                : "Нет данных",
+        },
+        {
+            label: "Telemetry scope",
+            detail: "Важно не путать target runtime telemetry с гарантированным host-level observability.",
+            value: live?.telemetry_scope || "Нет данных",
+        },
+    ];
+}
+
+export function buildHistoryViewModel(historyPayload, range) {
+    const labels = {
+        "1h": "1 час",
+        "6h": "6 часов",
+        "24h": "24 часа",
+    };
+    const normalizedRange = labels[range] ? range : "24h";
+    const pointCount = Number(historyPayload?.point_count || 0);
+    if (pointCount <= 0) {
+        return {
+            rangeLabel: labels[normalizedRange],
+            note: `Нет сохранённых telemetry samples за диапазон «${labels[normalizedRange]}».`,
+            title: "Нет данных за выбранный диапазон",
+            detail: "История строится только из реально сохранённых samples. Backend не подставляет synthetic series.",
+        };
+    }
+    return {
+        rangeLabel: labels[normalizedRange],
+        note: `Загружено ${formatNumber(pointCount)} точек. Bucket: ${formatNumber(historyPayload?.bucket_seconds || 0)} с.`,
+        title: "История нагрузки готова",
+        detail: "Точки ниже построены из реальных сохранённых telemetry samples и доступны для timeline selection.",
+    };
+}
+
+export function buildEventLogViewModel(eventsPayload) {
+    const events = Array.isArray(eventsPayload?.events) ? eventsPayload.events : [];
+    if (!events.length) {
+        return {
+            title: "Нет событий для отображения",
+            detail: "Telemetry sampler ещё не записал transitions или runtime warnings для operator view.",
+            meta: "Журнал остаётся честно пустым, пока backend не накопил реальные события.",
+        };
+    }
+    return {
+        title: "События доступны",
+        detail: `В журнале сейчас ${formatNumber(events.length)} событий(я).`,
+        meta: "Список отсортирован от новых к старым и ограничен по размеру.",
+    };
+}
+
+function metricChartDescriptor(key) {
+    const descriptors = {
+        cpu_percent: { label: "CPU", unit: "percent", color: "#56d0ff" },
+        ram_used_mb: { label: "RAM used", unit: "mb", color: "#54ddb6" },
+        gpu_utilization_percent: { label: "GPU", unit: "percent", color: "#ffcb57" },
+        queue_depth: { label: "Queue depth", unit: "count", color: "#ff7289" },
+    };
+    return descriptors[key] || { label: key, unit: "count", color: "#56d0ff" };
+}
+
+function buildHistoryPolyline(points, metricKey, color) {
+    const values = points
+        .map((point) => Number(point?.[metricKey]))
+        .filter((value) => Number.isFinite(value));
+    if (!values.length) {
+        return null;
+    }
+    const maxValue = Math.max(...values, 1);
+    const minValue = Math.min(...values, 0);
+    const spread = Math.max(1, maxValue - minValue);
+    const width = 480;
+    const height = 160;
+    const coordinates = points
+        .map((point, index) => {
+            const value = Number(point?.[metricKey]);
+            if (!Number.isFinite(value)) {
+                return null;
+            }
+            const x = points.length <= 1 ? 0 : (index / (points.length - 1)) * width;
+            const y = height - ((value - minValue) / spread) * (height - 18) - 9;
+            return `${x.toFixed(2)},${y.toFixed(2)}`;
+        })
+        .filter(Boolean);
+    if (!coordinates.length) {
+        return null;
+    }
+    return `
+        <svg class="history-chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="history chart">
+            <polyline fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${coordinates.join(" ")}"></polyline>
+        </svg>
+    `;
+}
+
 export function buildQueueEntries(summary) {
     return Object.entries(summary.pending || {}).map(([queueKey, count]) => {
         const [workload, priority = ""] = queueKey.split(":");
@@ -1071,6 +1297,8 @@ class AdminDashboardApp {
             },
         });
         this.elements = {
+            tabs: Array.from(document.querySelectorAll("[data-dashboard-tab]")),
+            views: Array.from(document.querySelectorAll("[data-dashboard-view]")),
             heroMeaning: document.getElementById("heroMeaning"),
             overallStatusTitle: document.getElementById("overallStatusTitle"),
             overallStatusBadge: document.getElementById("overallStatusBadge"),
@@ -1092,16 +1320,112 @@ class AdminDashboardApp {
             workersTableBody: document.getElementById("workersTableBody"),
             targetsSectionNote: document.getElementById("targetsSectionNote"),
             targetsTableBody: document.getElementById("targetsTableBody"),
+            resourceTelemetryGrid: document.getElementById("resourceTelemetryGrid"),
+            resourceSecondaryList: document.getElementById("resourceSecondaryList"),
+            resourceNoDataCard: document.getElementById("resourceNoDataCard"),
+            resourceLastUpdated: document.getElementById("resourceLastUpdated"),
+            resourceUpdatedLabel: document.getElementById("resourceUpdatedLabel"),
+            resourceScopeNote: document.getElementById("resourceScopeNote"),
+            historyRangeLabel: document.getElementById("historyRangeLabel"),
+            historyRangeSwitcher: document.getElementById("historyRangeSwitcher"),
+            historyMetaNote: document.getElementById("historyMetaNote"),
+            historyTimelineCard: document.getElementById("historyTimelineCard"),
+            historyPointCountLabel: document.getElementById("historyPointCountLabel"),
+            historyAvailabilityNote: document.getElementById("historyAvailabilityNote"),
+            historyTimelineSlider: document.getElementById("historyTimelineSlider"),
+            historySelectedTsLabel: document.getElementById("historySelectedTsLabel"),
+            historyBucketLabel: document.getElementById("historyBucketLabel"),
+            historySnapshotGrid: document.getElementById("historySnapshotGrid"),
+            eventLogList: document.getElementById("eventLogList"),
+            eventSeverityFilter: document.getElementById("eventSeverityFilter"),
+            eventCountLabel: document.getElementById("eventCountLabel"),
+            eventLogUpdatedLabel: document.getElementById("eventLogUpdatedLabel"),
         };
         this.refreshTimer = null;
         this.loading = false;
+        this.activeTab = "overview";
+        this.historyRange = "24h";
+        this.eventFilter = "all";
+        this.summary = null;
+        this.live = null;
+        this.history = null;
+        this.events = null;
+        this.selectedHistoryIndex = 0;
     }
 
     async init() {
+        this.initTabs();
         await this.refresh();
         this.refreshTimer = window.setInterval(() => {
             void this.refresh();
         }, Math.max(5000, Number(this.bootstrap.refreshIntervalMs) || DEFAULT_REFRESH_MS));
+    }
+
+    initTabs() {
+        for (const button of this.elements.tabs) {
+            button.addEventListener("click", () => {
+                this.setActiveTab(button.dataset.dashboardTab || "overview");
+            });
+        }
+
+        const rangeButtons = this.elements.historyRangeSwitcher
+            ? Array.from(this.elements.historyRangeSwitcher.querySelectorAll("[data-history-range]"))
+            : [];
+        for (const button of rangeButtons) {
+            button.addEventListener("click", () => {
+                void this.setHistoryRange(button.dataset.historyRange || "24h");
+            });
+        }
+
+        const filterButtons = this.elements.eventSeverityFilter
+            ? Array.from(this.elements.eventSeverityFilter.querySelectorAll("[data-event-filter]"))
+            : [];
+        for (const button of filterButtons) {
+            button.addEventListener("click", () => {
+                this.setEventFilter(button.dataset.eventFilter || "all");
+            });
+        }
+
+        if (this.elements.historyTimelineSlider) {
+            this.elements.historyTimelineSlider.addEventListener("input", (event) => {
+                const target = event.currentTarget;
+                this.selectedHistoryIndex = Number(target?.value || 0);
+                this.renderHistorySelection();
+            });
+        }
+    }
+
+    setActiveTab(tabName) {
+        this.activeTab = tabName;
+        for (const button of this.elements.tabs) {
+            button.classList.toggle("is-active", button.dataset.dashboardTab === tabName);
+        }
+        for (const view of this.elements.views) {
+            view.classList.toggle("is-active", view.dataset.dashboardView === tabName);
+        }
+    }
+
+    async setHistoryRange(range) {
+        this.historyRange = range;
+        const rangeButtons = this.elements.historyRangeSwitcher
+            ? Array.from(this.elements.historyRangeSwitcher.querySelectorAll("[data-history-range]"))
+            : [];
+        for (const button of rangeButtons) {
+            button.classList.toggle("is-active", button.dataset.historyRange === range);
+        }
+        await this.refreshHistory();
+        this.renderHistoryView(this.history);
+    }
+
+    setEventFilter(filter) {
+        this.eventFilter = filter;
+        const buttons = this.elements.eventSeverityFilter
+            ? Array.from(this.elements.eventSeverityFilter.querySelectorAll("[data-event-filter]"))
+            : [];
+        for (const button of buttons) {
+            button.classList.toggle("is-active", button.dataset.eventFilter === filter);
+        }
+        this.renderEventLog(this.events);
     }
 
     async refresh() {
@@ -1111,7 +1435,15 @@ class AdminDashboardApp {
 
         this.loading = true;
         try {
-            const summary = await this.apiClient.requestJSON(this.bootstrap.apiUrl, { method: "GET", timeout: 10000 });
+            const [summary, live, events] = await Promise.all([
+                this.apiClient.requestJSON(this.bootstrap.apiUrl, { method: "GET", timeout: 10000 }),
+                this.apiClient.requestJSON(this.bootstrap.liveApiUrl, { method: "GET", timeout: 10000 }),
+                this.apiClient.requestJSON(this.bootstrap.eventsApiUrl, { method: "GET", timeout: 10000 }),
+            ]);
+            this.summary = summary;
+            this.live = live;
+            this.events = events;
+            await this.refreshHistory();
             this.render(summary);
         } catch (error) {
             console.error("Admin dashboard refresh failed:", error);
@@ -1119,6 +1451,14 @@ class AdminDashboardApp {
         } finally {
             this.loading = false;
         }
+    }
+
+    async refreshHistory() {
+        const url = new URL(this.bootstrap.historyApiUrl, window.location.origin);
+        url.searchParams.set("range", this.historyRange);
+        this.history = await this.apiClient.requestJSON(`${url.pathname}${url.search}`, { method: "GET", timeout: 10000 });
+        const pointCount = Number(this.history?.point_count || 0);
+        this.selectedHistoryIndex = pointCount > 0 ? pointCount - 1 : 0;
     }
 
     render(summary) {
@@ -1154,6 +1494,9 @@ class AdminDashboardApp {
         this.renderRuntimeSummary(summary);
         this.renderWorkers(summary, summary.worker_rows || []);
         this.renderTargets(summary, summary.target_rows || []);
+        this.renderResourceTelemetry(this.live, summary);
+        this.renderHistoryView(this.history);
+        this.renderEventLog(this.events);
     }
 
     renderSummaryStrip(summary) {
@@ -1356,6 +1699,227 @@ class AdminDashboardApp {
                 `;
             })
             .join("");
+    }
+
+    renderResourceTelemetry(live, summary) {
+        if (this.elements.resourceTelemetryGrid) {
+            this.elements.resourceTelemetryGrid.innerHTML = buildResourceTelemetryCards(live || {}, summary || {})
+                .map(
+                    (item) => `
+                        <article class="resource-card">
+                            <div class="resource-card-head">
+                                <div class="resource-label">${escapeHtml(item.label)}</div>
+                                <span class="resource-state ${severityClass(item.severity)}">${escapeHtml(item.state)}</span>
+                            </div>
+                            <div class="resource-value">${escapeHtml(item.value)}</div>
+                            <div class="resource-detail">${escapeHtml(item.detail)}</div>
+                            <div class="resource-visual"><span style="--telemetry-fill:${Number(item.fill || 0)}%"></span></div>
+                        </article>
+                    `,
+                )
+                .join("");
+        }
+
+        if (this.elements.resourceSecondaryList) {
+            this.elements.resourceSecondaryList.innerHTML = buildResourceSecondaryFacts(live || {}, summary || {})
+                .map(
+                    (item) => `
+                        <div class="resource-secondary-row">
+                            <div>
+                                <div class="resource-secondary-title">${escapeHtml(item.label)}</div>
+                                <div class="resource-footnote">${escapeHtml(item.detail)}</div>
+                            </div>
+                            <div class="resource-secondary-value">${escapeHtml(item.value)}</div>
+                        </div>
+                    `,
+                )
+                .join("");
+        }
+
+        if (this.elements.resourceNoDataCard) {
+            const missingCount = buildResourceTelemetryCards(live || {}, summary || {}).filter((item) => item.state !== "reported" && item.state !== "runtime summary").length;
+            this.elements.resourceNoDataCard.innerHTML = `
+                <div class="resource-label">Текущий статус</div>
+                <div class="resource-value">${missingCount > 0 ? "Частичный telemetry mode" : "Runtime summary available"}</div>
+                <div class="resource-detail">${
+                    missingCount > 0
+                        ? "Часть monitoring cards уже использует реальные runtime поля, а недостающие telemetry источники честно помечены как no-data."
+                        : "Все видимые cards сейчас заполнены реальными runtime полями без поддельных значений."
+                }</div>
+            `;
+        }
+        if (this.elements.resourceLastUpdated) {
+            this.elements.resourceLastUpdated.textContent = live?.captured_at_iso
+                ? formatTimestamp(live.captured_at_iso)
+                : "Ожидание live telemetry";
+        }
+        if (this.elements.resourceUpdatedLabel) {
+            this.elements.resourceUpdatedLabel.textContent = live?.captured_at_iso
+                ? `Последнее обновление: ${formatTimestamp(live.captured_at_iso)}`
+                : "Последнее обновление: нет данных";
+        }
+        if (this.elements.resourceScopeNote) {
+            this.elements.resourceScopeNote.textContent = live?.network_scope
+                ? `Scope: ${live.telemetry_scope}. Network: ${live.network_scope}.`
+                : "Метрики показываются только там, где их реально сообщает target runtime.";
+        }
+    }
+
+    renderHistoryView(historyPayload = null) {
+        const model = buildHistoryViewModel(historyPayload || {}, this.historyRange);
+        if (this.elements.historyRangeLabel) {
+            this.elements.historyRangeLabel.textContent = model.rangeLabel;
+        }
+        if (this.elements.historyMetaNote) {
+            this.elements.historyMetaNote.textContent = model.note;
+        }
+        if (this.elements.historyPointCountLabel) {
+            this.elements.historyPointCountLabel.textContent = Number(historyPayload?.point_count || 0) > 0
+                ? `${formatNumber(historyPayload?.point_count || 0)} telemetry points`
+                : "Ожидание samples";
+        }
+        if (this.elements.historyAvailabilityNote) {
+            this.elements.historyAvailabilityNote.textContent = Number(historyPayload?.point_count || 0) > 0
+                ? "Charts строятся из сохранённых telemetry samples, без synthetic interpolation."
+                : "История появится только после накопления реальных samples.";
+        }
+        if (this.elements.historyTimelineCard) {
+            const points = Array.isArray(historyPayload?.points) ? historyPayload.points : [];
+            if (!points.length) {
+                this.elements.historyTimelineCard.innerHTML = `
+                    <div class="timeline-label">История нагрузки</div>
+                    <div class="timeline-title">${escapeHtml(model.title)}</div>
+                    <div class="timeline-detail">${escapeHtml(model.detail)}</div>
+                    <div class="timeline-rail"></div>
+                `;
+            } else {
+                const charts = [
+                    { key: "cpu_percent" },
+                    { key: "ram_used_mb" },
+                    { key: "gpu_utilization_percent" },
+                    { key: "queue_depth" },
+                ].map(({ key }) => {
+                    const descriptor = metricChartDescriptor(key);
+                    const latestPoint = points[points.length - 1] || {};
+                    const svg = buildHistoryPolyline(points, key, descriptor.color);
+                    return `
+                        <article class="history-chart-card">
+                            <div class="history-chart-head">
+                                <div class="history-chart-label">${escapeHtml(descriptor.label)}</div>
+                                <div class="history-chart-value">${escapeHtml(formatMetricValue(latestPoint[key], descriptor.unit))}</div>
+                            </div>
+                            ${svg || '<div class="history-chart-empty">Нет series для этой метрики</div>'}
+                        </article>
+                    `;
+                });
+                this.elements.historyTimelineCard.innerHTML = `
+                    <div class="timeline-label">История нагрузки</div>
+                    <div class="timeline-title">${escapeHtml(model.title)}</div>
+                    <div class="timeline-detail">${escapeHtml(model.detail)}</div>
+                    <div class="history-chart-grid">${charts.join("")}</div>
+                `;
+            }
+        }
+
+        const points = Array.isArray(historyPayload?.points) ? historyPayload.points : [];
+        if (this.elements.historyTimelineSlider) {
+            this.elements.historyTimelineSlider.disabled = points.length <= 1;
+            this.elements.historyTimelineSlider.max = String(Math.max(0, points.length - 1));
+            this.elements.historyTimelineSlider.value = String(Math.min(this.selectedHistoryIndex, Math.max(0, points.length - 1)));
+        }
+        if (this.elements.historyBucketLabel) {
+            this.elements.historyBucketLabel.textContent = Number(historyPayload?.bucket_seconds || 0) > 0
+                ? `Bucket: ${formatNumber(historyPayload.bucket_seconds)} с`
+                : `Bucket: ${model.rangeLabel}`;
+        }
+        this.renderHistorySelection();
+    }
+
+    renderHistorySelection() {
+        const points = Array.isArray(this.history?.points) ? this.history.points : [];
+        const selectedPoint = points[Math.min(this.selectedHistoryIndex, Math.max(0, points.length - 1))];
+        if (this.elements.historySelectedTsLabel) {
+            this.elements.historySelectedTsLabel.textContent = selectedPoint?.captured_at_iso
+                ? `Выбранная точка: ${formatTimestamp(selectedPoint.captured_at_iso)}`
+                : "Выбранная точка: нет данных";
+        }
+        if (this.elements.historySnapshotGrid) {
+            if (!selectedPoint) {
+                this.elements.historySnapshotGrid.innerHTML = `
+                    <article class="snapshot-card">
+                        <div class="snapshot-label">История</div>
+                        <div class="snapshot-value">Нет данных</div>
+                        <div class="snapshot-detail">Snapshot появится после загрузки history samples.</div>
+                    </article>
+                `;
+                return;
+            }
+            const snapshotItems = [
+                { label: "CPU", value: formatMetricValue(selectedPoint.cpu_percent, "percent"), detail: "Средняя CPU telemetry по target heartbeat." },
+                { label: "RAM used", value: formatMetricValue(selectedPoint.ram_used_mb, "mb"), detail: "Использованная RAM по online targets." },
+                { label: "GPU", value: formatMetricValue(selectedPoint.gpu_utilization_percent, "percent"), detail: "GPU utilization reported GPU target path." },
+                { label: "VRAM used", value: formatMetricValue(selectedPoint.vram_used_mb, "mb"), detail: "Использованная VRAM, если GPU telemetry доступна." },
+                { label: "Network rx/tx", value: `${formatMetricValue(selectedPoint.network_rx_bytes_per_sec, "bytes_per_sec")} / ${formatMetricValue(selectedPoint.network_tx_bytes_per_sec, "bytes_per_sec")}`, detail: "Throughput по target runtime namespace counters." },
+                { label: "Queue depth", value: formatNumber(selectedPoint.queue_depth), detail: "Глубина очереди на выбранной telemetry точке." },
+                { label: "Active jobs", value: formatNumber(selectedPoint.active_jobs), detail: "Сколько задач выполнялось в момент snapshot." },
+                { label: "Workers", value: `${formatNumber(selectedPoint.workers_working)} / ${formatNumber(selectedPoint.workers_total)}`, detail: "working / total workers на выбранной точке." },
+            ];
+            this.elements.historySnapshotGrid.innerHTML = snapshotItems
+                .map(
+                    (item) => `
+                        <article class="snapshot-card">
+                            <div class="snapshot-label">${escapeHtml(item.label)}</div>
+                            <div class="snapshot-value">${escapeHtml(item.value)}</div>
+                            <div class="snapshot-detail">${escapeHtml(item.detail)}</div>
+                        </article>
+                    `,
+                )
+                .join("");
+        }
+    }
+
+    renderEventLog(eventsPayload) {
+        const model = buildEventLogViewModel(eventsPayload || {});
+        const events = Array.isArray(eventsPayload?.events) ? eventsPayload.events : [];
+        const filteredEvents = this.eventFilter === "all"
+            ? events
+            : events.filter((event) => String(event?.severity || "").toLowerCase() === this.eventFilter);
+        if (this.elements.eventCountLabel) {
+            this.elements.eventCountLabel.textContent = `События: ${formatNumber(events.length)}`;
+        }
+        if (this.elements.eventLogUpdatedLabel) {
+            this.elements.eventLogUpdatedLabel.textContent = events[0]?.timestamp_iso
+                ? `Последнее событие: ${formatTimestamp(events[0].timestamp_iso)}`
+                : "Ожидание event log";
+        }
+        if (this.elements.eventLogList) {
+            if (!filteredEvents.length) {
+                this.elements.eventLogList.innerHTML = `
+                    <article class="event-row">
+                        <div class="event-row-label">Event log</div>
+                        <div class="events-empty-title">${escapeHtml(model.title)}</div>
+                        <div class="events-empty-text">${escapeHtml(model.detail)}</div>
+                        <div class="event-row-meta">${escapeHtml(model.meta)}</div>
+                    </article>
+                `;
+                return;
+            }
+            this.elements.eventLogList.innerHTML = `
+                ${filteredEvents
+                    .map(
+                        (event) => `
+                            <article class="event-row">
+                                <div class="event-row-label">${escapeHtml(event.source || "runtime")}</div>
+                                <div class="event-severity-badge ${severityClass(event.severity)}">${escapeHtml(event.severity || "info")}</div>
+                                <div class="events-empty-title">${escapeHtml(event.message || "Событие")}</div>
+                                <div class="events-empty-text">${escapeHtml(event.timestamp_iso ? formatTimestamp(event.timestamp_iso) : "Нет времени")}</div>
+                                <div class="event-row-meta">${escapeHtml(JSON.stringify(event.context || {}, null, 0))}</div>
+                            </article>
+                        `,
+                    )
+                    .join("")}
+            `;
+        }
     }
 
     renderError(error) {

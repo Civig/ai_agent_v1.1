@@ -125,6 +125,66 @@ class AdminDashboardCompactContractTests(unittest.TestCase):
         self.assertEqual(result["observed"], ["chat"])
         self.assertIn("Capabilities показаны отдельно", result["note"])
 
+    def test_resource_cards_use_real_summary_fields_and_honest_no_data_placeholders(self):
+        result = evaluate_dashboard_compact_contract(
+            """
+            const live = {
+              cpu_percent: 60,
+              cpu_availability: "reported",
+              ram_total_mb: 12288,
+              ram_free_mb: 6144,
+              ram_used_mb: 6144,
+              ram_availability: "reported",
+              gpu_availability: "reported",
+              gpu_utilization_percent: 73,
+              gpu_temperature_c: 68,
+              vram_free_mb: 4096,
+              network_availability: "reported",
+              network_rx_bytes_per_sec: 2048,
+              network_tx_bytes_per_sec: 4096,
+              queue_depth: 2,
+              chat_backlog: 1,
+              parser_backlog: 1,
+              active_models: ["llama3", "qwen2.5"],
+              sampling_interval_seconds: 5,
+              telemetry_scope: "target heartbeat runtime telemetry",
+            };
+            const summary = { capacity: true, queue_depth: 2, chat_backlog: 1, parser_backlog: 1 };
+
+            const cards = mod.buildResourceTelemetryCards(live, summary);
+            console.log(JSON.stringify({
+              cpu: cards.find((item) => item.key === "cpu"),
+              network: cards.find((item) => item.key === "network"),
+              queue: cards.find((item) => item.key === "queue"),
+              models: cards.find((item) => item.key === "models"),
+            }));
+            """
+        )
+
+        self.assertEqual(result["cpu"]["value"], "60.0%")
+        self.assertEqual(result["cpu"]["state"], "reported")
+        self.assertIn("KB/s", result["network"]["value"])
+        self.assertEqual(result["network"]["state"], "reported")
+        self.assertEqual(result["queue"]["value"], "2")
+        self.assertIn("chat backlog: 1", result["queue"]["detail"])
+        self.assertEqual(result["models"]["value"], "2")
+        self.assertIn("llama3", result["models"]["detail"])
+
+    def test_history_and_event_views_stay_honest_when_backend_not_connected(self):
+        result = evaluate_dashboard_compact_contract(
+            """
+            const history = mod.buildHistoryViewModel({}, "6h");
+            const events = mod.buildEventLogViewModel({ events: [] });
+            console.log(JSON.stringify({ history, events }));
+            """
+        )
+
+        self.assertEqual(result["history"]["rangeLabel"], "6 часов")
+        self.assertIn("нет данных", result["history"]["title"].lower())
+        self.assertIn("нет сохранённых", result["history"]["note"].lower())
+        self.assertIn("telemetry sampler", result["events"]["detail"].lower())
+        self.assertIn("честно пустым", result["events"]["meta"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()

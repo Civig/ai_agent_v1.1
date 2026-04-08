@@ -775,6 +775,9 @@ class LLMGateway(RedisBackedComponent):
     WORKERS_SET_KEY = "llm:workers"
     SCHEDULER_HEARTBEAT_KEY = "llm:scheduler:heartbeat"
     METRICS_KEY = "llm:metrics"
+    DASHBOARD_TELEMETRY_LIVE_KEY = "llm:dashboard:telemetry:live"
+    DASHBOARD_TELEMETRY_HISTORY_KEY = "llm:dashboard:telemetry:history"
+    DASHBOARD_EVENTS_KEY = "llm:dashboard:events"
 
     def pending_queue_key(self, workload_class: str, priority: str) -> str:
         return f"llm:queue:{workload_class}:{priority}"
@@ -1137,6 +1140,56 @@ class LLMGateway(RedisBackedComponent):
             "job_latency_total_ms": int(raw.get("job_latency_total_ms", 0)),
             "job_latency_count": int(raw.get("job_latency_count", 0)),
         }
+
+    async def store_dashboard_live_sample(self, sample: Dict[str, Any]) -> None:
+        if self.redis is None:
+            return
+        await self.redis.set(
+            self.DASHBOARD_TELEMETRY_LIVE_KEY,
+            json.dumps(sample, ensure_ascii=False),
+            ex=max(10, settings.ADMIN_DASHBOARD_TELEMETRY_INTERVAL_SECONDS * 6),
+        )
+
+    async def get_dashboard_live_sample(self) -> Optional[Dict[str, Any]]:
+        if self.redis is None:
+            return None
+        raw = await self.redis.get(self.DASHBOARD_TELEMETRY_LIVE_KEY)
+        if not raw:
+            return None
+        return json.loads(raw)
+
+    async def append_dashboard_history_sample(self, sample: Dict[str, Any]) -> None:
+        if self.redis is None:
+            return
+        captured_at = int(sample.get("captured_at") or time.time())
+        oldest_allowed = captured_at - max(60, settings.ADMIN_DASHBOARD_HISTORY_RETENTION_SECONDS)
+        member = json.dumps(sample, ensure_ascii=False, sort_keys=True)
+        async with self.redis.pipeline(transaction=True) as pipeline:
+            pipeline.zadd(self.DASHBOARD_TELEMETRY_HISTORY_KEY, {member: captured_at})
+            pipeline.zremrangebyscore(self.DASHBOARD_TELEMETRY_HISTORY_KEY, 0, oldest_allowed)
+            await pipeline.execute()
+
+    async def get_dashboard_history_samples(self, *, since_ts: Optional[int] = None) -> list[Dict[str, Any]]:
+        if self.redis is None:
+            return []
+        min_score = int(since_ts or 0)
+        raw = await self.redis.zrangebyscore(self.DASHBOARD_TELEMETRY_HISTORY_KEY, min_score, "+inf")
+        return [json.loads(item) for item in raw]
+
+    async def append_dashboard_event(self, event: Dict[str, Any]) -> None:
+        if self.redis is None:
+            return
+        async with self.redis.pipeline(transaction=True) as pipeline:
+            pipeline.lpush(self.DASHBOARD_EVENTS_KEY, json.dumps(event, ensure_ascii=False))
+            pipeline.ltrim(self.DASHBOARD_EVENTS_KEY, 0, max(1, settings.ADMIN_DASHBOARD_EVENT_LOG_MAX_ITEMS) - 1)
+            await pipeline.execute()
+
+    async def get_dashboard_events(self, *, limit: int = 50) -> list[Dict[str, Any]]:
+        if self.redis is None:
+            return []
+        normalized_limit = max(1, min(int(limit or 50), max(1, settings.ADMIN_DASHBOARD_EVENT_LOG_MAX_ITEMS)))
+        raw = await self.redis.lrange(self.DASHBOARD_EVENTS_KEY, 0, normalized_limit - 1)
+        return [json.loads(item) for item in raw]
 
     async def get_queue_pressure(self) -> Dict[str, int]:
         workers = await self.list_active_workers()
