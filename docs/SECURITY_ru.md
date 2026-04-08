@@ -48,7 +48,7 @@
 - cookie configuration через environment variables
 - узкий bearer-only CSRF bypass для non-cookie API clients
 - явный reject зарезервированных proxy-auth headers, пока trusted proxy SSO mode выключен
-- зарезервированные proxy-auth headers принимаются только на выделенном SSO entry path (`/auth/sso/login`)
+- зарезервированные proxy-auth headers принимаются только на выделенном SSO entry path (`/auth/sso/login`) и только от доверенного proxy source
 - основной FastAPI app по-прежнему не принимает raw `Authorization: Negotiate ...` как auth path
 
 ### Текущий статус SSO
@@ -58,6 +58,7 @@
 - password login остаётся рабочим fallback
 - SSO по умолчанию выключен
 - SSO работает только если одновременно включены `SSO_ENABLED=true` и `TRUSTED_AUTH_PROXY_ENABLED=true`
+- `TRUSTED_PROXY_SOURCE_CIDRS` должен явно перечислять source addresses/CIDR того reverse proxy, который делает hop до `app`
 - browser-facing Kerberos/SPNEGO negotiation завершается до основного app
 - основной app принимает только proxy-validated identity headers и только на выделенном SSO entry path
 - на обычных route'ах app не принимает произвольные identity headers
@@ -70,6 +71,7 @@
   - trusted HTTPS FQDN
   - валидный `HTTP/<fqdn>@REALM` SPN
   - service keytab, смонтированный в `deploy/sso/`
+  - корректный `TRUSTED_PROXY_SOURCE_CIDRS`, совпадающий с адресами reverse proxy на hop до `app`
   - domain-joined clients и корректную browser trust-zone configuration
 - logout в app очищает только локальную application session и не означает logout из Windows, Kerberos или browser SPNEGO state
 - model access control теперь использует явный folder-based policy catalog в `model_policies/`, но это всё ещё простая категорийная policy, а не полноценный enterprise RBAC

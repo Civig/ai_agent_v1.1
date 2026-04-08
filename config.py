@@ -1,4 +1,5 @@
-﻿import logging
+﻿import ipaddress
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional
@@ -42,6 +43,18 @@ def parse_group_mapping(value: Optional[str]) -> tuple[str, ...]:
         seen.add(key)
         normalized_groups.append(key)
     return tuple(normalized_groups)
+
+
+def validate_cidr_list(value: Optional[str]) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    for item in raw.split(","):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        ipaddress.ip_network(candidate, strict=False)
+    return raw
 
 
 def secret_looks_like_placeholder(value: Optional[str]) -> bool:
@@ -238,6 +251,14 @@ class Settings(BaseSettings):
             raise ValueError("Password uses an insecure placeholder value and must be overridden")
         return secret
 
+    @field_validator("TRUSTED_PROXY_SOURCE_CIDRS")
+    @classmethod
+    def validate_trusted_proxy_source_cidrs(cls, value: str) -> str:
+        try:
+            return validate_cidr_list(value)
+        except ValueError as exc:
+            raise ValueError("TRUSTED_PROXY_SOURCE_CIDRS must contain a comma-separated list of valid CIDRs") from exc
+
     @model_validator(mode="after")
     def validate_service_secret_requirements(self) -> "Settings":
         redis_url_secret = url_password(self.REDIS_URL)
@@ -251,6 +272,8 @@ class Settings(BaseSettings):
             raise ValueError("PERSISTENT_DB_URL embeds an insecure placeholder password")
         if self.PERSISTENT_DB_ENABLED and is_non_local_service(self.PERSISTENT_DB_URL) and not self.POSTGRES_PASSWORD.strip():
             raise ValueError("POSTGRES_PASSWORD must be set for non-local PostgreSQL deployments")
+        if self.SSO_ENABLED and self.TRUSTED_AUTH_PROXY_ENABLED and not self.TRUSTED_PROXY_SOURCE_CIDRS.strip():
+            raise ValueError("TRUSTED_PROXY_SOURCE_CIDRS must be set when trusted proxy SSO is enabled")
         return self
 
     @field_validator("WORKER_POOL")

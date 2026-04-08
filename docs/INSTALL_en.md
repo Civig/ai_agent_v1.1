@@ -122,6 +122,7 @@ Key environment groups include:
   - cookie settings
   - `TRUSTED_AUTH_PROXY_ENABLED`
   - `SSO_ENABLED`
+  - `TRUSTED_PROXY_SOURCE_CIDRS`
   - `SSO_LOGIN_PATH`
   - `SSO_SERVICE_PRINCIPAL`
   - `SSO_KEYTAB_PATH`
@@ -137,6 +138,8 @@ Key environment groups include:
   - `LOG_LEVEL`
 
 The installer writes `.env` for you. On a fresh install it enables the new parser file path out of the box with `ENABLE_PARSER_STAGE=true` and `ENABLE_PARSER_PUBLIC_CUTOVER=true`. If `.env` already exists and those values are set explicitly, the installer keeps them.
+
+For trusted reverse-proxy SSO, operators must verify `TRUSTED_PROXY_SOURCE_CIDRS` separately. It must list the source addresses/CIDRs of the reverse proxy hop that actually reaches `app`. A loopback-only value is correct only when that hop really arrives from loopback.
 
 The same file-processing baseline also exposes explicit parser/file-chat limits in `.env.example`, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout.
 

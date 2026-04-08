@@ -774,6 +774,15 @@ def reject_untrusted_auth_proxy_headers(request: Request) -> None:
     raise HTTPException(status_code=400, detail="Unsupported authentication headers")
 
 
+def build_http_exception_response(exc: HTTPException) -> JSONResponse:
+    payload = {"detail": exc.detail}
+    response = JSONResponse(payload, status_code=exc.status_code)
+    if exc.headers:
+        for header, value in exc.headers.items():
+            response.headers[header] = value
+    return response
+
+
 def parse_trusted_proxy_groups_header(raw_value: Optional[str]) -> list[str]:
     if not raw_value:
         return []
@@ -1427,7 +1436,10 @@ REQUEST_COUNT = Counter("app_requests_total", "Total HTTP requests", ["method", 
 
 @app.middleware("http")
 async def prometheus_middleware(request: Request, call_next):
-    reject_untrusted_auth_proxy_headers(request)
+    try:
+        reject_untrusted_auth_proxy_headers(request)
+    except HTTPException as exc:
+        return build_http_exception_response(exc)
     response = await call_next(request)
     REQUEST_COUNT.labels(request.method, request.url.path).inc()
     return response

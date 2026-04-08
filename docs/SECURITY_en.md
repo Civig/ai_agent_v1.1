@@ -48,7 +48,7 @@ The application currently includes:
 - cookie configuration controlled through environment variables
 - a narrow bearer-only CSRF bypass for non-cookie API clients
 - explicit rejection of reserved proxy-auth headers unless trusted proxy SSO mode is enabled
-- reserved proxy-auth headers are accepted only on the dedicated SSO entry path (`/auth/sso/login`)
+- reserved proxy-auth headers are accepted only on the dedicated SSO entry path (`/auth/sso/login`) and only from a trusted proxy source
 - the main FastAPI app still rejects raw `Authorization: Negotiate ...` as an authentication path
 
 ### Current SSO implementation status
@@ -58,6 +58,7 @@ The repository now includes an actual SSO path, but only under a strict trusted-
 - password login remains active as a fallback
 - SSO is disabled by default
 - SSO works only when both `SSO_ENABLED=true` and `TRUSTED_AUTH_PROXY_ENABLED=true`
+- `TRUSTED_PROXY_SOURCE_CIDRS` must explicitly list the source addresses/CIDRs of the reverse proxy hop that reaches `app`
 - the browser-facing Kerberos/SPNEGO negotiation is terminated before the main app
 - the main app only accepts proxy-validated identity headers on the dedicated SSO entry path
 - the main app does not accept arbitrary identity headers on regular routes
@@ -70,6 +71,7 @@ The repository now includes an actual SSO path, but only under a strict trusted-
   - trusted HTTPS FQDN
   - valid `HTTP/<fqdn>@REALM` SPN
   - service keytab mounted into `deploy/sso/`
+  - a correct `TRUSTED_PROXY_SOURCE_CIDRS` value matching the reverse-proxy addresses on the hop to `app`
   - domain-joined clients and browser trust-zone configuration
 - app logout only clears the local application session; it does not claim to log the user out of Windows, Kerberos, or the browser's SPNEGO state
 - model access control now uses an explicit folder-based policy catalog under `model_policies/`, but it is still a simple category policy, not full enterprise RBAC

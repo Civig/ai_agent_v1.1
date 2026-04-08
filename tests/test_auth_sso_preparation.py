@@ -63,6 +63,37 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
         raise AssertionError(f"Route {path} not found")
 
     @staticmethod
+    async def invoke_app(*, path="/", method="GET", headers=None, client_host="127.0.0.1"):
+        raw_headers = []
+        for header, value in (headers or {}).items():
+            raw_headers.append((header.lower().encode("utf-8"), value.encode("utf-8")))
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("utf-8"),
+            "query_string": b"",
+            "headers": raw_headers,
+            "client": (client_host, 12345),
+            "server": ("testserver", 80),
+            "root_path": "",
+            "app": app_module.app,
+        }
+        messages = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            messages.append(message)
+
+        await app_module.app(scope, receive, send)
+        return messages
+
+    @staticmethod
     def write_policy_catalog(root_dir: Path, *, categories=None):
         catalog = categories or {
             "general": {
@@ -539,6 +570,29 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
                 await app_module.sso_login_entry(request, current_user=None)
 
         self.assertEqual(error.exception.status_code, 400)
+
+    async def test_middleware_returns_clean_400_without_session_for_untrusted_proxy_headers(self):
+        with patch.object(app_module.settings, "TRUSTED_AUTH_PROXY_ENABLED", True), patch.object(
+            app_module.settings,
+            "SSO_ENABLED",
+            True,
+        ), patch.object(app_module.settings, "TRUSTED_PROXY_SOURCE_CIDRS", "127.0.0.1/32"):
+            messages = await self.invoke_app(
+                path="/auth/sso/login",
+                headers={
+                    "x-authenticated-user": "alice",
+                    "x-authenticated-principal": "alice@EXAMPLE.LOCAL",
+                },
+                client_host="203.0.113.10",
+            )
+
+        start_message = next(message for message in messages if message["type"] == "http.response.start")
+        body_message = next(message for message in messages if message["type"] == "http.response.body")
+        header_map = {key.lower(): value for key, value in start_message["headers"]}
+
+        self.assertEqual(start_message["status"], 400)
+        self.assertEqual(body_message["body"], b'{"detail":"Unsupported authentication headers"}')
+        self.assertNotIn(b"set-cookie", header_map)
 
     async def test_get_current_user_returns_session_metadata_from_access_token(self):
         fake_redis = self.FakeRedis()

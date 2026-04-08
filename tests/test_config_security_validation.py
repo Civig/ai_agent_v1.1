@@ -79,6 +79,28 @@ class ConfigSecurityValidationTests(unittest.TestCase):
 
         self.assertIn("POSTGRES_PASSWORD must be set for non-local PostgreSQL deployments", str(error.exception))
 
+    def test_trusted_proxy_sso_requires_explicit_cidrs(self):
+        with self.assertRaises(ValidationError) as error:
+            config_module.Settings(
+                SECRET_KEY="x" * 40,
+                COOKIE_SECURE=False,
+                SSO_ENABLED=True,
+                TRUSTED_AUTH_PROXY_ENABLED=True,
+                TRUSTED_PROXY_SOURCE_CIDRS="",
+            )
+
+        self.assertIn("TRUSTED_PROXY_SOURCE_CIDRS must be set when trusted proxy SSO is enabled", str(error.exception))
+
+    def test_trusted_proxy_source_cidrs_must_be_valid(self):
+        with self.assertRaises(ValidationError) as error:
+            config_module.Settings(
+                SECRET_KEY="x" * 40,
+                COOKIE_SECURE=False,
+                TRUSTED_PROXY_SOURCE_CIDRS="not-a-cidr",
+            )
+
+        self.assertIn("TRUSTED_PROXY_SOURCE_CIDRS must contain a comma-separated list of valid CIDRs", str(error.exception))
+
     def test_installer_like_secure_service_secrets_remain_valid(self):
         settings = config_module.Settings(
             SECRET_KEY="x" * 40,
@@ -88,6 +110,7 @@ class ConfigSecurityValidationTests(unittest.TestCase):
             PERSISTENT_DB_ENABLED=True,
             PERSISTENT_DB_URL="postgresql+psycopg://corporate_ai:postgres-secret-123@postgres:5432/corporate_ai",
             POSTGRES_PASSWORD="postgres-secret-123",
+            TRUSTED_PROXY_SOURCE_CIDRS="127.0.0.1/32,10.0.0.0/24",
         )
 
         self.assertEqual(settings.REDIS_PASSWORD, "redis-secret-123")
