@@ -78,6 +78,7 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 - [Architecture (EN)](docs/ARCHITECTURE_en.md)
 - [Architecture (RU)](docs/ARCHITECTURE_ru.md)
 - [Changelog](CHANGELOG.md)
+- [website/index.html](website/index.html) - static project website and separate model catalog page
 
 ## License
 

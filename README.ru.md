@@ -80,6 +80,7 @@ Legacy helper files могут оставаться в репозитории д
 - [docs/ARCHITECTURE_ru.md](docs/ARCHITECTURE_ru.md)
 - [docs/ARCHITECTURE_en.md](docs/ARCHITECTURE_en.md)
 - [CHANGELOG.md](CHANGELOG.md)
+- [website/index.html](website/index.html) — статический сайт проекта и отдельная страница каталога моделей
 
 ## Ограничения текущего релиза
 

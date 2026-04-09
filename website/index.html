@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Corporate AI Assistant | Локальный корпоративный ИИ</title>
+  <meta
+    name="description"
+    content="Корпоративная AI-платформа для локального запуска моделей через Ollama, безопасной работы с данными и развёртывания внутри закрытого контура."
+  />
+  <meta name="theme-color" content="#1d4ed8" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a href="index.html" class="brand">
+        <div class="brand-mark">AI</div>
+        <div class="brand-text">
+          Corporate AI Assistant
+          <small>Корпоративная AI-платформа на базе Ollama</small>
+        </div>
+      </a>
+
+      <nav class="nav">
+        <a class="nav-link active" href="index.html">Главная</a>
+        <a class="nav-link" href="#about">О продукте</a>
+        <a class="nav-link" href="#security">152-ФЗ и безопасность</a>
+        <a class="nav-link" href="#architecture">Архитектура</a>
+        <a class="nav-link" href="#deploy">Развёртывание</a>
+        <a class="nav-link nav-link-strong" href="models.html">Каталог моделей</a>
+        <a class="nav-link" href="contacts.html">Контакты</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero hero-home">
+      <div class="container hero-grid">
+        <div class="hero-card">
+          <div class="eyebrow">Локальный AI внутри корпоративного контура</div>
+          <h1>Corporate AI Assistant для безопасной работы с ИИ внутри инфраструктуры организации</h1>
+          <p>
+            Платформа спроектирована для внутреннего контура: локальный inference через Ollama, корпоративная аутентификация
+            через Active Directory / Kerberos / LDAP, защищённый HTTPS ingress и управляемый запуск через Docker Compose.
+            Главная цель — снизить риски передачи корпоративных данных и персональных данных во внешние облачные AI-сервисы.
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#security">Почему это важно</a>
+            <a class="btn btn-secondary" href="models.html">Открыть каталог моделей</a>
+          </div>
+        </div>
+
+        <div class="hero-side">
+          <div class="glass-card stats-card">
+            <div class="stats-grid">
+              <div class="stat-box">
+                <strong>On-Prem</strong>
+                <span>модели и inference размещаются внутри корпоративной среды через Ollama</span>
+              </div>
+              <div class="stat-box">
+                <strong>AD / Kerberos</strong>
+                <span>аутентификация и доступ основаны на корпоративной directory-инфраструктуре</span>
+              </div>
+              <div class="stat-box">
+                <strong>Redis + Workers</strong>
+                <span>очереди, scheduler, worker pools и control plane для управляемого выполнения</span>
+              </div>
+              <div class="stat-box">
+                <strong>Docker Compose</strong>
+                <span>основной поддерживаемый путь развёртывания на Linux VM</span>
+              </div>
+            </div>
+
+            <div class="mini-note">
+              Это не публичный облачный AI-сервис. Это внутренняя корпоративная платформа, где оператор сам контролирует
+              инфраструктуру, сертификаты, модели, доступ и эксплуатацию.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="about" class="section">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">О продукте</h2>
+            <p class="section-subtitle">
+              Corporate AI Assistant — это корпоративный AI-ассистент для внутреннего контура, где локальный inference,
+              внутренняя аутентификация и эксплуатационный контроль важны так же, как и сам чат-интерфейс.
+            </p>
+          </div>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card">
+            <div class="feature-icon">🧠</div>
+            <h3>Локальный inference через Ollama</h3>
+            <p>
+              Модели запускаются через локальный Ollama runtime. Каталог моделей в интерфейсе может заполняться из live-списка Ollama,
+              а сами модели не хранятся в Git-репозитории.
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon">🔐</div>
+            <h3>Корпоративная аутентификация</h3>
+            <p>
+              Платформа рассчитана на Active Directory-среды: Kerberos ticket, LDAP/GSSAPI, membership в группах
+              и выдача secure cookies для web-доступа.
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon">⚙️</div>
+            <h3>Управляемое выполнение запросов</h3>
+            <p>
+              Redis control plane, resource-aware scheduler и отдельные worker pools для chat, siem и batch
+              позволяют отделить inference от web-слоя и сделать платформу более управляемой.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="security" class="section section-soft">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">152-ФЗ и безопасность обработки данных</h2>
+            <p class="section-subtitle">
+              Ключевая идея платформы — держать обработку запросов, моделей и доступ пользователей внутри корпоративной среды,
+              чтобы уменьшить риски, связанные с использованием внешних облачных AI-сервисов при работе с корпоративными данными и ПД.
+            </p>
+          </div>
+        </div>
+
+        <div class="providers">
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Внутренний контур</h3>
+              <span class="provider-badge">On-Prem</span>
+            </div>
+            <p>
+              Платформа ориентирована на внутреннее deployment: Linux VM, Docker Compose, локальный Ollama,
+              внутренний Redis и Nginx как единственная публичная точка входа.
+            </p>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Контроль доступа</h3>
+              <span class="provider-badge">AD / LDAP</span>
+            </div>
+            <p>
+              Аутентификация и доступ основаны на корпоративной directory-среде, а не на внешнем публичном аккаунте
+              или стороннем облачном identity-provider по умолчанию.
+            </p>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Безопасный ingress</h3>
+              <span class="provider-badge">TLS / Nginx</span>
+            </div>
+            <p>
+              Базовая схема эксплуатации держит приложение за Nginx, использует HTTPS ingress и публикует только 80/443,
+              а Redis остаётся на внутренней Compose-сети.
+            </p>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Важно понимать</h3>
+              <span class="provider-badge">Compliance</span>
+            </div>
+            <p>
+              Локальное развёртывание помогает снизить риски передачи данных наружу, но само по себе не заменяет
+              организационные и правовые меры по защите персональных данных в организации.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" class="section">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">Архитектура платформы</h2>
+            <p class="section-subtitle">
+              Основная архитектурная цепочка: Browser → Nginx → FastAPI → Kerberos/LDAP + Redis control plane →
+              Scheduler → Worker pools → Ollama inference runtime.
+            </p>
+          </div>
+        </div>
+
+        <div class="models-grid models-grid-3">
+          <article class="model-card compact-card">
+            <div class="model-top">
+              <div>
+                <h3>Веб-слой</h3>
+                <div class="model-provider">Browser + Nginx + FastAPI</div>
+              </div>
+              <span class="tag tag-cyan">Frontend / API</span>
+            </div>
+            <div class="model-desc">
+              Пользователь работает через web UI. Внешний вход проходит через Nginx с TLS, а приложение работает в FastAPI.
+            </div>
+            <div class="chips">
+              <span class="chip">HTTPS ingress</span>
+              <span class="chip">Jinja2</span>
+              <span class="chip">FastAPI</span>
+              <span class="chip">SSE streaming</span>
+            </div>
+          </article>
+
+          <article class="model-card compact-card">
+            <div class="model-top">
+              <div>
+                <h3>Контроль и очереди</h3>
+                <div class="model-provider">Redis + Scheduler</div>
+              </div>
+              <span class="tag tag-blue">Control Plane</span>
+            </div>
+            <div class="model-desc">
+              Redis используется для состояния очередей, heartbeat, lease/retry, rate limiting и session-state,
+              а scheduler управляет admission control и назначением задач.
+            </div>
+            <div class="chips">
+              <span class="chip">Redis</span>
+              <span class="chip">queue state</span>
+              <span class="chip">heartbeats</span>
+              <span class="chip">scheduler</span>
+            </div>
+          </article>
+
+          <article class="model-card compact-card">
+            <div class="model-top">
+              <div>
+                <h3>Inference-слой</h3>
+                <div class="model-provider">Worker pools + Ollama</div>
+              </div>
+              <span class="tag tag-green">Inference Runtime</span>
+            </div>
+            <div class="model-desc">
+              Worker pools разделяют chat, siem и batch-нагрузку, а inference выполняется через локальный Ollama runtime.
+              Поддерживается CPU default и optional GPU profile.
+            </div>
+            <div class="chips">
+              <span class="chip">worker-chat</span>
+              <span class="chip">worker-siem</span>
+              <span class="chip">worker-batch</span>
+              <span class="chip">optional worker-gpu</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="deploy" class="section">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">Развёртывание и системные требования</h2>
+            <p class="section-subtitle">
+              Основной поддерживаемый путь — Linux VM с Docker Compose, доступом к AD / Kerberos / LDAP и локальным Ollama внутри stack.
+            </p>
+          </div>
+        </div>
+
+        <div class="models-grid models-grid-3">
+          <article class="model-card compact-card">
+            <div class="model-top">
+              <div>
+                <h3>Минимальные требования</h3>
+                <div class="model-provider">Поддерживаемая базовая конфигурация</div>
+              </div>
+              <span class="tag tag-green">Minimum</span>
+            </div>
+            <div class="requirements-box">
+              <div class="requirements-title">Платформа</div>
+              <ul class="requirements-list">
+                <li>Ubuntu 20.04+ или Debian 11+</li>
+                <li>4 CPU cores</li>
+                <li>8 GB RAM</li>
+                <li>40 GB свободного места</li>
+                <li>Сетевой доступ к Active Directory / Kerberos KDC</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="model-card compact-card">
+            <div class="model-top">
+              <div>
+                <h3>Рекомендуемая конфигурация</h3>
+                <div class="model-provider">Для более комфортной эксплуатации</div>
+              </div>
+              <span class="tag tag-amber">Recommended</span>
+            </div>
+            <div class="requirements-box">
+              <div class="requirements-title">Сервер</div>
+              <ul class="requirements-list">
+                <li>8 CPU cores</li>
+                <li>16 GB RAM</li>
+                <li>SSD-backed storage</li>
+                <li>Корпоративный TLS-сертификат</li>
+                <li>NVIDIA GPU — опционально для более крупных моделей и меньшей latency</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="model-card compact-card">
+            <div class="model-top">
+              <div>
+                <h3>Базовый запуск</h3>
+                <div class="model-provider">Quick Start</div>
+              </div>
+              <span class="tag tag-cyan">Install</span>
+            </div>
+            <div class="install-box">
+              <div class="install-label">Команды</div>
+              <code class="install-command">git clone https://github.com/Civig/ai-agent.git
+cd ai-agent
+chmod +x install.sh
+./install.sh</code>
+            </div>
+            <div class="model-desc">
+              Installer ставит Docker, Docker Compose, Kerberos/LDAP packages, Ollama CLI, генерирует .env и TLS-артефакты,
+              поднимает stack и ждёт ready-health.
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-soft">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">Основные разделы сайта</h2>
+            <p class="section-subtitle">
+              Главная страница рассказывает о платформе. Каталог моделей — это отдельный раздел внутри продукта.
+            </p>
+          </div>
+        </div>
+
+        <div class="providers">
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Главная</h3>
+              <span class="provider-badge">Платформа</span>
+            </div>
+            <p>Позиционирование продукта, безопасность, архитектура, deployment и ключевые преимущества.</p>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Каталог моделей</h3>
+              <span class="provider-badge">Ollama</span>
+            </div>
+            <p>Отдельная страница доступных локальных моделей, их характеристик, требований и Ollama-тегов.</p>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Архитектура</h3>
+              <span class="provider-badge">Docs</span>
+            </div>
+            <p>Подробная схема компонентов: app, Redis, scheduler, workers, Ollama, Nginx и SSO-proxy.</p>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-top">
+              <h3>Установка и безопасность</h3>
+              <span class="provider-badge">Ops</span>
+            </div>
+            <p>Quick Start, operational baseline, TLS, secrets, health endpoints и ограничения текущей версии.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-box">
+        <div><strong>Corporate AI Assistant</strong> — локальная корпоративная AI-платформа на базе Ollama</div>
+        <div>
+          <a href="models.html">Перейти к каталогу моделей</a>
+          <span> · </span>
+          <a href="contacts.html">Контакты</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

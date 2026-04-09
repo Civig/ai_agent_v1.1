@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Corporate AI Assistant | Каталог моделей Ollama</title>
+  <meta
+    name="description"
+    content="Каталог локальных моделей Ollama для корпоративного AI-контура: фильтрация по семейству, категории и типу размещения."
+  />
+  <meta name="theme-color" content="#1d4ed8" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a href="index.html" class="brand">
+        <div class="brand-mark">AI</div>
+        <div class="brand-text">
+          Corporate AI Assistant
+          <small>Каталог моделей Ollama</small>
+        </div>
+      </a>
+
+      <nav class="nav">
+        <a class="nav-link" href="index.html">Главная</a>
+        <a class="nav-link" href="index.html#security">152-ФЗ и безопасность</a>
+        <a class="nav-link active" href="models.html">Каталог моделей</a>
+        <a class="nav-link" href="contacts.html">Контакты</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero hero-catalog">
+      <div class="container hero-grid">
+        <div class="hero-card">
+          <div class="eyebrow">Локальные модели для Corporate AI Assistant</div>
+          <h1>Каталог моделей Ollama для закрытого корпоративного контура</h1>
+          <p>
+            Это отдельная страница каталога внутри Corporate AI Assistant. Здесь собраны локальные модели, которые можно запускать
+            через Ollama внутри корпоративной инфраструктуры без обязательной передачи запросов во внешние облачные AI-сервисы.
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#catalog">Перейти к каталогу</a>
+            <a class="btn btn-secondary" href="index.html">Вернуться на главную</a>
+          </div>
+        </div>
+
+        <div class="hero-side">
+          <div class="glass-card stats-card">
+            <div class="stats-grid">
+              <div class="stat-box">
+                <strong>33</strong>
+                <span>модели в текущем каталоге</span>
+              </div>
+              <div class="stat-box">
+                <strong>7</strong>
+                <span>семейств: GPT-OSS, Qwen, Llama, Gemma, Phi, DeepSeek, Mistral</span>
+              </div>
+              <div class="stat-box">
+                <strong>4</strong>
+                <span>основные категории: чат, код, рассуждение, мультимодальность</span>
+              </div>
+              <div class="stat-box">
+                <strong>3</strong>
+                <span>режима размещения: локально, частный сервер, изолированный контур</span>
+              </div>
+            </div>
+
+            <div class="mini-note">
+              В карточках указаны реальные теги для установки через Ollama, команда запуска, базовые характеристики,
+              а также официальные ссылки на модель или документацию.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="providers" class="section section-soft">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">Быстрый старт по сценариям</h2>
+            <p class="section-subtitle">
+              Если не хочется читать весь каталог подряд, начните с этих рекомендованных направлений.
+            </p>
+          </div>
+        </div>
+
+        <div class="providers">
+          <article class="provider-card provider-action-card">
+            <div class="provider-top">
+              <h3>Для пилота</h3>
+              <span class="provider-badge">Старт</span>
+            </div>
+            <p>Gemma 3 4B, Qwen 3.5 0.8B и Phi-4 Mini подходят для тестового стенда и первого локального запуска.</p>
+            <button class="small-btn quick-filter" data-quick-search="Gemma 3 4B">Показать пример</button>
+          </article>
+
+          <article class="provider-card provider-action-card">
+            <div class="provider-top">
+              <h3>Для production-чата</h3>
+              <span class="provider-badge">Assistant</span>
+            </div>
+            <p>Llama 3.1 8B, Qwen 3.5 9B и Mistral Small 3 подходят для внутренних ассистентов и диалоговых сценариев.</p>
+            <button class="small-btn quick-filter" data-quick-search="Llama 3.1 8B">Показать пример</button>
+          </article>
+
+          <article class="provider-card provider-action-card">
+            <div class="provider-top">
+              <h3>Для кода</h3>
+              <span class="provider-badge">Coding</span>
+            </div>
+            <p>Qwen3-Coder и Qwen2.5-Coder закрывают сценарии code generation, code review и внутренних dev-инструментов.</p>
+            <button class="small-btn quick-filter" data-quick-family="Qwen" data-quick-category="Код">Открыть подборку</button>
+          </article>
+
+          <article class="provider-card provider-action-card">
+            <div class="provider-top">
+              <h3>Для reasoning</h3>
+              <span class="provider-badge">Logic</span>
+            </div>
+            <p>GPT-OSS, DeepSeek-R1 и Phi-4 подходят для логики, анализа, математики и сложных внутренних вопросов.</p>
+            <button class="small-btn quick-filter" data-quick-category="Рассуждение">Открыть подборку</button>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="catalog" class="section">
+      <div class="container">
+        <div class="section-header section-header-stack">
+          <div>
+            <h2 class="section-title">Полный каталог моделей</h2>
+            <p class="section-subtitle">
+              Фильтруйте по семейству, категории и режиму размещения. Каталог работает из локального JavaScript-массива,
+              поэтому поиск и фильтрация выполняются прямо в интерфейсе.
+            </p>
+          </div>
+          <div class="results-pill" id="resultsCount" aria-live="polite">Найдено моделей: 0</div>
+        </div>
+
+        <div class="filter-panel filter-panel-extended">
+          <div class="field">
+            <label for="search">Поиск модели</label>
+            <input id="search" type="text" placeholder="Например: GPT-OSS, Qwen, Llama, Phi, DeepSeek..." />
+          </div>
+
+          <div class="field">
+            <label for="provider">Семейство</label>
+            <select id="provider">
+              <option>Все семейства</option>
+              <option>GPT-OSS</option>
+              <option>Qwen</option>
+              <option>Llama</option>
+              <option>Gemma</option>
+              <option>Phi</option>
+              <option>DeepSeek</option>
+              <option>Mistral</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="category">Категория</label>
+            <select id="category">
+              <option>Все категории</option>
+              <option>Чат</option>
+              <option>Рассуждение</option>
+              <option>Код</option>
+              <option>Мультимодальная</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="deployment">Размещение</label>
+            <select id="deployment">
+              <option>Все варианты</option>
+              <option>Локально</option>
+              <option>Частный сервер</option>
+              <option>Изолированный контур</option>
+            </select>
+          </div>
+
+          <div class="field field-action">
+            <label>&nbsp;</label>
+            <button id="resetFilters" class="btn btn-secondary btn-full" type="button">Сбросить фильтры</button>
+          </div>
+        </div>
+
+        <div class="toolbar-note">
+          Карточки ниже показывают базовые характеристики, ориентиры по запуску, тег установки и прямые ссылки на официальные страницы.
+        </div>
+
+        <div id="modelsList" class="models-grid"></div>
+
+        <p id="emptyState" class="section-subtitle empty-state" hidden>
+          По выбранным параметрам модели не найдены. Попробуйте изменить фильтры или сбросить поиск.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-box">
+        <div><strong>Corporate AI Assistant</strong> — каталог локальных моделей через Ollama</div>
+        <div>
+          <a href="index.html">Вернуться на главную</a>
+          <span> · </span>
+          <a href="contacts.html">Контакты</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
