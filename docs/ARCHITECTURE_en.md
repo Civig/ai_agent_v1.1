@@ -13,7 +13,9 @@ Corporate AI Assistant is a Docker Compose deployment made of:
 - `sso-proxy` for internal Kerberos/SPNEGO validation behind the reverse proxy
 - `scheduler` for admission control and stale-job recovery
 - `worker-chat`, `worker-siem`, and `worker-batch` for workload execution
+- `worker-parser` for parser-stage file processing
 - optional `worker-gpu` for GPU-targeted chat execution
+- `postgres` for the conversation persistence baseline
 - `redis` for chat history, rate limiting, queues, heartbeats, leases, job state, and event streams
 - `ollama` for local model inference
 
@@ -56,6 +58,7 @@ The FastAPI application handles:
 - model selection and runtime model resolution through an explicit folder-based policy catalog (`model_policies/`)
 - regular chat request intake
 - file upload staging, parser jobs, and document processing
+- the read-only operator dashboard plus dashboard telemetry/history/events endpoints
 - health endpoints
 - SSE event streaming to the browser
 
@@ -125,6 +128,15 @@ Redis is the current control plane and lightweight storage layer. It is used for
 - scheduler and worker heartbeats
 - event streams
 
+### `postgres`
+
+`postgres` is the current persistent conversation storage baseline for the runtime when `PERSISTENT_DB_*` flags are enabled. It:
+
+- stores `conversation_threads` and `conversation_messages`
+- serves DB-backed thread/message reads when cutover is enabled
+- participates in the dual-write baseline for conversation updates
+- does not fully replace the Redis control plane or eliminate Redis fallback semantics
+
 ### `ollama`
 
 Ollama is the local inference runtime. The application expects at least one model to be installed there.
@@ -190,23 +202,25 @@ PDF extraction uses a parser chain already present in the application runtime. I
 
 ### Chat history
 
-Chat history is currently stored in Redis through `AsyncChatStore`.
+Chat history in the current baseline uses Redis through `AsyncChatStore`, and when the persistence profile is enabled it also relies on the DB-backed conversation path.
 
 Current properties:
 
 - bounded history retention
-- no separate SQL database
 - no long-term archival backend in this repository
 - the primary history model is already per-thread: `chat:{username}:{thread_id}`
 - the backend maintains a server-side thread registry and uses it as the source of truth for thread list bootstrap
 - the UI thread list and active-thread bootstrap are already synchronized with backend truth through `/chat`, `GET /api/threads`, `POST /api/threads`, and `GET /api/threads/{thread_id}/messages`
 - legacy `chat:{username}` remains only as a compatibility/migration bridge for the explicit `default` thread
 - the bridge is deterministic: on the first `default` thread bootstrap/read/write/list, the legacy bucket is moved into `chat:{username}:default`, the old key is deleted, and no repeated re-migration occurs
-- for the next durable storage step, PostgreSQL is selected as the target persistent relational database; the current runtime still remains Redis-based and DB integration is not implemented yet
-- the ownership split for the next storage step is fixed separately: Redis remains the owner of queue/control-plane/transient state, while the persistent relational DB is the target durable owner for dialog/message/meta entities
+- PostgreSQL runtime, schema, and store are already implemented through `PERSISTENT_DB_*` settings, the `persistence/` package, and startup wiring in `app`
+- the fresh-install baseline includes the `postgres` service and the conversation persistence profile with schema bootstrap, dual-write, and read-cutover flags
+- thread-list and message reads can already use the DB-backed path when cutover is enabled; Redis remains the fallback on mismatch/error
+- shadow-compare hooks and dual-write groundwork already exist, so ownership is currently transitional rather than purely Redis-only
+- the ownership split for the next storage step is still documented separately: Redis remains the owner of queue/control-plane/transient state, while the persistent relational DB is the target durable owner for dialog/message/meta entities
 - the quota direction for the next policy/storage step is also defined separately: current rate limiting and queue admission already exist, but they are not treated as a full quota platform
 - the queue/concurrency control direction for the next reliability step is also fixed separately: current queue backpressure, scheduler admission, timeout/cancel/recovery, and observability already exist, but part of the control contract remains topology-derived and is only now being formalized at the docs level
-- the operator dashboard direction for the next operations step is also fixed separately: the current runtime already exposes health/readiness, queue depth, active jobs, and queue-wait surfaces, but this is still not equivalent to a ready operator KPI dashboard
+- the operator dashboard is already implemented as a read-only monitoring surface on top of summary/live/history/events telemetry, but its access model and KPI formalization still remain follow-up topics
 - a session-scoped active-thread pointer plus archive/restore as platform capabilities are still not implemented
 
 The target server-side thread/session model for the next implementation step is defined in [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md), the storage direction is defined in [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md), the ownership split is defined in [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md), the quota direction is defined in [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md), the queue/concurrency control direction is defined in [QUEUE_CONCURRENCY_CONTROL_DIRECTION.md](QUEUE_CONCURRENCY_CONTROL_DIRECTION.md), and the operator dashboard direction is defined in [OPERATOR_DASHBOARD_DIRECTION.md](OPERATOR_DASHBOARD_DIRECTION.md).
@@ -285,17 +299,19 @@ No full metrics stack is packaged in the repository.
 - dedicated `worker-parser` service with shared parser staging
 - file-processing limits, budgets, and malformed/heavy-file controlled failures
 - CPU/GPU routing readiness with CPU fallback
-- Redis-backed chat history and job state
+- read-only operator dashboard with live telemetry/history/events
+- Redis/PostgreSQL transitional conversation persistence baseline
 - baseline upload validation and structured observability logs
 
 ### Planned or not yet implemented
 
-- runtime integration of a dedicated persistent relational database for dialog/message/meta entities
-- a runtime boundary between durable conversation/meta storage and the Redis control plane
+- final authoritative ownership cutover of conversation data to persistent relational storage without the Redis fallback bridge
+- durable user/quota/audit entities beyond the current thread/message baseline
 - a dedicated runtime quota layer with per-user/per-group enforcement
-- server-side thread/session storage model implementation
+- a full session-scoped active-thread/archive/restore platform
 - HA Redis / Sentinel profile
 - packaged external monitoring stack
+- production-ready dashboard RBAC / claim model
 - antivirus or sandbox-based file scanning
 - standalone RAG subsystem
 - Kubernetes deployment artifacts

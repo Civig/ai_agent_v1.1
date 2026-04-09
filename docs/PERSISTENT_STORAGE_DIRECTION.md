@@ -1,68 +1,64 @@
 # Persistent Storage Direction For Dialogs
 
-Этот документ фиксирует design-level решение для шага `P5.1`: какое постоянное хранилище должно стать primary durable store для диалогов и связанных метаданных.
+Этот документ больше не должен читаться как pure future-only note. Выбранное направление уже partially implemented в runtime baseline, но ещё не доведено до финальной authoritative persistence platform.
 
-Статус документа:
+## Статус документа
 
-- design choice selected
-- runtime implementation not yet done
-- это не ORM rollout
-- это не Alembic/migrations plan
-- это не compose/install integration
+- PostgreSQL direction остаётся выбранным durable storage target
+- runtime groundwork уже реализован
+- compose/install wiring уже существует
+- thread/message schema и store уже существуют
+- dual-write / read-cutover / shadow-compare groundwork уже существует
+- ownership всё ещё transitional и не считается окончательно завершённым
 
 ## 1. Подтверждённые текущие факты
 
-По текущему runtime-коду:
+По текущему runtime-коду уже есть:
 
-- chat history хранится в Redis через `AsyncChatStore`
-- thread registry тоже хранится в Redis
-- queue / scheduler / worker control plane живут в Redis
-- token revocation и часть session-ish runtime state тоже живут в Redis
-- persistent DB layer в runtime не внедрён
-- SQLAlchemy / Alembic / DB URL / migrations в runtime-коде отсутствуют
+- Redis path для control-plane state и compatibility conversation path
+- `postgres` service в `docker-compose.yml`
+- `PERSISTENT_DB_*` flags в config/runtime
+- SQLAlchemy-based conversation persistence package в `persistence/`
+- schema для `conversation_threads` и `conversation_messages`
+- app startup wiring для открытия conversation persistence runtime
+- DB-backed thread/message reads при включённом cutover
+- conversation dual-write coordinator
+- shadow-compare / parity hooks
 
-Это означает, что текущий runtime остаётся Redis-first и фактически Redis-only для storage-critical частей.
+Также важно:
 
-## 2. Выбранное направление
+- fresh install baseline пишет persistence profile в `.env`
+- existing `.env` values по persistence сохраняются, если они заданы явно
+- runtime всё ещё сохраняет Redis fallback semantics при unavailable/mismatch scenarios
 
-Для production-grade durable entities выбирается:
+## 2. Выбранное направление не изменилось
 
-- PostgreSQL как целевая persistent relational database
+Для durable conversation/meta entities выбран:
 
-Это design choice, а не утверждение, что PostgreSQL уже подключён в runtime.
+- PostgreSQL как target persistent relational database
 
-## 3. Почему именно PostgreSQL
+Это уже не просто abstract idea. В репозитории есть working groundwork для подключения и использования этого слоя. Но это всё ещё не равнозначно полной финальной миграции всей ownership model.
 
-Это направление подходит текущему проекту по следующим причинам:
+## 3. Что уже реально реализовано
 
-- проекту нужны durable dialog/message/meta entities, а не только ephemeral runtime state
-- roadmap уже ушёл в server-side thread/session direction и требует нормальной модели ownership и связей
-- target на `100+ users` делает Redis-only history/storage модель слишком хрупкой как единственный durable store
-- реляционная модель лучше подходит для `user -> thread -> message`, model access mappings, quotas и audit metadata
-- PostgreSQL даёт прозрачную схему данных и предсказуемый multi-user growth path без выдумывания собственной data platform поверх Redis
-- выбор не ломает текущий validated runtime, потому что на `P5.1` это только design-level решение
+Текущий implemented baseline уже включает:
 
-## 4. First-class Persistent Entities
+- conversation persistence runtime и session factory
+- bootstrap schema path
+- conversation thread/message store
+- DB-backed thread/message read cutover hooks
+- dual-write path для conversation updates
+- runtime fallback к Redis при проблемах DB path
 
-Следующие сущности должны стать first-class persistent entities в будущем implementation scope:
+Это означает:
 
-- `user`
-- `thread`
-- `message`
-- `model entitlement / access mapping`
-- `quota metadata`
-- `audit metadata`
+- репозиторий больше не является Redis-only по conversation baseline
+- persistent DB уже не “только direction doc”
+- но текущая модель всё ещё transitional
 
-Смысл этого выбора:
+## 4. Что по-прежнему остаётся в Redis
 
-- `user`, `thread`, `message` образуют durable conversation model
-- `model entitlement / access mapping` не должен оставаться только derived runtime decision
-- `quota metadata` должна жить в persistent store, если проект пойдёт в controlled multi-user growth
-- `audit metadata` нужна как durable operator/security trail, а не только как transient logs
-
-## 5. Что остаётся в Redis
-
-Даже после будущего persistent storage rollout Redis должен остаться control-plane и transient runtime layer для:
+Redis остаётся owner для:
 
 - queues
 - job state
@@ -72,56 +68,24 @@
 - rate limiting
 - token revocation
 - transient control-plane state
-- временный compatibility/migration bridge на переходных implementation steps
+- compatibility conversation bridge там, где authoritative cutover ещё не объявлен завершённым
 
-Это означает:
+## 5. Что ещё не завершено
 
-- Redis не убирается из системы на `P5.1`
-- Redis не становится primary durable store для dialog/message entities
+Следующие вещи не стоит переобещать:
 
-## 6. Что явно НЕ реализовано на P5.1
+- окончательный authoritative ownership cutover conversation data в PostgreSQL без Redis fallback bridge
+- finished migration/rollback story для всех conversation entities
+- durable `user` entity platform beyond current username-based ownership
+- durable quota metadata rollout
+- durable audit metadata rollout
+- final session storage platform
 
-В рамках этого шага сознательно НЕ делаются:
+## 6. Минимально корректная формулировка baseline
 
-- внедрение ORM
-- внедрение Alembic
-- schema rollout
-- compose/install changes
-- runtime history migration в БД
-- quota enforcement runtime
-- broad storage refactor
-- замена validated Redis runtime path
+Current source of truth должен читаться так:
 
-Также этот шаг НЕ означает, что в репозитории уже есть:
-
-- live PostgreSQL connection
-- DB URL contract
-- migrations framework
-- persistent runtime read/write path для dialogs
-
-## 7. Ownership Split Follow-up
-
-Следующий design шаг после `P5.1` уже не должен выбирать БД заново. Он должен зафиксировать ownership split между:
-
-- Redis как control-plane / transient runtime owner
-- persistent relational DB как target durable owner для dialog/message/meta entities
-
-Этот split отдельно оформляется в [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md).
-
-## 8. Минимальный безопасный следующий implementation scope
-
-После `P5.1` минимальный безопасный следующий шаг должен быть уже не про выбор направления, а про узкий groundwork для future persistent layer.
-
-Он должен:
-
-- ввести минимальную storage abstraction boundary
-- определить first implementation slice для durable entities
-- не ломать текущий Redis-backed runtime
-- не тащить quota runtime, dashboard или broad migration framework раньше времени
-
-До этого момента текущий source of truth остаётся таким:
-
-- runtime storage для chat/thread/job state по-прежнему Redis-based
-- PostgreSQL выбран как target durable store, но не внедрён
-
-Отдельный design follow-up для quota direction после ownership split оформляется в [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md).
+- PostgreSQL persistent conversation groundwork уже implemented
+- Redis больше не является единственным conversation-related path в runtime
+- Redis и PostgreSQL сейчас образуют transitional baseline
+- final ownership model и migration completion остаются отдельным следующим шагом

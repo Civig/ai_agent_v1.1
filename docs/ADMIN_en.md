@@ -10,10 +10,13 @@ Baseline stack:
 
 - `corporate-ai-nginx`
 - `corporate-ai-assistant`
+- `corporate-ai-sso-proxy`
 - `corporate-ai-scheduler`
 - `corporate-ai-worker-chat`
 - `corporate-ai-worker-siem`
 - `corporate-ai-worker-batch`
+- `corporate-ai-worker-parser`
+- `corporate-ai-postgres`
 - `corporate-ai-redis`
 - `ollama-server`
 
@@ -64,7 +67,7 @@ docker compose logs -f app scheduler worker-chat nginx
 ### Inspect file-processing behavior
 
 ```bash
-docker compose logs --tail=200 app worker-chat
+docker compose logs --tail=200 app worker-parser worker-chat
 ```
 
 ### Inspect GPU-related runtime behavior
@@ -108,6 +111,23 @@ docker compose ps
 ```
 
 The Compose health checks use `runtime_healthcheck.py` for `app`, `scheduler`, and workers.
+
+## Operator Dashboard
+
+The current operator dashboard is already implemented as a read-only monitoring surface:
+
+- route: `/admin/dashboard`
+- APIs:
+  - `/api/admin/dashboard/summary`
+  - `/api/admin/dashboard/live`
+  - `/api/admin/dashboard/history`
+  - `/api/admin/dashboard/events`
+
+Important notes:
+
+- the dashboard uses honest no-data / unavailable states and does not fabricate telemetry
+- live/history/events are intended for operator monitoring, not broad user access
+- the current access model remains a narrow temporary operator gate rather than production-ready RBAC
 
 ## Model Operations
 
@@ -180,7 +200,7 @@ docker compose exec -T redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" GET llm:job:
 ### Typical file-processing checks
 
 ```bash
-docker compose logs --tail=200 app
+docker compose logs --tail=200 app worker-parser
 ```
 
 Look for:
@@ -194,7 +214,7 @@ Look for:
 The PDF path is part of the current backend implementation. If PDF extraction stops working after environment drift, rebuild the application image:
 
 ```bash
-docker compose up -d --build app worker-chat worker-siem worker-batch
+docker compose up -d --build app worker-parser worker-chat worker-siem worker-batch
 ```
 
 ### OCR path notes
@@ -220,7 +240,7 @@ Key fields currently available include:
 Current log events to grep:
 
 ```bash
-docker compose logs --tail=300 app worker-chat scheduler | grep -E 'file_parse_observability|job_queue_observability|job_terminal_observability|upload_rejected|Routing job'
+docker compose logs --tail=300 app worker-parser worker-chat scheduler | grep -E 'file_parse_observability|job_queue_observability|job_terminal_observability|upload_rejected|Routing job'
 ```
 
 ## Regular Maintenance

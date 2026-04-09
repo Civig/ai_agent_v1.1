@@ -36,9 +36,12 @@ Use [INSTALL_ru.md](INSTALL_ru.md) or [INSTALL_en.md](INSTALL_en.md) for the sup
 - replace installer-generated self-signed TLS with organization-approved certificate material
 - confirm AD, DNS, and SPN consistency for the hostname profile you actually publish
 - if SSO is planned, prepare the real `HTTP/<fqdn>@REALM` SPN and service keytab before enabling it
+- validate SSO on the real reverse-proxy/FQDN path before treating it as a production login path
+- if GPU is planned, validate the `gpu` profile on the target host before treating GPU routing as a production capability
 - keep `.env` only on the deployment host and rotate `SECRET_KEY` and `REDIS_PASSWORD`
 - plan monitoring, log forwarding, backup, and host-access controls according to your environment
 - keep Redis on the internal Compose network; do not expose Redis or the FastAPI container directly
+- if the operator dashboard is used, keep it internal-only; its current access model is still a temporary operator gate
 
 ## Production Rollout Checklist
 
@@ -46,8 +49,9 @@ Use [INSTALL_ru.md](INSTALL_ru.md) or [INSTALL_en.md](INSTALL_en.md) for the sup
 2. Replace the contents of `deploy/certs/` with trusted TLS material for the real FQDN.
 3. Verify AD hostname, DNS, and SPN alignment for LDAP and any planned SSO path.
 4. Confirm only the intended public ports are exposed and that Redis remains internal-only.
-5. Verify `https://<fqdn>/health/live` and `https://<fqdn>/health/ready`, login, and model availability.
-6. Hand off routine operations to [ADMIN_ru.md](ADMIN_ru.md) / [ADMIN_en.md](ADMIN_en.md) and incident handling to [TROUBLESHOOTING_ru.md](TROUBLESHOOTING_ru.md) / [TROUBLESHOOTING_en.md](TROUBLESHOOTING_en.md).
+5. Verify `https://<fqdn>/health/live` and `https://<fqdn>/health/ready`, login, model availability, and the operator dashboard if it is part of the rollout.
+6. If SSO or GPU are in scope, validate them separately on the target host/FQDN before calling the rollout production-ready.
+7. Hand off routine operations to [ADMIN_ru.md](ADMIN_ru.md) / [ADMIN_en.md](ADMIN_en.md) and incident handling to [TROUBLESHOOTING_ru.md](TROUBLESHOOTING_ru.md) / [TROUBLESHOOTING_en.md](TROUBLESHOOTING_en.md).
 
 ## TLS And FQDN
 

@@ -50,6 +50,10 @@
 - явный reject зарезервированных proxy-auth headers, пока trusted proxy SSO mode выключен
 - зарезервированные proxy-auth headers принимаются только на выделенном SSO entry path (`/auth/sso/login`) и только от доверенного proxy source
 - основной FastAPI app по-прежнему не принимает raw `Authorization: Negotiate ...` как auth path
+- startup validation environment secrets и proxy-boundary настроек:
+  - placeholder passwords в `REDIS_URL` и `PERSISTENT_DB_URL` отклоняются
+  - для non-local Redis/PostgreSQL требуется явный пароль
+  - `TRUSTED_PROXY_SOURCE_CIDRS` должен быть валиден и обязателен при включённом trusted-proxy SSO
 
 ### Текущий статус SSO
 
@@ -108,6 +112,25 @@ Installer по умолчанию генерирует self-signed certificates.
 
 - Redis по умолчанию single-node
 - HA Redis profile пока не поставляется
+
+## Dashboard telemetry boundary
+
+### Что реализовано
+
+- read-only operator dashboard под `/admin/dashboard`
+- dashboard API surfaces:
+  - `/api/admin/dashboard/summary`
+  - `/api/admin/dashboard/live`
+  - `/api/admin/dashboard/history`
+  - `/api/admin/dashboard/events`
+- honest no-data / unavailable semantics для telemetry, GPU и history
+- dashboard не публикует fake metrics и не подменяет missing telemetry нулём
+
+### Текущее ограничение
+
+- текущая модель доступа к dashboard остаётся временным узким operator gate, а не production-ready RBAC
+- dashboard payloads раскрывают operational telemetry, history и event context, поэтому этот surface нужно считать operator-only
+- если SSO планируется использовать и для dashboard access, это всё равно требует отдельной real-infra validation
 
 ## Upload и file security baseline
 
@@ -185,6 +208,7 @@ Installer по умолчанию генерирует self-signed certificates.
 - централизованная SIEM forwarding
 - antivirus или sandbox-based file scanning
 - fine-grained admin controls
+- production-ready dashboard role/claim model
 - packaged compliance controls
 - multi-layer content classification или DLP
 

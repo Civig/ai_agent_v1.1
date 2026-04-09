@@ -74,7 +74,7 @@ This creates four architectural risks:
 - no durable document database
 - no raw file bytes in Redis
 - no redesign of the current auth/session model
-- no runtime implementation in this step
+- no new parser feature rollout is promised by this document sync; the runtime path already exists
 - no attempt to make current app-side parsing "slightly better" instead of moving it out
 
 ## Evaluated Options
@@ -195,7 +195,7 @@ Why this is the best fit now:
 
 ## Target Flow
 
-### Future Target Sequence
+### Implemented Sequence
 
 1. request arrives at `/api/chat_with_files`
 2. app validates:

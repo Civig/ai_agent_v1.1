@@ -14,8 +14,10 @@ Legacy helper files могут оставаться в репозитории д
 - login через Kerberos + LDAP-backed password flow
 - optional trusted reverse-proxy SSO path
 - Redis-backed session, rate-limit и job state
+- PostgreSQL-backed conversation persistence groundwork с dual-write/read-cutover flags
 - Ollama как локальный inference runtime
 - parser-based file-chat path с отдельным `worker-parser` и shared staging
+- read-only operator dashboard с live telemetry, history и events
 - русскоязычный набор operator docs с синхронизированными английскими версиями
 
 ## Поддерживаемый baseline развёртывания
@@ -27,6 +29,12 @@ Legacy helper files могут оставаться в репозитории д
 - поддерживаемый путь для v1.1: Linux VM + Docker Compose + `install.sh`
 - baseline path — CPU-first deployment
 - GPU profile остаётся optional и требует отдельно подготовленного хоста
+
+## Границы текущей валидации
+
+- текущая ветка отражает чистый code/docs baseline, но exact current HEAD всё ещё нужно отдельно перепроверить через fresh install перед pilot freeze
+- GPU profile требует отдельной runtime validation на целевом GPU host
+- trusted reverse-proxy SSO требует отдельной infra/runtime validation на реальном FQDN/SPN/keytab path
 
 ## Порядок чтения
 
@@ -63,6 +71,7 @@ Legacy helper files могут оставаться в репозитории д
 - Redis по умолчанию single-node
 - self-signed TLS остаётся дефолтным installer path
 - GPU deployment не считается baseline path
+- dashboard access model остаётся временным operator gate и не является production-ready RBAC
 - расширенная observability и HA-профили не входят в этот release snapshot
 - качество и latency зависят от выбранной модели Ollama и профиля железа
 ## Лицензия

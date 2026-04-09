@@ -10,10 +10,13 @@
 
 - `corporate-ai-nginx`
 - `corporate-ai-assistant`
+- `corporate-ai-sso-proxy`
 - `corporate-ai-scheduler`
 - `corporate-ai-worker-chat`
 - `corporate-ai-worker-siem`
 - `corporate-ai-worker-batch`
+- `corporate-ai-worker-parser`
+- `corporate-ai-postgres`
 - `corporate-ai-redis`
 - `ollama-server`
 
@@ -64,7 +67,7 @@ docker compose logs -f app scheduler worker-chat nginx
 ### Диагностика file-processing behavior
 
 ```bash
-docker compose logs --tail=200 app worker-chat
+docker compose logs --tail=200 app worker-parser worker-chat
 ```
 
 ### Диагностика GPU-related runtime behavior
@@ -108,6 +111,23 @@ docker compose ps
 ```
 
 Compose health checks используют `runtime_healthcheck.py` для `app`, `scheduler` и worker'ов.
+
+## Operator dashboard
+
+Текущий operator dashboard уже реализован как read-only monitoring surface:
+
+- route: `/admin/dashboard`
+- API:
+  - `/api/admin/dashboard/summary`
+  - `/api/admin/dashboard/live`
+  - `/api/admin/dashboard/history`
+  - `/api/admin/dashboard/events`
+
+Полезно помнить:
+
+- dashboard честно показывает no-data / unavailable состояния и не рисует fake telemetry
+- live/history/events предназначены для operator monitoring, а не для массового пользовательского доступа
+- текущая модель доступа остаётся временным узким operator gate и не является production-ready RBAC
 
 ## Работа с моделями
 
@@ -180,7 +200,7 @@ docker compose exec -T redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" GET llm:job:
 ### Базовые проверки file processing
 
 ```bash
-docker compose logs --tail=200 app
+docker compose logs --tail=200 app worker-parser
 ```
 
 Ищите:
@@ -194,7 +214,7 @@ docker compose logs --tail=200 app
 PDF path — часть текущего backend implementation. Если PDF extraction перестала работать после drift окружения, пересоберите application image:
 
 ```bash
-docker compose up -d --build app worker-chat worker-siem worker-batch
+docker compose up -d --build app worker-parser worker-chat worker-siem worker-batch
 ```
 
 ### Примечания по OCR path
@@ -220,7 +240,7 @@ OCR сейчас встроен в container image для поддерживае
 Какие события удобно grep'ать:
 
 ```bash
-docker compose logs --tail=300 app worker-chat scheduler | grep -E 'file_parse_observability|job_queue_observability|job_terminal_observability|upload_rejected|Routing job'
+docker compose logs --tail=300 app worker-parser worker-chat scheduler | grep -E 'file_parse_observability|job_queue_observability|job_terminal_observability|upload_rejected|Routing job'
 ```
 
 ## Регулярное обслуживание

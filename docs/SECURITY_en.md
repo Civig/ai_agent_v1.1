@@ -50,6 +50,10 @@ The application currently includes:
 - explicit rejection of reserved proxy-auth headers unless trusted proxy SSO mode is enabled
 - reserved proxy-auth headers are accepted only on the dedicated SSO entry path (`/auth/sso/login`) and only from a trusted proxy source
 - the main FastAPI app still rejects raw `Authorization: Negotiate ...` as an authentication path
+- startup validation for environment secrets and proxy-boundary settings:
+  - placeholder passwords embedded in `REDIS_URL` and `PERSISTENT_DB_URL` are rejected
+  - explicit passwords are required for non-local Redis/PostgreSQL deployments
+  - `TRUSTED_PROXY_SOURCE_CIDRS` must be valid and is mandatory when trusted-proxy SSO is enabled
 
 ### Current SSO implementation status
 
@@ -108,6 +112,25 @@ The installer generates self-signed certificates by default. This is acceptable 
 
 - Redis is single-node by default
 - no HA Redis profile is shipped yet
+
+## Dashboard Telemetry Boundary
+
+### What is implemented
+
+- a read-only operator dashboard under `/admin/dashboard`
+- dashboard API surfaces:
+  - `/api/admin/dashboard/summary`
+  - `/api/admin/dashboard/live`
+  - `/api/admin/dashboard/history`
+  - `/api/admin/dashboard/events`
+- honest no-data / unavailable semantics for telemetry, GPU, and history
+- the dashboard does not fabricate metrics or substitute missing telemetry with zeroes
+
+### Current limitation
+
+- the current dashboard access model remains a narrow temporary operator gate, not production-ready RBAC
+- dashboard payloads expose operational telemetry, history, and event context, so this surface should remain operator-only
+- if SSO is expected to cover dashboard access, that still requires separate real-infrastructure validation
 
 ## Upload and File Security Baseline
 
@@ -185,6 +208,7 @@ The following areas are not fully implemented in this repository:
 - centralized SIEM forwarding
 - antivirus or sandbox-based file scanning
 - fine-grained admin controls
+- a production-ready dashboard role/claim model
 - packaged compliance controls
 - multi-layer content classification or DLP
 

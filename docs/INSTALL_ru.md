@@ -9,7 +9,7 @@
 - интеграция с Active Directory / Kerberos / LDAP
 - Ollama как локальный inference runtime
 
-Предпочтительный путь установки — `./install.sh`. Для v1.1 это primary/supported deployment path и единственный validated release baseline. Ручное развёртывание возможно, но это вторичный сценарий и он требует большей аккуратности со стороны оператора.
+Предпочтительный путь установки — `./install.sh`. Для v1.1 это primary/supported deployment path и reference baseline для текущего release family. Exact current HEAD всё ещё нужно отдельно перепроверять через fresh install перед pilot freeze. Ручное развёртывание возможно, но это вторичный сценарий и он требует большей аккуратности со стороны оператора.
 
 Legacy deployment paths, которые могут встречаться в репозитории:
 
@@ -68,6 +68,7 @@ Compose stack реально включает:
 - `worker-siem`
 - `worker-batch`
 - `worker-parser`
+- `postgres`
 - `redis`
 - `ollama`
 
@@ -126,6 +127,17 @@ Compose stack реально включает:
   - `SSO_LOGIN_PATH`
   - `SSO_SERVICE_PRINCIPAL`
   - `SSO_KEYTAB_PATH`
+- persistence / PostgreSQL:
+  - `POSTGRES_DB`
+  - `POSTGRES_USER`
+  - `POSTGRES_PASSWORD`
+  - `PERSISTENT_DB_ENABLED`
+  - `PERSISTENT_DB_URL`
+  - `PERSISTENT_DB_BOOTSTRAP_SCHEMA`
+  - `PERSISTENT_DB_SHADOW_COMPARE`
+  - `PERSISTENT_DB_READ_THREADS`
+  - `PERSISTENT_DB_READ_MESSAGES`
+  - `PERSISTENT_DB_DUAL_WRITE_CONVERSATION`
 - runtime:
   - `DEFAULT_MODEL`
   - `MODEL_ACCESS_CODING_GROUPS`
@@ -137,11 +149,11 @@ Compose stack реально включает:
   - `APP_PORT`
   - `LOG_LEVEL`
 
-`install.sh` пишет `.env` сам. Для fresh install он сразу включает новый parser file path через `ENABLE_PARSER_STAGE=true` и `ENABLE_PARSER_PUBLIC_CUTOVER=true`. Если `.env` уже существует и в нём эти значения заданы явно, installer их сохраняет.
+`install.sh` пишет `.env` сам. Для fresh install он сразу включает новый parser file path через `ENABLE_PARSER_STAGE=true` и `ENABLE_PARSER_PUBLIC_CUTOVER=true`, а также текущий PostgreSQL-backed conversation persistence baseline через `PERSISTENT_DB_ENABLED=true`, schema bootstrap, dual-write и read-cutover flags. Если `.env` уже существует и в нём эти значения заданы явно, installer их сохраняет.
 
 Для trusted reverse-proxy SSO оператор должен отдельно проверить `TRUSTED_PROXY_SOURCE_CIDRS`: это должен быть список source addresses/CIDR того reverse proxy, который реально обращается к `app`. Значение loopback подходит только там, где hop до `app` действительно приходит с loopback.
 
-Тот же file-processing baseline теперь явно показывает в `.env.example` parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout.
+Тот же file-processing baseline также поддерживает дополнительные env/settings knobs для parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout. Шаблон `.env.example` сознательно не перечисляет каждый advanced parser limit по отдельности.
 
 Пример model-access mapping для пилотного AD-стенда может выглядеть так:
 
@@ -207,7 +219,7 @@ INSTALL_MODE=gpu ./install.sh
    - JWT secret
 10. проверяет, что LDAP/KDC hostnames разрешаются на хосте, если не задан явный AD IP override
 11. если SSO включён, проверяет наличие требуемого HTTP service keytab в `deploy/sso/`
-12. пишет `.env`, включая `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, exact-match group mappings для модельных категорий и SSO-related flags
+12. пишет `.env`, включая `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, PostgreSQL/persistence flags, exact-match group mappings для модельных категорий и SSO-related flags
 13. генерирует `deploy/krb5.conf`
 14. при необходимости пишет installer-managed `docker-compose.override.yml`
 15. подготавливает host-side директорию для Ollama models

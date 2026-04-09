@@ -79,11 +79,11 @@ Russian documents are the primary operator reference. English documents are kept
 - [SUPPORTED_OS.md](SUPPORTED_OS.md) - canonical supported OS matrix and validation status
 - [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md) - current parser-stage architecture, design rationale, and file-chat path boundaries
 - [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md) - target server-side thread/session model, current limitations, and migration path from username-based history
-- [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md) - selected persistent storage direction for durable dialog/message/meta entities and explicit Redis role boundaries
-- [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md) - design-level ownership matrix for Redis control-plane state vs future persistent DB entities
+- [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md) - implemented PostgreSQL persistence groundwork, current transition baseline, and remaining durable-storage gaps
+- [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md) - current Redis/PostgreSQL transition boundary for conversation data vs control-plane state
 - [QUOTA_MODEL_DIRECTION.md](QUOTA_MODEL_DIRECTION.md) - design-level quota matrix, entitlement vs throttling split, and future durable quota ownership
 - [QUEUE_CONCURRENCY_CONTROL_DIRECTION.md](QUEUE_CONCURRENCY_CONTROL_DIRECTION.md) - design-level queue depth, concurrency, overload, and parser-vs-chat control contract
-- [OPERATOR_DASHBOARD_DIRECTION.md](OPERATOR_DASHBOARD_DIRECTION.md) - design-level first dashboard scope, ready-vs-derivable metrics, and operator KPI boundaries
+- [OPERATOR_DASHBOARD_DIRECTION.md](OPERATOR_DASHBOARD_DIRECTION.md) - implemented read-only dashboard baseline, current metric scope, and remaining access-model/KPI gaps
 - [../PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) - repository layout reference
 - [../CHANGELOG.md](../CHANGELOG.md) - release and change history
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) - contribution workflow and coding style

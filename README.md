@@ -12,8 +12,10 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 - Kerberos + LDAP-backed password login
 - optional trusted reverse-proxy SSO path
 - Redis-backed scheduler, workers, rate limiting, and session state
+- PostgreSQL-backed conversation persistence groundwork with dual-write/read-cutover flags
 - Ollama as the local inference runtime
 - parser-based file-chat path with dedicated `worker-parser` and shared staging
+- read-only operator dashboard with live telemetry, history, and events
 - Russian-first operator docs with synced English documents
 
 ## Reading Order
@@ -37,6 +39,12 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 - Ollama
 - Kerberos / LDAP-backed authentication
 - installer-driven deployment through `install.sh`
+
+## Current Validation Boundaries
+
+- the current branch is a clean code/docs baseline, but the exact current HEAD should still be re-validated through a fresh install before a pilot freeze
+- GPU deployment requires separate target-host validation
+- trusted reverse-proxy SSO requires separate infrastructure/runtime validation on the final FQDN/SPN/keytab path
 
 ## Documentation
 

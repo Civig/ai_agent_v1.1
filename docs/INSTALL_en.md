@@ -9,7 +9,7 @@ This guide documents the currently supported installation path for Corporate AI 
 - Active Directory / Kerberos / LDAP integration
 - Ollama as the local inference runtime
 
-The preferred path is `./install.sh`. For v1.1, this is the primary/supported deployment path and the only validated release baseline. Manual deployment is possible, but it is a secondary path and requires more operator care.
+The preferred path is `./install.sh`. For v1.1, this is the primary/supported deployment path and the reference baseline for the current release family. The exact current HEAD should still be re-validated through a fresh install before a pilot freeze. Manual deployment is possible, but it is a secondary path and requires more operator care.
 
 Legacy deployment paths that may still appear in the repository:
 
@@ -68,6 +68,7 @@ The deployed Compose stack contains:
 - `worker-siem`
 - `worker-batch`
 - `worker-parser`
+- `postgres`
 - `redis`
 - `ollama`
 
@@ -126,6 +127,17 @@ Key environment groups include:
   - `SSO_LOGIN_PATH`
   - `SSO_SERVICE_PRINCIPAL`
   - `SSO_KEYTAB_PATH`
+- persistence / PostgreSQL:
+  - `POSTGRES_DB`
+  - `POSTGRES_USER`
+  - `POSTGRES_PASSWORD`
+  - `PERSISTENT_DB_ENABLED`
+  - `PERSISTENT_DB_URL`
+  - `PERSISTENT_DB_BOOTSTRAP_SCHEMA`
+  - `PERSISTENT_DB_SHADOW_COMPARE`
+  - `PERSISTENT_DB_READ_THREADS`
+  - `PERSISTENT_DB_READ_MESSAGES`
+  - `PERSISTENT_DB_DUAL_WRITE_CONVERSATION`
 - runtime:
   - `DEFAULT_MODEL`
   - `MODEL_ACCESS_CODING_GROUPS`
@@ -137,11 +149,11 @@ Key environment groups include:
   - `APP_PORT`
   - `LOG_LEVEL`
 
-The installer writes `.env` for you. On a fresh install it enables the new parser file path out of the box with `ENABLE_PARSER_STAGE=true` and `ENABLE_PARSER_PUBLIC_CUTOVER=true`. If `.env` already exists and those values are set explicitly, the installer keeps them.
+The installer writes `.env` for you. On a fresh install it enables the new parser file path out of the box with `ENABLE_PARSER_STAGE=true` and `ENABLE_PARSER_PUBLIC_CUTOVER=true`, and it also writes the current PostgreSQL-backed conversation persistence baseline with `PERSISTENT_DB_ENABLED=true`, schema bootstrap, dual-write, and read-cutover flags. If `.env` already exists and those values are set explicitly, the installer keeps them.
 
 For trusted reverse-proxy SSO, operators must verify `TRUSTED_PROXY_SOURCE_CIDRS` separately. It must list the source addresses/CIDRs of the reverse proxy hop that actually reaches `app`. A loopback-only value is correct only when that hop really arrives from loopback.
 
-The same file-processing baseline also exposes explicit parser/file-chat limits in `.env.example`, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout.
+The same file-processing baseline also supports additional parser/file-chat limit knobs through env/settings overrides, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout. `.env.example` intentionally keeps the template compact and does not enumerate every advanced parser limit by default.
 
 Model access examples for a pilot AD deployment might look like:
 
@@ -207,7 +219,7 @@ INSTALL_MODE=gpu ./install.sh
    - JWT secret
 10. validates that the LDAP/KDC hostnames resolve on the host, unless an explicit AD IP override was provided
 11. if SSO is enabled, validates that the required HTTP service keytab is present under `deploy/sso/`
-12. writes `.env`, including `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, exact-match model access group mappings, and SSO-related flags
+12. writes `.env`, including `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, PostgreSQL/persistence flags, exact-match model access group mappings, and SSO-related flags
 13. writes `deploy/krb5.conf`
 14. optionally writes installer-managed `docker-compose.override.yml`
 15. ensures the host-side Ollama model directory exists
