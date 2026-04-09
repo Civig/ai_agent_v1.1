@@ -21,6 +21,19 @@ Russian documents are the primary operator reference. English documents are kept
 - Covers / Что покрывает: brief prerequisites, `install.sh`, first launch, first verification, where to go next
 - Does not cover / Что не покрывает: manual installation, full installer behavior, production hardening, full troubleshooting
 
+## Pilot Package / Пилотный пакет
+
+- Primary baseline document / Основной документ по baseline пилота: [PILOT_BASELINE_ru.md](PILOT_BASELINE_ru.md)
+- Synced companion / Синхронизированная companion-версия: [PILOT_BASELINE_en.md](PILOT_BASELINE_en.md)
+- Scope / Область: [PILOT_SCOPE_ru.md](PILOT_SCOPE_ru.md), [PILOT_SCOPE_en.md](PILOT_SCOPE_en.md)
+- Limitations / Ограничения: [PILOT_LIMITATIONS_ru.md](PILOT_LIMITATIONS_ru.md), [PILOT_LIMITATIONS_en.md](PILOT_LIMITATIONS_en.md)
+- Acceptance / Приёмка: [PILOT_ACCEPTANCE_CHECKLIST_ru.md](PILOT_ACCEPTANCE_CHECKLIST_ru.md), [PILOT_ACCEPTANCE_CHECKLIST_en.md](PILOT_ACCEPTANCE_CHECKLIST_en.md)
+- GPU playbook / GPU-плейбук: [GPU_VALIDATION_PLAYBOOK_ru.md](GPU_VALIDATION_PLAYBOOK_ru.md), [GPU_VALIDATION_PLAYBOOK_en.md](GPU_VALIDATION_PLAYBOOK_en.md)
+- Handoff runbook / Документ handoff и runbook: [PILOT_RUNBOOK_ru.md](PILOT_RUNBOOK_ru.md), [PILOT_RUNBOOK_en.md](PILOT_RUNBOOK_en.md)
+- When to read / Когда читать: before pilot kickoff, pilot handoff, acceptance review, and dedicated GPU validation
+- Covers / Что покрывает: exact pilot baseline SHA, scope boundaries, known limitations, pilot acceptance criteria, GPU validation procedure, operator handoff checks
+- Does not cover / Что не покрывает: full installation details, deep troubleshooting catalog, architecture rationale
+
 ## Full Install / Полная установка
 
 - Primary document / Основной документ: [INSTALL_ru.md](INSTALL_ru.md)
@@ -78,6 +91,12 @@ Russian documents are the primary operator reference. English documents are kept
 
 - [SUPPORTED_OS.md](SUPPORTED_OS.md) - canonical supported OS matrix and validation status
 - [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md) - current parser-stage architecture, design rationale, and file-chat path boundaries
+- [PILOT_BASELINE_ru.md](PILOT_BASELINE_ru.md) / [PILOT_BASELINE_en.md](PILOT_BASELINE_en.md) - pilot baseline candidate, evidence boundary, and validation status
+- [PILOT_SCOPE_ru.md](PILOT_SCOPE_ru.md) / [PILOT_SCOPE_en.md](PILOT_SCOPE_en.md) - exact in-scope vs out-of-scope pilot contract
+- [PILOT_LIMITATIONS_ru.md](PILOT_LIMITATIONS_ru.md) / [PILOT_LIMITATIONS_en.md](PILOT_LIMITATIONS_en.md) - honest pilot limitations and non-promises
+- [PILOT_ACCEPTANCE_CHECKLIST_ru.md](PILOT_ACCEPTANCE_CHECKLIST_ru.md) / [PILOT_ACCEPTANCE_CHECKLIST_en.md](PILOT_ACCEPTANCE_CHECKLIST_en.md) - strict acceptance checklist for pilot sign-off
+- [GPU_VALIDATION_PLAYBOOK_ru.md](GPU_VALIDATION_PLAYBOOK_ru.md) / [GPU_VALIDATION_PLAYBOOK_en.md](GPU_VALIDATION_PLAYBOOK_en.md) - dedicated GPU validation procedure and verdict criteria
+- [PILOT_RUNBOOK_ru.md](PILOT_RUNBOOK_ru.md) / [PILOT_RUNBOOK_en.md](PILOT_RUNBOOK_en.md) - operator-facing pilot handoff and first-response checks
 - [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md) - target server-side thread/session model, current limitations, and migration path from username-based history
 - [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md) - implemented PostgreSQL persistence groundwork, current transition baseline, and remaining durable-storage gaps
 - [STORAGE_OWNERSHIP_SPLIT.md](STORAGE_OWNERSHIP_SPLIT.md) - current Redis/PostgreSQL transition boundary for conversation data vs control-plane state
@@ -92,10 +111,11 @@ Russian documents are the primary operator reference. English documents are kept
 ## Recommended Reading Order / Рекомендуемый маршрут чтения
 
 1. [README.ru.md](../README.ru.md) or [README.md](../README.md)
-2. [../QUICKSTART.md](../QUICKSTART.md)
-3. [INSTALL_ru.md](INSTALL_ru.md) or [INSTALL_en.md](INSTALL_en.md)
-4. [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md) if a production rollout is planned
-5. [ADMIN_ru.md](ADMIN_ru.md) / [ADMIN_en.md](ADMIN_en.md)
-6. [SECURITY_ru.md](SECURITY_ru.md) / [SECURITY_en.md](SECURITY_en.md)
-7. [TROUBLESHOOTING_ru.md](TROUBLESHOOTING_ru.md) / [TROUBLESHOOTING_en.md](TROUBLESHOOTING_en.md)
-8. [ARCHITECTURE_ru.md](ARCHITECTURE_ru.md) / [ARCHITECTURE_en.md](ARCHITECTURE_en.md)
+2. [PILOT_BASELINE_ru.md](PILOT_BASELINE_ru.md) / [PILOT_BASELINE_en.md](PILOT_BASELINE_en.md) - вход в пакет pilot docs и переход к остальным документам пилота
+3. [../QUICKSTART.md](../QUICKSTART.md)
+4. [INSTALL_ru.md](INSTALL_ru.md) or [INSTALL_en.md](INSTALL_en.md)
+5. [PRODUCTION_DEPLOY.md](PRODUCTION_DEPLOY.md) if a production rollout is planned
+6. [ADMIN_ru.md](ADMIN_ru.md) / [ADMIN_en.md](ADMIN_en.md)
+7. [SECURITY_ru.md](SECURITY_ru.md) / [SECURITY_en.md](SECURITY_en.md)
+8. [TROUBLESHOOTING_ru.md](TROUBLESHOOTING_ru.md) / [TROUBLESHOOTING_en.md](TROUBLESHOOTING_en.md)
+9. [ARCHITECTURE_ru.md](ARCHITECTURE_ru.md) / [ARCHITECTURE_en.md](ARCHITECTURE_en.md)

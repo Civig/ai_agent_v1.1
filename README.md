@@ -21,14 +21,15 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 ## Reading Order
 
 1. [Documentation Map](docs/INDEX.md) — document roles and navigation
-2. [QUICKSTART.md](QUICKSTART.md) — shortest first launch path
-3. [Supported OS Matrix](docs/SUPPORTED_OS.md) — validated vs supported vs unsupported platform status
-4. [Install Guide (EN)](docs/INSTALL_en.md) or [Install Guide (RU)](docs/INSTALL_ru.md) — full installation and installer behavior
-5. [Production Deployment Guide](docs/PRODUCTION_DEPLOY.md) — production-only deltas and exposure guidance
-6. [Administration (EN)](docs/ADMIN_en.md) / [Administration (RU)](docs/ADMIN_ru.md) — day-2 operations
-7. [Security Baseline (EN)](docs/SECURITY_en.md) / [Security Baseline (RU)](docs/SECURITY_ru.md) — product security baseline
-8. [Troubleshooting (EN)](docs/TROUBLESHOOTING_en.md) / [Troubleshooting (RU)](docs/TROUBLESHOOTING_ru.md) — full diagnostics and recovery
-9. [Architecture (EN)](docs/ARCHITECTURE_en.md) / [Architecture (RU)](docs/ARCHITECTURE_ru.md) — implemented system design
+2. [Pilot Baseline (EN)](docs/PILOT_BASELINE_en.md) — pilot baseline candidate, evidence boundary, and validation status
+3. [QUICKSTART.md](QUICKSTART.md) — shortest first launch path
+4. [Supported OS Matrix](docs/SUPPORTED_OS.md) — validated vs supported vs unsupported platform status
+5. [Install Guide (EN)](docs/INSTALL_en.md) or [Install Guide (RU)](docs/INSTALL_ru.md) — full installation and installer behavior
+6. [Production Deployment Guide](docs/PRODUCTION_DEPLOY.md) — production-only deltas and exposure guidance
+7. [Administration (EN)](docs/ADMIN_en.md) / [Administration (RU)](docs/ADMIN_ru.md) — day-2 operations
+8. [Security Baseline (EN)](docs/SECURITY_en.md) / [Security Baseline (RU)](docs/SECURITY_ru.md) — product security baseline
+9. [Troubleshooting (EN)](docs/TROUBLESHOOTING_en.md) / [Troubleshooting (RU)](docs/TROUBLESHOOTING_ru.md) — full diagnostics and recovery
+10. [Architecture (EN)](docs/ARCHITECTURE_en.md) / [Architecture (RU)](docs/ARCHITECTURE_ru.md) — implemented system design
 
 ## Supported Deployment Baseline
 
@@ -46,9 +47,23 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 - GPU deployment requires separate target-host validation
 - trusted reverse-proxy SSO requires separate infrastructure/runtime validation on the final FQDN/SPN/keytab path
 
+## Pilot Baseline Summary
+
+- pilot baseline candidate: `33960581772787b162a0885bc2181f650f22a168` (`3396058`) on `main`
+- the baseline already includes supported Linux VM + Docker Compose + `install.sh`, password login, normal chat, file-chat, the read-only operator dashboard, and the uninstall/factory-reset flow
+- still not separately proven: fresh install re-validation of the exact current HEAD, GPU host validation, and real-infrastructure SSO validation
+- the pilot is meant to prove the CPU-first baseline, operator handoff readiness, and honest limitations, not to promise HA, enterprise SSO, or GPU readiness by default
+- pilot package: [docs/PILOT_BASELINE_en.md](docs/PILOT_BASELINE_en.md), [docs/PILOT_SCOPE_en.md](docs/PILOT_SCOPE_en.md), [docs/PILOT_LIMITATIONS_en.md](docs/PILOT_LIMITATIONS_en.md), [docs/PILOT_ACCEPTANCE_CHECKLIST_en.md](docs/PILOT_ACCEPTANCE_CHECKLIST_en.md), [docs/GPU_VALIDATION_PLAYBOOK_en.md](docs/GPU_VALIDATION_PLAYBOOK_en.md), [docs/PILOT_RUNBOOK_en.md](docs/PILOT_RUNBOOK_en.md)
+
 ## Documentation
 
 - [Documentation Map](docs/INDEX.md)
+- [Pilot Baseline (EN)](docs/PILOT_BASELINE_en.md)
+- [Pilot Scope (EN)](docs/PILOT_SCOPE_en.md)
+- [Pilot Limitations (EN)](docs/PILOT_LIMITATIONS_en.md)
+- [Pilot Acceptance Checklist (EN)](docs/PILOT_ACCEPTANCE_CHECKLIST_en.md)
+- [GPU Validation Playbook (EN)](docs/GPU_VALIDATION_PLAYBOOK_en.md)
+- [Pilot Runbook (EN)](docs/PILOT_RUNBOOK_en.md)
 - [Supported OS Matrix](docs/SUPPORTED_OS.md)
 - [QUICKSTART.md](QUICKSTART.md)
 - [Install Guide (EN)](docs/INSTALL_en.md)
