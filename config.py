@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     LDAP_DOMAIN: str = "your-domain.local"
     LDAP_BASE_DN: str = "dc=your-domain,dc=local"
     LDAP_NETBIOS_DOMAIN: str = "DOMAIN"
+    INSTALL_TEST_USER: str = ""
 
     KERBEROS_REALM: str = "YOUR-DOMAIN.LOCAL"
     KERBEROS_KDC: str = "your-dc-server.local"

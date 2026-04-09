@@ -775,6 +775,33 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(admin_allowed.keys()), ["phi3:mini", "llama3.1:8b"])
         self.assertEqual(list(combined_allowed.keys()), ["phi3:mini", "codellama:13b", "llama3.1:8b"])
 
+    def test_model_authorization_allows_all_policy_categories_for_configured_validation_user(self):
+        models = {
+            "phi3:mini": {"name": "phi3:mini", "description": "General"},
+            "codellama:13b": {"name": "codellama:13b", "description": "Coding"},
+            "llama3.1:8b": {"name": "llama3.1:8b", "description": "Admin"},
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            policy_root = Path(temp_dir)
+            self.write_policy_catalog(policy_root)
+            with patch.object(auth_module.settings, "MODEL_POLICY_DIR", str(policy_root)), patch.object(
+                auth_module.settings, "INSTALL_TEST_USER", "aitest"
+            ), patch.object(auth_module.settings, "MODEL_ACCESS_CODING_GROUPS", ""), patch.object(
+                auth_module.settings, "MODEL_ACCESS_ADMIN_GROUPS", ""
+            ):
+                validation_allowed = auth_module.get_allowed_models_for_user(
+                    {"username": "aitest", "groups": ["domain_users"]},
+                    models,
+                )
+                normal_allowed = auth_module.get_allowed_models_for_user(
+                    {"username": "alice", "groups": ["domain_users"]},
+                    models,
+                )
+
+        self.assertEqual(list(validation_allowed.keys()), ["phi3:mini", "codellama:13b", "llama3.1:8b"])
+        self.assertEqual(list(normal_allowed.keys()), ["phi3:mini"])
+
     def test_model_authorization_fails_closed_when_policy_catalog_is_missing(self):
         models = {"phi3:mini": {"name": "phi3:mini", "description": "General"}}
 
@@ -841,6 +868,30 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["key"] for item in payload], ["phi3:mini", "codellama:13b"])
+
+    async def test_api_models_returns_all_baseline_policy_models_for_configured_validation_user(self):
+        models = {
+            "phi3:mini": {"name": "phi3:mini", "description": "General", "size": "1", "status": "active"},
+            "codellama:13b": {"name": "codellama:13b", "description": "Coding", "size": "2", "status": "active"},
+            "llama3.1:8b": {"name": "llama3.1:8b", "description": "Admin", "size": "3", "status": "active"},
+        }
+        gateway = types.SimpleNamespace(set_model_catalog=AsyncMock(return_value=None))
+        request = types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace(llm_gateway=gateway)))
+        current_user = {"username": "aitest", "groups": ["domain_users"], "auth_source": "password"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            policy_root = Path(temp_dir)
+            self.write_policy_catalog(policy_root)
+            with patch.object(app_module.settings, "get_available_models", return_value=models), patch.object(
+                auth_module.settings, "MODEL_POLICY_DIR", str(policy_root)
+            ), patch.object(auth_module.settings, "INSTALL_TEST_USER", "aitest"), patch.object(
+                auth_module.settings, "MODEL_ACCESS_CODING_GROUPS", ""
+            ), patch.object(auth_module.settings, "MODEL_ACCESS_ADMIN_GROUPS", ""):
+                response = await app_module.get_available_models(request, current_user=current_user)
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["key"] for item in payload], ["phi3:mini", "codellama:13b", "llama3.1:8b"])
 
     async def test_switch_model_rejects_disallowed_model_for_general_user(self):
         models = {

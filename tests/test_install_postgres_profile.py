@@ -87,6 +87,32 @@ class InstallPostgresProfileTests(unittest.TestCase):
         )
         return (temp_root / "deploy" / "krb5.conf").read_text(encoding="utf-8")
 
+    def _run_validate_smoke_test_model_contract(
+        self,
+        temp_dir: str,
+        *,
+        default_model: str,
+        test_admin_user: str,
+    ) -> subprocess.CompletedProcess[str]:
+        temp_root = self._copy_install_fixture(temp_dir)
+        shell_script = textwrap.dedent(
+            """
+            set -Eeuo pipefail
+            cd "$1"
+            export INSTALL_SH_SOURCE_ONLY=1
+            source ./install.sh
+            DEFAULT_MODEL="$2"
+            TEST_ADMIN_USER="$3"
+            validate_smoke_test_model_contract
+            """
+        )
+        return subprocess.run(
+            ["bash", "-lc", shell_script, "bash", str(temp_root), default_model, test_admin_user],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
     @staticmethod
     def _get_env_value(env_text: str, key: str) -> str | None:
         prefix = f"{key}="
@@ -168,6 +194,37 @@ class InstallPostgresProfileTests(unittest.TestCase):
             krb5_text = self._run_write_krb5_conf(temp_dir, ldap_gssapi_service_host="srv-ad")
 
         self.assertIn("dns_canonicalize_hostname = false", krb5_text)
+
+    def test_smoke_validation_user_allows_curated_installer_model(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_validate_smoke_test_model_contract(
+                temp_dir,
+                default_model="qwen2.5-coder:7b",
+                test_admin_user="aitest",
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+    def test_smoke_validation_user_rejects_custom_model_outside_curated_catalog(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_validate_smoke_test_model_contract(
+                temp_dir,
+                default_model="qwen2.5:7b",
+                test_admin_user="aitest",
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("outside the curated installer catalog", result.stdout)
+
+    def test_custom_model_stays_allowed_when_smoke_validation_user_is_not_configured(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_validate_smoke_test_model_contract(
+                temp_dir,
+                default_model="qwen2.5:7b",
+                test_admin_user="",
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
 
 if __name__ == "__main__":

@@ -386,6 +386,13 @@ def get_configured_model_access_groups_for_category(category_key: str) -> set[st
     return set(getattr(settings, settings_attr, ()) or ())
 
 
+def is_validation_user(user_info: Dict[str, Any]) -> bool:
+    configured_validation_user = normalize_username(getattr(settings, "INSTALL_TEST_USER", ""))
+    if not configured_validation_user:
+        return False
+    return normalize_username(str(user_info.get("username") or "")) == configured_validation_user
+
+
 def load_model_policy_catalog(policy_root: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
     root = Path(policy_root or settings.model_policy_dir)
     if not root.exists() or not root.is_dir():
@@ -456,6 +463,9 @@ def get_allowed_model_categories_for_user(
     catalog = policy_catalog or load_model_policy_catalog()
     if not catalog:
         return []
+
+    if is_validation_user(user_info):
+        return list(catalog.keys())
 
     groups_lower = set(_groups_lower(user_info))
     allowed_categories: list[str] = []

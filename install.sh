@@ -1114,6 +1114,20 @@ qwen2.5:14b|Qwen 2.5 14B|Heavy admin-tier model for stronger reasoning and long-
 EOF
 }
 
+is_model_in_installer_catalog() {
+    local target_model="$1"
+    local model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint
+
+    while IFS='|' read -r model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint; do
+        [[ -n "${model_id}" ]] || continue
+        if [[ "${model_id}" == "${target_model}" ]]; then
+            return 0
+        fi
+    done < <(model_catalog_records)
+
+    return 1
+}
+
 print_model_catalog() {
     local index=1
     local model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint
@@ -1208,6 +1222,18 @@ prompt_default_model_selection() {
     DOWNLOAD_DEFAULT_MODEL_NOW="$(prompt_boolean_with_default "Download selected model now so chat is ready immediately / Скачать выбранную модель сейчас, чтобы чат был готов сразу (example: y)" "true")"
     print_info "Selected default model: ${DEFAULT_MODEL}"
     print_info "Model pre-pull requested: ${DOWNLOAD_DEFAULT_MODEL_NOW}"
+}
+
+validate_smoke_test_model_contract() {
+    if [[ -z "${TEST_ADMIN_USER}" ]]; then
+        return 0
+    fi
+
+    if is_model_in_installer_catalog "${DEFAULT_MODEL}"; then
+        return 0
+    fi
+
+    die "Selected default model '${DEFAULT_MODEL}' is outside the curated installer catalog and cannot be used with smoke validation user '${TEST_ADMIN_USER}'. Choose a catalog baseline model or leave the smoke user blank."
 }
 
 collect_configuration() {
@@ -1324,6 +1350,7 @@ collect_configuration() {
     KERBEROS_REALM="${DOMAIN^^}"
     LDAP_SERVER_URL="ldap://${LDAP_SERVER_HOST}"
     prompt_default_model_selection "${existing_default_model}"
+    validate_smoke_test_model_contract
 
     print_info "Configuration summary"
     printf "  DOMAIN=%s\n" "${DOMAIN}"
