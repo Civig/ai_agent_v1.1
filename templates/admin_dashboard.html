@@ -6,24 +6,28 @@
 <style>
     :root {
         --dash-bg:
-            radial-gradient(circle at top left, rgba(41, 140, 255, 0.18), transparent 28%),
-            radial-gradient(circle at 85% 0%, rgba(66, 214, 189, 0.12), transparent 24%),
-            linear-gradient(180deg, #07101d 0%, #09131f 42%, #06111b 100%);
-        --dash-panel: rgba(10, 18, 31, 0.9);
-        --dash-panel-2: rgba(15, 27, 43, 0.86);
-        --dash-panel-3: rgba(9, 16, 27, 0.76);
-        --dash-border: rgba(136, 163, 196, 0.16);
-        --dash-border-strong: rgba(136, 163, 196, 0.24);
-        --dash-text: #edf5ff;
-        --dash-muted: #8ea0b8;
-        --dash-accent: #56d0ff;
-        --dash-accent-2: #54ddb6;
-        --dash-success: #2edc8e;
-        --dash-warn: #ffcb57;
-        --dash-danger: #ff7289;
-        --dash-neutral: #8fa1b8;
-        --dash-shadow: 0 28px 90px rgba(0, 0, 0, 0.34);
-        --dash-glow: 0 0 0 1px rgba(86, 208, 255, 0.1), 0 18px 50px rgba(13, 47, 90, 0.32);
+            radial-gradient(circle at top left, rgba(70, 130, 255, 0.16), transparent 22%),
+            radial-gradient(circle at 88% 0%, rgba(65, 198, 170, 0.11), transparent 24%),
+            linear-gradient(180deg, #07111c 0%, #091320 46%, #07111a 100%);
+        --dash-panel: rgba(9, 16, 27, 0.92);
+        --dash-panel-soft: rgba(12, 22, 36, 0.88);
+        --dash-panel-strong: rgba(15, 27, 43, 0.94);
+        --dash-border: rgba(132, 154, 188, 0.14);
+        --dash-border-strong: rgba(132, 154, 188, 0.24);
+        --dash-text: #edf4ff;
+        --dash-muted: #95a7bf;
+        --dash-muted-strong: #b9c6d8;
+        --dash-accent: #62c7ff;
+        --dash-accent-soft: rgba(98, 199, 255, 0.12);
+        --dash-success: #39d28c;
+        --dash-warn: #f2c15f;
+        --dash-danger: #ff7287;
+        --dash-neutral: #89a0bc;
+        --dash-shadow: 0 26px 90px rgba(0, 0, 0, 0.34);
+        --dash-shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.22);
+        --dash-radius-xl: 28px;
+        --dash-radius-lg: 22px;
+        --dash-radius-md: 16px;
     }
 
     body {
@@ -36,7 +40,7 @@
 
     .dashboard-shell {
         display: grid;
-        grid-template-columns: minmax(250px, 284px) minmax(0, 1fr);
+        grid-template-columns: minmax(250px, 290px) minmax(0, 1fr);
         gap: 1.25rem;
         align-items: start;
     }
@@ -44,7 +48,7 @@
     .panel {
         background: var(--dash-panel);
         border: 1px solid var(--dash-border);
-        border-radius: 26px;
+        border-radius: var(--dash-radius-xl);
         box-shadow: var(--dash-shadow);
         overflow: hidden;
     }
@@ -52,17 +56,22 @@
     .dashboard-sidebar {
         position: sticky;
         top: 1rem;
-        padding: 1.35rem;
         display: grid;
-        gap: 1.35rem;
+        gap: 1.25rem;
+        padding: 1.35rem;
         background:
-            linear-gradient(180deg, rgba(15, 27, 43, 0.96), rgba(9, 16, 27, 0.96)),
+            linear-gradient(180deg, rgba(15, 27, 43, 0.96), rgba(8, 15, 25, 0.94)),
             var(--dash-panel);
     }
 
-    .sidebar-brand {
+    .sidebar-brand,
+    .sidebar-nav,
+    .sidebar-user {
         display: grid;
-        gap: 0.75rem;
+        gap: 0.72rem;
+    }
+
+    .sidebar-brand {
         padding-bottom: 1rem;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     }
@@ -72,13 +81,13 @@
         align-items: center;
         gap: 0.55rem;
         width: fit-content;
-        padding: 0.42rem 0.78rem;
+        padding: 0.42rem 0.82rem;
         border-radius: 999px;
-        background: rgba(86, 208, 255, 0.1);
+        background: var(--dash-accent-soft);
         color: var(--dash-accent);
-        text-transform: uppercase;
-        letter-spacing: 0.09em;
         font-size: 0.78rem;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
     }
 
     .brand-mark {
@@ -90,20 +99,15 @@
     }
 
     .brand-title {
-        font-size: 1.38rem;
+        font-size: 1.42rem;
         letter-spacing: -0.04em;
-        line-height: 1.1;
+        line-height: 1.08;
     }
 
     .brand-text {
         color: var(--dash-muted);
         font-size: 0.92rem;
-        line-height: 1.45;
-    }
-
-    .sidebar-nav {
-        display: grid;
-        gap: 0.55rem;
+        line-height: 1.5;
     }
 
     .sidebar-section-label {
@@ -111,15 +115,14 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         font-size: 0.78rem;
-        margin-bottom: 0.1rem;
     }
 
     .nav-button {
         width: 100%;
         border: 1px solid transparent;
+        border-radius: 18px;
         background: rgba(255, 255, 255, 0.02);
         color: var(--dash-text);
-        border-radius: 18px;
         padding: 0.95rem 1rem;
         text-align: left;
         cursor: pointer;
@@ -131,18 +134,18 @@
     .nav-button:hover,
     .nav-button:focus-visible {
         transform: translateY(-1px);
-        border-color: rgba(86, 208, 255, 0.22);
-        background: rgba(86, 208, 255, 0.08);
-        box-shadow: var(--dash-glow);
+        border-color: rgba(98, 199, 255, 0.24);
+        background: rgba(98, 199, 255, 0.08);
+        box-shadow: 0 0 0 1px rgba(98, 199, 255, 0.08), 0 18px 40px rgba(10, 36, 70, 0.24);
         outline: none;
     }
 
     .nav-button.is-active {
-        border-color: rgba(86, 208, 255, 0.28);
+        border-color: rgba(98, 199, 255, 0.3);
         background:
-            linear-gradient(135deg, rgba(86, 208, 255, 0.14), rgba(84, 221, 182, 0.1)),
+            linear-gradient(135deg, rgba(98, 199, 255, 0.14), rgba(58, 210, 146, 0.08)),
             rgba(255, 255, 255, 0.02);
-        box-shadow: var(--dash-glow);
+        box-shadow: 0 0 0 1px rgba(98, 199, 255, 0.08), 0 18px 40px rgba(10, 36, 70, 0.26);
     }
 
     .nav-label {
@@ -154,18 +157,16 @@
     .nav-detail {
         color: var(--dash-muted);
         font-size: 0.84rem;
-        line-height: 1.35;
+        line-height: 1.4;
     }
 
     .sidebar-user {
         margin-top: auto;
         padding: 1rem;
-        border-radius: 22px;
-        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: var(--dash-radius-lg);
         background:
-            linear-gradient(180deg, rgba(17, 30, 48, 0.92), rgba(10, 19, 31, 0.92));
-        display: grid;
-        gap: 0.35rem;
+            linear-gradient(180deg, rgba(16, 28, 45, 0.92), rgba(9, 16, 27, 0.92));
+        border: 1px solid rgba(255, 255, 255, 0.06);
     }
 
     .sidebar-user-label {
@@ -183,12 +184,12 @@
     .sidebar-user-meta {
         color: var(--dash-muted);
         font-size: 0.84rem;
-        line-height: 1.4;
+        line-height: 1.45;
     }
 
     .dashboard-main {
         display: grid;
-        gap: 1.15rem;
+        gap: 1.2rem;
         min-width: 0;
     }
 
@@ -206,13 +207,13 @@
         align-items: end;
         justify-content: space-between;
         gap: 1rem;
-        padding: 1.4rem 1.5rem;
-        border-radius: 28px;
+        padding: 1.45rem 1.5rem;
+        border-radius: var(--dash-radius-xl);
         border: 1px solid var(--dash-border);
         background:
-            linear-gradient(135deg, rgba(15, 29, 47, 0.94), rgba(10, 18, 31, 0.88)),
+            linear-gradient(135deg, rgba(15, 29, 47, 0.96), rgba(9, 17, 28, 0.9)),
             var(--dash-panel);
-        box-shadow: var(--dash-shadow);
+        box-shadow: var(--dash-shadow-soft);
         position: relative;
         overflow: hidden;
     }
@@ -220,102 +221,99 @@
     .view-header::after {
         content: "";
         position: absolute;
-        inset: auto -3rem -4rem auto;
-        width: 18rem;
-        height: 18rem;
-        border-radius: 999px;
-        background: radial-gradient(circle, rgba(86, 208, 255, 0.16), transparent 68%);
+        inset: auto -12% -50% auto;
+        width: 280px;
+        height: 280px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(98, 199, 255, 0.12), transparent 70%);
         pointer-events: none;
     }
 
-    .view-header-copy {
+    .view-header-copy,
+    .view-aside-card {
         display: grid;
         gap: 0.55rem;
-        max-width: 52rem;
-    }
-
-    .view-kicker {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        width: fit-content;
-        padding: 0.36rem 0.76rem;
-        border-radius: 999px;
-        background: rgba(84, 221, 182, 0.08);
-        color: var(--dash-accent-2);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-size: 0.79rem;
-    }
-
-    .view-title {
-        font-size: clamp(2rem, 4vw, 2.7rem);
-        line-height: 1.02;
-        letter-spacing: -0.05em;
-    }
-
-    .view-description {
-        color: var(--dash-muted);
-        font-size: 0.95rem;
-        line-height: 1.45;
-    }
-
-    .view-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.7rem;
-    }
-
-    .meta-pill {
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 999px;
-        color: var(--dash-muted);
-        padding: 0.52rem 0.82rem;
-        font-size: 0.88rem;
-    }
-
-    .view-aside {
-        display: grid;
-        gap: 0.7rem;
-        min-width: 16rem;
+        position: relative;
         z-index: 1;
     }
 
-    .view-aside-card {
-        padding: 1rem 1.05rem;
-        border-radius: 20px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        display: grid;
-        gap: 0.3rem;
-    }
-
-    .view-aside-label {
-        color: var(--dash-muted);
+    .view-kicker,
+    .section-kicker,
+    .hero-kicker {
+        color: var(--dash-accent);
         font-size: 0.78rem;
-        text-transform: uppercase;
         letter-spacing: 0.08em;
+        text-transform: uppercase;
     }
 
-    .view-aside-value {
-        font-size: 1.05rem;
-        font-weight: 700;
+    .view-title,
+    .section-title,
+    .hero-title {
+        margin: 0;
+        font-size: 1.55rem;
+        letter-spacing: -0.04em;
+        line-height: 1.08;
     }
 
+    .view-description,
+    .section-description,
+    .hero-subtitle,
+    .hero-meaning,
+    .event-card-detail,
+    .alert-detail,
+    .resource-footnote,
+    .snapshot-detail,
+    .timeline-detail,
+    .events-empty-text,
+    .resource-detail,
+    .queue-help,
+    .summary-detail,
+    .kpi-meta,
+    .definition-text,
+    .table-secondary,
+    .section-note,
     .view-aside-help {
         color: var(--dash-muted);
-        font-size: 0.84rem;
-        line-height: 1.35;
+        line-height: 1.45;
     }
 
-    .overview-grid,
+    .view-meta,
+    .hero-meta,
+    .status-panel-badges,
+    .status-detail-grid,
+    .resource-toolbar,
+    .timeline-toolbar,
+    .events-toolbar,
+    .trend-toolbar,
+    .title-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+    }
+
+    .meta-pill,
+    .status-badge,
+    .table-badge,
+    .resource-state,
+    .event-severity-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 32px;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        letter-spacing: 0.02em;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(255, 255, 255, 0.04);
+    }
+
     .hero-grid,
-    .dual-grid,
+    .overview-lower-grid,
+    .resource-overview-grid,
+    .queue-summary,
     .table-grid,
-    .summary-strip,
-    .kpi-grid,
-    .resource-grid,
     .resource-aux-grid,
     .history-grid,
     .event-grid {
@@ -324,15 +322,96 @@
     }
 
     .hero-grid {
-        grid-template-columns: 1.2fr 0.8fr;
+        grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
     }
 
-    .dual-grid {
-        grid-template-columns: 1.15fr 0.85fr;
+    .hero-panel,
+    .status-panel,
+    .section-panel,
+    .resource-panel,
+    .table-panel,
+    .history-panel,
+    .events-panel,
+    .trend-panel {
+        padding: 1.35rem 1.4rem;
+        display: grid;
+        gap: 1rem;
     }
 
-    .table-grid {
-        grid-template-columns: 1fr;
+    .hero-panel {
+        background:
+            linear-gradient(135deg, rgba(18, 34, 55, 0.97), rgba(9, 16, 27, 0.94)),
+            var(--dash-panel-strong);
+    }
+
+    .hero-panel::after {
+        content: "";
+        position: absolute;
+        display: none;
+    }
+
+    .status-panel {
+        background:
+            linear-gradient(180deg, rgba(14, 26, 43, 0.97), rgba(8, 15, 25, 0.94)),
+            var(--dash-panel);
+    }
+
+    .status-panel-label,
+    .view-aside-label,
+    .resource-label,
+    .timeline-label,
+    .snapshot-label,
+    .summary-label,
+    .kpi-label,
+    .queue-key,
+    .runtime-key,
+    .event-row-label,
+    .resource-secondary-title,
+    .section-head {
+        color: var(--dash-muted);
+        font-size: 0.82rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    .status-panel-title,
+    .view-aside-value,
+    .resource-value,
+    .timeline-title,
+    .snapshot-value,
+    .summary-value,
+    .kpi-value,
+    .runtime-value {
+        font-size: 1.32rem;
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        color: var(--dash-text);
+    }
+
+    .status-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .status-detail,
+    .trend-stat,
+    .resource-secondary-row {
+        display: grid;
+        gap: 0.28rem;
+        padding: 0.82rem 0.9rem;
+        border-radius: var(--dash-radius-md);
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .summary-strip,
+    .kpi-grid,
+    .queue-overview,
+    .runtime-list,
+    .history-snapshot-grid,
+    .history-chart-grid {
+        display: grid;
+        gap: 0.9rem;
     }
 
     .summary-strip {
@@ -340,439 +419,305 @@
     }
 
     .kpi-grid {
-        grid-template-columns: repeat(7, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
     }
 
-    .resource-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .resource-aux-grid {
-        grid-template-columns: 1.2fr 0.8fr;
-    }
-
-    .history-grid,
-    .event-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .hero-panel,
-    .status-panel,
-    .section-panel,
-    .table-panel,
-    .resource-panel,
-    .history-panel,
-    .events-panel {
-        padding: 1.5rem;
-    }
-
-    .hero-panel,
-    .resource-panel,
-    .history-panel,
-    .events-panel {
-        position: relative;
-    }
-
-    .hero-panel::after,
-    .resource-panel::after,
-    .history-panel::after,
-    .events-panel::after {
-        content: "";
-        position: absolute;
-        inset: auto -2rem -3rem auto;
-        width: 15rem;
-        height: 15rem;
-        border-radius: 999px;
-        background: radial-gradient(circle, rgba(86, 208, 255, 0.14), transparent 70%);
-        pointer-events: none;
-    }
-
-    .hero-eyebrow,
-    .section-kicker {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.38rem 0.78rem;
-        border-radius: 999px;
-        background: rgba(86, 208, 255, 0.12);
-        color: var(--dash-accent);
-        font-size: 0.8rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-    }
-
-    .hero-title {
-        margin-top: 0.95rem;
-        font-size: clamp(2.1rem, 4vw, 2.8rem);
-        line-height: 1.03;
-        letter-spacing: -0.05em;
-    }
-
-    .hero-subtitle {
-        margin-top: 0.75rem;
-        max-width: 38rem;
-        color: var(--dash-muted);
-        font-size: 0.96rem;
-    }
-
-    .hero-meaning {
-        margin-top: 1rem;
-        padding: 0.85rem 0.95rem;
-        border-radius: 18px;
-        background: var(--dash-panel-2);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        color: var(--dash-text);
-        font-size: 0.92rem;
-    }
-
-    .hero-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.8rem;
-        margin-top: 1rem;
-    }
-
-    .status-panel {
-        display: grid;
-        gap: 1rem;
-        align-content: start;
-    }
-
-    .status-panel-label {
-        color: var(--dash-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-size: 0.8rem;
-    }
-
-    .status-panel-title {
-        font-size: 1.9rem;
-        font-weight: 700;
-        letter-spacing: -0.04em;
-    }
-
-    .status-panel-badges {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.65rem;
-    }
-
-    .status-badge,
-    .table-badge,
-    .chip,
-    .resource-state,
-    .range-button {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        border-radius: 999px;
-        white-space: nowrap;
-    }
-
-    .status-badge,
-    .table-badge {
-        padding: 0.55rem 0.85rem;
-        font-size: 0.82rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-weight: 600;
-    }
-
-    .status-badge::before,
-    .table-badge::before,
-    .resource-state::before {
-        content: "";
-        width: 0.62rem;
-        height: 0.62rem;
-        border-radius: 999px;
-        background: currentColor;
-        box-shadow: 0 0 12px currentColor;
-    }
-
-    .severity-ok {
-        color: var(--dash-success);
-        background: rgba(46, 220, 142, 0.12);
-        border: 1px solid rgba(46, 220, 142, 0.22);
-    }
-
-    .severity-warn {
-        color: var(--dash-warn);
-        background: rgba(255, 203, 87, 0.12);
-        border: 1px solid rgba(255, 203, 87, 0.22);
-    }
-
-    .severity-critical {
-        color: var(--dash-danger);
-        background: rgba(255, 114, 137, 0.12);
-        border: 1px solid rgba(255, 114, 137, 0.22);
-    }
-
-    .severity-neutral {
-        color: var(--dash-neutral);
-        background: rgba(143, 161, 184, 0.12);
-        border: 1px solid rgba(143, 161, 184, 0.2);
-    }
-
-    .status-support-text {
-        color: var(--dash-muted);
-        font-size: 0.9rem;
-        line-height: 1.4;
-    }
-
-    .status-detail-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0.8rem;
-    }
-
-    .status-detail,
     .summary-card,
     .kpi-card,
+    .queue-card,
+    .runtime-card,
+    .snapshot-card,
+    .history-chart-card,
     .resource-card,
-    .timeline-card,
-    .events-table-shell,
-    .resource-secondary-card {
-        background: var(--dash-panel);
-        border: 1px solid var(--dash-border);
-        border-radius: 20px;
-        box-shadow: var(--dash-shadow);
-        padding: 1.1rem;
-    }
-
-    .status-detail {
-        background: var(--dash-panel-2);
+    .resource-secondary-card,
+    .event-card {
         display: grid;
-        gap: 0.4rem;
-    }
-
-    .status-detail span,
-    .summary-label,
-    .kpi-label,
-    .resource-label,
-    .timeline-label,
-    .events-table-label {
-        color: var(--dash-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-size: 0.78rem;
-    }
-
-    .status-detail strong,
-    .summary-value,
-    .kpi-value,
-    .resource-value,
-    .timeline-title,
-    .events-empty-title {
-        font-size: 1.08rem;
-        font-weight: 700;
-        letter-spacing: -0.03em;
-    }
-
-    .summary-card {
-        background: var(--dash-panel-2);
-    }
-
-    .summary-value,
-    .kpi-value,
-    .resource-value {
-        margin-top: 0.7rem;
-        font-size: 1.6rem;
-        font-weight: 700;
-        letter-spacing: -0.04em;
-    }
-
-    .summary-detail,
-    .kpi-meta,
-    .resource-detail,
-    .resource-footnote,
-    .timeline-detail,
-    .events-empty-text,
-    .events-table-caption,
-    .section-description,
-    .section-note,
-    .alert-detail,
-    .definition-text,
-    .runtime-help,
-    .queue-help {
-        margin-top: 0.55rem;
-        color: var(--dash-muted);
-        font-size: 0.86rem;
-        line-height: 1.4;
+        gap: 0.45rem;
+        min-width: 0;
+        padding: 1rem;
+        border-radius: var(--dash-radius-lg);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        background:
+            linear-gradient(180deg, rgba(18, 31, 49, 0.92), rgba(9, 16, 27, 0.92));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
     }
 
     .kpi-card {
-        position: relative;
-        overflow: hidden;
-        display: grid;
-        gap: 0.35rem;
+        min-height: 150px;
     }
 
-    .kpi-card::before {
-        content: "";
-        position: absolute;
-        inset: 0 auto 0 0;
-        width: 4px;
-        background: currentColor;
-        opacity: 0.95;
-    }
-
-    .section-head {
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-        margin-bottom: 0.85rem;
-    }
-
-    .section-title {
-        font-size: 1.32rem;
-        letter-spacing: -0.03em;
-    }
-
-    .title-row,
     .kpi-head,
-    .resource-card-head,
-    .timeline-head,
-    .events-head {
+    .queue-card-head,
+    .runtime-card-head,
+    .history-chart-head,
+    .resource-card-head {
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        gap: 0.6rem;
+        align-items: start;
+        gap: 0.75rem;
+    }
+
+    .resource-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.95rem;
+    }
+
+    .resource-card {
+        min-height: 150px;
+    }
+
+    .resource-visual {
+        margin-top: 0.35rem;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        overflow: hidden;
+    }
+
+    .resource-visual span {
+        display: block;
+        width: var(--telemetry-fill, 0%);
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--dash-accent), #39d28c);
+    }
+
+    .severity-ok {
+        border-color: rgba(57, 210, 140, 0.18);
+    }
+
+    .severity-ok .status-badge,
+    .severity-ok .table-badge,
+    .status-badge.severity-ok,
+    .table-badge.severity-ok,
+    .resource-state.severity-ok,
+    .event-severity-badge.severity-ok {
+        color: var(--dash-success);
+        border-color: rgba(57, 210, 140, 0.22);
+        background: rgba(57, 210, 140, 0.1);
+    }
+
+    .severity-warn {
+        border-color: rgba(242, 193, 95, 0.18);
+    }
+
+    .severity-warn .status-badge,
+    .severity-warn .table-badge,
+    .status-badge.severity-warn,
+    .table-badge.severity-warn,
+    .resource-state.severity-warn,
+    .event-severity-badge.severity-warn {
+        color: var(--dash-warn);
+        border-color: rgba(242, 193, 95, 0.22);
+        background: rgba(242, 193, 95, 0.1);
+    }
+
+    .severity-critical {
+        border-color: rgba(255, 114, 135, 0.2);
+    }
+
+    .severity-critical .status-badge,
+    .severity-critical .table-badge,
+    .status-badge.severity-critical,
+    .table-badge.severity-critical,
+    .resource-state.severity-critical,
+    .event-severity-badge.severity-critical {
+        color: var(--dash-danger);
+        border-color: rgba(255, 114, 135, 0.22);
+        background: rgba(255, 114, 135, 0.1);
+    }
+
+    .severity-neutral .status-badge,
+    .severity-neutral .table-badge,
+    .status-badge.severity-neutral,
+    .table-badge.severity-neutral,
+    .resource-state.severity-neutral,
+    .event-severity-badge.severity-neutral {
+        color: var(--dash-neutral);
+        border-color: rgba(137, 160, 188, 0.18);
+        background: rgba(137, 160, 188, 0.1);
     }
 
     .info-chip {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 1.2rem;
-        height: 1.2rem;
+        width: 1.3rem;
+        height: 1.3rem;
         border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--dash-muted);
-        font-size: 0.74rem;
-        font-weight: 700;
-        cursor: help;
-        flex: 0 0 auto;
-    }
-
-    .help-drawer {
         border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 18px;
-        background: var(--dash-panel-2);
-        padding: 0.9rem 1rem;
-    }
-
-    .help-drawer summary {
-        list-style: none;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        font-weight: 600;
-    }
-
-    .help-drawer summary::-webkit-details-marker {
-        display: none;
-    }
-
-    .help-drawer[open] summary {
-        margin-bottom: 0.9rem;
-    }
-
-    .help-drawer-summary {
         color: var(--dash-muted);
-        font-size: 0.88rem;
-        font-weight: 400;
+        font-size: 0.78rem;
     }
 
+    .trend-panel {
+        gap: 1.1rem;
+    }
+
+    .trend-toolbar {
+        justify-content: space-between;
+        align-items: start;
+    }
+
+    .pill-switch {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        padding: 0.38rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .pill-button,
+    .range-button,
+    .event-filter-button {
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--dash-muted-strong);
+        padding: 0.48rem 0.82rem;
+        cursor: pointer;
+    }
+
+    .pill-button.is-active,
+    .range-button.is-active,
+    .event-filter-button.is-active {
+        background: rgba(98, 199, 255, 0.12);
+        border-color: rgba(98, 199, 255, 0.22);
+        color: var(--dash-text);
+    }
+
+    .trend-summary {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+        gap: 1rem;
+        align-items: stretch;
+    }
+
+    .trend-primary,
+    .trend-side {
+        display: grid;
+        gap: 0.6rem;
+        padding: 1rem;
+        border-radius: var(--dash-radius-lg);
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .trend-value {
+        font-size: 2.1rem;
+        letter-spacing: -0.05em;
+        font-weight: 800;
+    }
+
+    .trend-chart-shell {
+        padding: 1rem;
+        border-radius: var(--dash-radius-lg);
+        background:
+            linear-gradient(180deg, rgba(17, 31, 49, 0.9), rgba(9, 16, 27, 0.92));
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .trend-chart-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.85rem;
+        color: var(--dash-muted);
+        font-size: 0.84rem;
+    }
+
+    .trend-chart-stage {
+        min-height: 280px;
+        border-radius: 20px;
+        background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        padding: 1rem;
+        display: grid;
+        align-items: stretch;
+    }
+
+    .trend-empty,
+    .events-empty,
+    .timeline-placeholder,
+    .empty-state {
+        display: grid;
+        gap: 0.4rem;
+        place-items: center;
+        text-align: center;
+        color: var(--dash-muted);
+    }
+
+    .trend-empty {
+        align-content: center;
+        min-height: 220px;
+    }
+
+    .trend-empty-title,
+    .events-empty-title {
+        font-size: 1.05rem;
+        color: var(--dash-text);
+    }
+
+    .trend-chart-svg,
+    .history-chart-svg {
+        width: 100%;
+        height: 100%;
+        min-height: 220px;
+    }
+
+    .overview-lower-grid {
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+    }
+
+    .event-card-list,
     .alert-list,
-    .definition-list,
-    .queue-overview,
-    .queue-list,
-    .workload-grid,
-    .runtime-list,
     .events-list {
         display: grid;
-        gap: 0.8rem;
+        gap: 0.85rem;
     }
 
-    .alert-card,
-    .definition-card,
-    .queue-card,
-    .runtime-card,
-    .event-row {
-        background: var(--dash-panel-2);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 18px;
-        padding: 1rem;
+    .event-card-head,
+    .event-row-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        align-items: center;
     }
 
-    .definition-list {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .definition-card strong {
-        display: block;
-        margin-bottom: 0.45rem;
-        font-size: 0.96rem;
-    }
-
+    .event-card-title,
     .alert-title {
         display: flex;
+        gap: 0.55rem;
         align-items: center;
-        gap: 0.65rem;
-        font-weight: 700;
+        color: var(--dash-text);
+        font-weight: 600;
     }
 
     .alert-title-dot {
-        width: 0.7rem;
-        height: 0.7rem;
+        width: 0.55rem;
+        height: 0.55rem;
         border-radius: 999px;
         background: currentColor;
-        box-shadow: 0 0 12px currentColor;
     }
 
-    .queue-overview {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        margin-bottom: 0.9rem;
+    .resource-overview-grid {
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
     }
 
-    .queue-summary {
+    .resource-secondary-list,
+    .model-chip-list,
+    .queue-list,
+    .workload-grid {
         display: grid;
-        grid-template-columns: 1.1fr 0.9fr;
-        gap: 0.9rem;
+        gap: 0.75rem;
     }
 
-    .queue-card-head,
-    .runtime-card-head {
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-        align-items: baseline;
-        margin-bottom: 0.55rem;
-    }
-
-    .runtime-key-wrap {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-    }
-
-    .queue-key,
-    .runtime-key {
-        font-weight: 600;
-    }
-
-    .queue-raw {
-        color: var(--dash-muted);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.82rem;
-    }
-
-    .queue-value,
-    .runtime-value {
-        font-weight: 700;
+    .model-chip-list {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     }
 
     .chip-row {
@@ -782,416 +727,151 @@
     }
 
     .chip {
-        padding: 0.32rem 0.62rem;
-        font-size: 0.8rem;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        color: var(--dash-text);
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 0.3rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        color: var(--dash-muted-strong);
+        font-size: 0.84rem;
     }
 
     .chip--muted {
         color: var(--dash-muted);
     }
 
-    .resource-card {
-        display: grid;
-        gap: 0.55rem;
-        background:
-            linear-gradient(180deg, rgba(17, 30, 48, 0.94), rgba(10, 19, 31, 0.92));
-    }
-
-    .resource-state {
-        width: fit-content;
-        padding: 0.4rem 0.7rem;
-        font-size: 0.76rem;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        font-weight: 600;
-    }
-
-    .resource-visual {
-        margin-top: 0.3rem;
-        height: 0.45rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.06);
-        overflow: hidden;
-        position: relative;
-    }
-
-    .resource-visual > span {
-        display: block;
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, rgba(86, 208, 255, 0.85), rgba(84, 221, 182, 0.9));
-        width: var(--telemetry-fill, 0%);
-        min-width: 0;
-    }
-
-    .resource-secondary-card {
-        display: grid;
-        gap: 0.55rem;
-        background: var(--dash-panel-2);
-    }
-
-    .resource-secondary-list {
-        display: grid;
-        gap: 0.8rem;
-    }
-
-    .resource-secondary-row {
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-        align-items: start;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    .resource-secondary-row:last-child {
-        padding-bottom: 0;
-        border-bottom: 0;
-    }
-
-    .resource-secondary-title {
-        font-weight: 600;
-    }
-
-    .resource-secondary-value {
-        color: var(--dash-text);
-        font-weight: 700;
-        text-align: right;
-    }
-
-    .timeline-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-top: 0.6rem;
-        margin-bottom: 0.9rem;
-        flex-wrap: wrap;
-    }
-
-    .range-switcher {
-        display: inline-flex;
-        gap: 0.55rem;
-        padding: 0.3rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    .range-button {
-        border: 0;
-        background: transparent;
-        color: var(--dash-muted);
-        padding: 0.48rem 0.78rem;
-        cursor: pointer;
-        font-size: 0.84rem;
-        font-weight: 600;
-        transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
-    }
-
-    .range-button::before {
-        display: none;
-    }
-
-    .range-button.is-active {
-        color: var(--dash-text);
-        background: linear-gradient(135deg, rgba(86, 208, 255, 0.14), rgba(84, 221, 182, 0.14));
-        box-shadow: var(--dash-glow);
-    }
-
-    .timeline-surface {
-        min-height: 18rem;
-        border-radius: 24px;
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        background:
-            linear-gradient(180deg, rgba(13, 23, 37, 0.9), rgba(9, 16, 27, 0.92));
-        position: relative;
-        overflow: hidden;
-        display: grid;
-        place-items: center;
-    }
-
-    .timeline-surface::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background:
-            linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-        background-size: 4.5rem 100%, 100% 3.4rem;
-        opacity: 0.45;
-    }
-
-    .timeline-placeholder {
-        position: relative;
-        z-index: 1;
-        width: min(100%, 46rem);
-        padding: 1.6rem;
-        border-radius: 24px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(9, 16, 27, 0.78);
-        text-align: left;
-    }
-
-    .timeline-rail {
-        margin-top: 1.1rem;
-        height: 5rem;
-        border-radius: 18px;
-        background:
-            linear-gradient(180deg, rgba(86, 208, 255, 0.12), rgba(84, 221, 182, 0.03));
-        position: relative;
-        overflow: hidden;
-    }
-
-    .timeline-rail::before {
-        content: "";
-        position: absolute;
-        inset: 1.35rem 1rem auto 1rem;
-        height: 2px;
-        background: linear-gradient(90deg, rgba(86, 208, 255, 0.2), rgba(84, 221, 182, 0.6), rgba(86, 208, 255, 0.18));
-    }
-
-    .timeline-rail::after {
-        content: "";
-        position: absolute;
-        top: 1.05rem;
-        left: 18%;
-        width: 54%;
-        height: 0.7rem;
-        border-radius: 999px;
-        background: linear-gradient(90deg, rgba(86, 208, 255, 0.45), rgba(84, 221, 182, 0.72));
-        box-shadow: 0 0 18px rgba(86, 208, 255, 0.22);
-    }
-
-    .events-table-shell {
-        background:
-            linear-gradient(180deg, rgba(14, 26, 42, 0.94), rgba(9, 16, 27, 0.94));
-    }
-
-    .events-list {
-        margin-top: 0.9rem;
-    }
-
-    .event-row {
-        display: grid;
-        gap: 0.3rem;
-    }
-
-    .event-row-label {
-        color: var(--dash-muted);
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }
-
-    .event-row-meta {
-        color: var(--dash-muted);
-        font-size: 0.84rem;
-    }
-
-    .resource-toolbar,
-    .events-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.85rem;
-        flex-wrap: wrap;
-    }
-
-    .resource-updated,
-    .history-updated,
-    .events-meta {
-        color: var(--dash-muted);
-        font-size: 0.84rem;
-    }
-
-    .resource-live-note {
-        display: grid;
-        gap: 0.22rem;
-        color: var(--dash-muted);
-        font-size: 0.84rem;
-        line-height: 1.4;
-    }
-
-    .history-chart-grid,
-    .history-snapshot-grid {
-        display: grid;
-        gap: 0.95rem;
-    }
-
-    .history-chart-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        margin-top: 1rem;
-    }
-
-    .history-chart-card,
-    .snapshot-card {
-        padding: 1rem 1.05rem;
-        border-radius: 22px;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        background: rgba(255, 255, 255, 0.02);
-    }
-
-    .history-chart-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 0.7rem;
-        margin-bottom: 0.7rem;
-    }
-
-    .history-chart-label,
-    .snapshot-label {
-        color: var(--dash-muted);
-        font-size: 0.84rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }
-
-    .history-chart-value,
-    .snapshot-value {
-        font-size: 1.2rem;
-        font-weight: 700;
-        letter-spacing: -0.03em;
-    }
-
-    .history-chart-svg {
-        width: 100%;
-        height: 9rem;
-        border-radius: 18px;
-        background:
-            linear-gradient(180deg, rgba(86, 208, 255, 0.08), rgba(86, 208, 255, 0.01)),
-            rgba(255, 255, 255, 0.015);
-        border: 1px solid rgba(255, 255, 255, 0.04);
-        overflow: hidden;
-    }
-
-    .history-chart-empty {
-        min-height: 9rem;
-        display: grid;
-        place-items: center;
-        color: var(--dash-muted);
-        font-size: 0.9rem;
-        text-align: center;
-        padding: 1rem;
-        border-radius: 18px;
-        border: 1px dashed rgba(255, 255, 255, 0.08);
-        background: rgba(255, 255, 255, 0.02);
-    }
-
-    .timeline-slider-wrap {
-        display: grid;
-        gap: 0.55rem;
-        margin-top: 1rem;
-    }
-
-    .timeline-slider {
-        width: 100%;
-        accent-color: var(--dash-accent);
-    }
-
-    .timeline-slider-meta {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.7rem;
-        color: var(--dash-muted);
-        font-size: 0.84rem;
-    }
-
-    .history-snapshot-grid {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        margin-top: 1rem;
-    }
-
-    .snapshot-detail {
-        color: var(--dash-muted);
-        font-size: 0.84rem;
-        line-height: 1.4;
-        margin-top: 0.28rem;
-    }
-
-    .events-filter-bar {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        flex-wrap: wrap;
-    }
-
-    .event-filter-button {
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(255, 255, 255, 0.03);
-        color: var(--dash-text);
-        border-radius: 999px;
-        padding: 0.45rem 0.78rem;
-        cursor: pointer;
-        font-size: 0.82rem;
-    }
-
-    .event-filter-button.is-active {
-        border-color: rgba(86, 208, 255, 0.32);
-        background: rgba(86, 208, 255, 0.1);
-        box-shadow: var(--dash-glow);
-    }
-
-    .event-severity-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-        width: fit-content;
-        border-radius: 999px;
-        padding: 0.32rem 0.7rem;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
     .data-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.92rem;
+        min-width: 760px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 0.9rem 0.85rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        text-align: left;
+        vertical-align: top;
     }
 
     .data-table th {
-        text-align: left;
         color: var(--dash-muted);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
         font-weight: 600;
-        padding: 0.85rem 0.75rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
 
-    .data-table td {
-        padding: 0.9rem 0.75rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        vertical-align: top;
+    .table-shell,
+    .events-table-shell {
+        overflow-x: auto;
     }
 
     .table-primary {
         display: grid;
-        gap: 0.45rem;
-    }
-
-    .table-secondary {
-        color: var(--dash-muted);
-        font-size: 0.86rem;
-        line-height: 1.45;
+        gap: 0.25rem;
+        min-width: 0;
     }
 
     .mono {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.86rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        word-break: break-all;
     }
 
-    .empty-state {
+    .timeline-surface {
+        display: grid;
+        gap: 0.95rem;
+    }
+
+    .timeline-slider-wrap {
+        display: grid;
+        gap: 0.6rem;
+    }
+
+    .timeline-slider {
+        width: 100%;
+    }
+
+    .timeline-slider-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
         color: var(--dash-muted);
-        padding: 1rem 0;
+        font-size: 0.84rem;
     }
 
-    @media (max-width: 1380px) {
+    .events-filter-bar {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        padding: 0.3rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .event-row {
+        display: grid;
+        gap: 0.45rem;
+        padding: 1rem;
+        border-radius: var(--dash-radius-lg);
+        background:
+            linear-gradient(180deg, rgba(17, 31, 49, 0.9), rgba(9, 16, 27, 0.92));
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .event-row-meta,
+    .events-table-caption,
+    .resource-updated,
+    .history-updated {
+        color: var(--dash-muted);
+        font-size: 0.84rem;
+        line-height: 1.45;
+        word-break: break-word;
+    }
+
+    .help-drawer {
+        border-radius: var(--dash-radius-lg);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(255, 255, 255, 0.02);
+        padding: 0.2rem;
+    }
+
+    .help-drawer summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 1rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+    }
+
+    .help-drawer summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .help-drawer-summary {
+        color: var(--dash-muted);
+    }
+
+    .definition-list {
+        display: grid;
+        gap: 0.75rem;
+        padding: 0 1rem 1rem;
+    }
+
+    .definition-card {
+        display: grid;
+        gap: 0.35rem;
+        padding: 0.9rem 1rem;
+        border-radius: var(--dash-radius-md);
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    @media (max-width: 1320px) {
         .dashboard-shell {
             grid-template-columns: 1fr;
         }
@@ -1200,78 +880,68 @@
             position: static;
         }
 
-        .resource-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+        .hero-grid,
+        .overview-lower-grid,
+        .resource-overview-grid,
+        .table-grid,
+        .trend-summary {
+            grid-template-columns: 1fr;
         }
 
-        .history-chart-grid,
-        .history-snapshot-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-    }
-
-    @media (max-width: 1280px) {
         .kpi-grid {
             grid-template-columns: repeat(3, minmax(0, 1fr));
         }
-
-        .summary-strip,
-        .queue-overview {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .dual-grid,
-        .queue-summary,
-        .resource-aux-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .view-header {
-            grid-template-columns: 1fr;
-        }
     }
 
-    @media (max-width: 980px) {
-        .hero-grid,
-        .definition-list,
-        .resource-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .history-chart-grid,
-        .history-snapshot-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .kpi-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+    @media (max-width: 920px) {
+        .admin-dashboard {
+            padding: 1rem 0.8rem 2rem;
         }
 
         .view-header {
             padding: 1.2rem;
         }
-    }
-
-    @media (max-width: 720px) {
-        .admin-dashboard {
-            padding: 1rem 0.75rem 2.4rem;
-        }
 
         .summary-strip,
-        .kpi-grid,
+        .resource-grid,
+        .kpi-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .status-detail-grid,
-        .queue-overview {
+        .history-snapshot-grid,
+        .history-chart-grid {
             grid-template-columns: 1fr;
         }
 
-        .data-table {
-            display: block;
-            overflow-x: auto;
-            white-space: nowrap;
+        .timeline-slider-meta {
+            flex-direction: column;
+            align-items: start;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .summary-strip,
+        .resource-grid,
+        .kpi-grid,
+        .model-chip-list {
+            grid-template-columns: 1fr;
         }
 
-        .view-aside {
-            min-width: 0;
+        .panel,
+        .view-header {
+            border-radius: 22px;
+        }
+
+        .hero-panel,
+        .status-panel,
+        .section-panel,
+        .resource-panel,
+        .table-panel,
+        .history-panel,
+        .events-panel,
+        .trend-panel {
+            padding: 1.1rem;
         }
     }
 </style>
@@ -1285,7 +955,7 @@
                 <div class="brand-badge"><span class="brand-mark"></span> Monitoring Center</div>
                 <h1 class="brand-title">Operator Dashboard</h1>
                 <p class="brand-text">
-                    Read-only центр наблюдения за runtime, очередями и operational signals без управляющих действий.
+                    Read-only экран для оператора: быстро понять состояние системы, bottleneck и недавние изменения без управляющих действий.
                 </p>
             </div>
 
@@ -1293,19 +963,19 @@
                 <div class="sidebar-section-label">Разделы</div>
                 <button class="nav-button is-active" type="button" data-dashboard-tab="overview">
                     <span class="nav-label">Обзор</span>
-                    <span class="nav-detail">Текущая compact summary, воркеры, очереди и цели исполнения.</span>
+                    <span class="nav-detail">Главный статус, ключевые KPI, один основной trend и последние события.</span>
                 </button>
                 <button class="nav-button" type="button" data-dashboard-tab="resources">
-                    <span class="nav-label">Мониторинг ресурсов</span>
-                    <span class="nav-detail">CPU, RAM, GPU, сеть, очередь и активные модели в monitoring layout.</span>
+                    <span class="nav-label">Ресурсы</span>
+                    <span class="nav-detail">CPU, RAM, GPU, сеть, модели, workers, targets и operational detail.</span>
                 </button>
                 <button class="nav-button" type="button" data-dashboard-tab="history">
-                    <span class="nav-label">История нагрузки</span>
-                    <span class="nav-detail">Foundation под future timeline и 24h history без фейковых данных.</span>
+                    <span class="nav-label">История</span>
+                    <span class="nav-detail">Полная history view с диапазонами, timeline и snapshot выбранной точки.</span>
                 </button>
                 <button class="nav-button" type="button" data-dashboard-tab="events">
-                    <span class="nav-label">Журнал событий</span>
-                    <span class="nav-detail">Подготовленный read-only список под будущий backend event log.</span>
+                    <span class="nav-label">События</span>
+                    <span class="nav-detail">Полный event log с фильтром severity и честными empty states.</span>
                 </button>
             </div>
 
@@ -1323,54 +993,50 @@
                 <div class="view-header">
                     <div class="view-header-copy">
                         <div class="view-kicker">Monitoring Center</div>
-                        <h2 class="view-title">Обзор runtime и очередей</h2>
+                        <h2 class="view-title">Состояние системы за 5 секунд</h2>
                         <p class="view-description">
-                            Вкладка сохраняет текущую compact operator summary и превращает её в главный обзорный экран monitoring center.
+                            Обзор показывает только главное: в норме ли система, что её ограничивает сейчас и что происходило недавно.
                         </p>
                         <div class="view-meta">
                             <span class="meta-pill">Источник: runtime heartbeats, queues и metrics</span>
+                            <span class="meta-pill">Пользователь: {{ current_user.username }}</span>
                             <span class="meta-pill">Обновление: <span id="lastRefreshLabel">ожидание данных</span></span>
                         </div>
                     </div>
                     <div class="view-aside">
                         <div class="view-aside-card">
-                            <div class="view-aside-label">Текущая цель</div>
-                            <div class="view-aside-value">Что происходит прямо сейчас</div>
-                            <div class="view-aside-help">Быстрый ответ: всё ли штатно, есть ли запас и будет ли ждать следующий chat-запрос.</div>
+                            <div class="view-aside-label">Operator focus</div>
+                            <div class="view-aside-value">Что ограничивает систему</div>
+                            <div class="view-aside-help">Если сигналов не хватает, панель покажет это честно и не будет рисовать фальшивую уверенность.</div>
                         </div>
                     </div>
                 </div>
 
                 <section class="hero-grid">
                     <article class="panel hero-panel">
-                        <div class="hero-eyebrow">Admin Dashboard</div>
-                        <h1 class="hero-title">Управление нагрузкой</h1>
+                        <div class="hero-kicker">System health statement</div>
+                        <h1 class="hero-title" id="overallStatusTitle">Сводка загружается</h1>
                         <p class="hero-subtitle">
                             Быстрый ответ: всё ли штатно, есть ли запас и будет ли ждать следующий chat-запрос.
                         </p>
                         <div class="hero-meaning" id="heroMeaning">
-                            Собираем короткую operator summary по chat capacity, очередям и текущим ограничениям.
+                            Собираем короткую operator summary по очередям, capacity и runtime telemetry.
                         </div>
                         <div class="hero-meta">
-                            <span class="meta-pill">Пользователь: {{ current_user.username }}</span>
-                            <span class="meta-pill">Источник: runtime heartbeats, queues и metrics</span>
-                            <span class="meta-pill">Вкладка: Обзор</span>
+                            <span class="status-badge severity-neutral" id="overallStatusBadge">Ожидание</span>
+                            <span class="status-badge severity-neutral" id="schedulerHealthBadge">Планировщик: ожидание</span>
                         </div>
                     </article>
 
                     <article class="panel status-panel">
-                        <div class="status-panel-label">Состояние системы</div>
-                        <div class="status-panel-title" id="overallStatusTitle">Загрузка сводки</div>
-                        <div class="status-panel-badges">
-                            <span class="status-badge severity-neutral" id="overallStatusBadge">Ожидание</span>
-                            <span class="status-badge severity-neutral" id="schedulerHealthBadge">Планировщик: ожидание</span>
-                        </div>
-                        <p class="status-support-text" id="statusSupportText">
-                            После первого обновления здесь появится короткая operator summary без длинных пояснений.
+                        <div class="status-panel-label">Короткая интерпретация</div>
+                        <div class="status-panel-title">Что это значит для оператора</div>
+                        <p class="hero-meaning" id="statusSupportText">
+                            После первой загрузки здесь появится короткое и аккуратное объяснение без фейковых выводов.
                         </p>
                         <div class="status-detail-grid">
                             <div class="status-detail">
-                                <span>Готовность для новых chat-задач</span>
+                                <span>Готовность</span>
                                 <strong id="readinessStatusValue">ожидание</strong>
                             </div>
                             <div class="status-detail">
@@ -1378,7 +1044,7 @@
                                 <strong id="healthStatusValue">ожидание</strong>
                             </div>
                             <div class="status-detail">
-                                <span>Оценка запаса</span>
+                                <span>Свободная мощность</span>
                                 <strong id="capacityStatusValue">ожидание</strong>
                             </div>
                             <div class="status-detail">
@@ -1391,15 +1057,16 @@
 
                 <section class="panel section-panel">
                     <div class="section-head">
-                        <div class="section-kicker">Оперативная оценка</div>
-                        <h2 class="section-title">Что происходит прямо сейчас</h2>
-                        <p class="section-description">Три коротких ответа без длинной расшифровки.</p>
+                        <div>
+                            <div class="section-kicker">Оперативная оценка</div>
+                            <h2 class="section-title">Коротко о ситуации сейчас</h2>
+                        </div>
                     </div>
                     <div class="summary-strip" id="operatorSummaryStrip">
                         <article class="summary-card">
-                            <div class="summary-label">Что ограничивает систему</div>
+                            <div class="summary-label">Что ограничивает систему сейчас</div>
                             <div class="summary-value">Ожидание</div>
-                            <div class="summary-detail">Собираем компактную operator summary.</div>
+                            <div class="summary-detail">Собираем короткую operator summary.</div>
                         </article>
                         <article class="summary-card">
                             <div class="summary-label">Следующий chat-запрос</div>
@@ -1418,14 +1085,76 @@
                     <article class="kpi-card severity-neutral">
                         <div class="kpi-head">
                             <div class="kpi-label">Состояние</div>
-                            <span class="info-chip" title="Главный сигнал: всё штатно, система занята, есть очередь или данных недостаточно.">i</span>
+                            <span class="info-chip" title="Главный сигнал: всё штатно, система занята, есть очередь или данных пока недостаточно.">i</span>
                         </div>
                         <div class="kpi-value">-</div>
-                        <div class="kpi-meta">Собираем компактную сводку.</div>
+                        <div class="kpi-meta">Собираем сводку.</div>
                     </article>
                 </section>
 
-                <section class="dual-grid">
+                <section class="panel trend-panel">
+                    <div class="trend-toolbar">
+                        <div>
+                            <div class="section-kicker">Главный тренд</div>
+                            <h2 class="section-title">Один график, который объясняет динамику</h2>
+                            <p class="section-description">Переключайте метрику и диапазон, не теряя честную no-data semantics.</p>
+                        </div>
+                        <div class="pill-switch" aria-label="Trend metric">
+                            <button class="pill-button is-active" type="button" data-trend-metric="queue_depth">Queue</button>
+                            <button class="pill-button" type="button" data-trend-metric="cpu_percent">CPU</button>
+                            <button class="pill-button" type="button" data-trend-metric="ram_used_mb">RAM</button>
+                            <button class="pill-button" type="button" data-trend-metric="gpu_utilization_percent">GPU</button>
+                        </div>
+                    </div>
+
+                    <div class="trend-summary">
+                        <div class="trend-primary">
+                            <div class="status-panel-label" id="overviewTrendMetricLabel">Queue depth</div>
+                            <div class="trend-value" id="overviewTrendValue">Нет данных</div>
+                            <div class="hero-meaning" id="overviewTrendDetail">История ещё не накоплена для выбранной метрики.</div>
+                        </div>
+                        <div class="trend-side">
+                            <div class="status-panel-label">Диапазон</div>
+                            <div class="view-aside-value" id="overviewHistoryRangeLabel">24 часа</div>
+                            <div class="pill-switch" aria-label="History range">
+                                <button class="range-button" type="button" data-history-range="1h">1 час</button>
+                                <button class="range-button" type="button" data-history-range="6h">6 часов</button>
+                                <button class="range-button is-active" type="button" data-history-range="24h">24 часа</button>
+                            </div>
+                            <div class="view-aside-help" id="overviewTrendUpdatedLabel">История ещё не загружена.</div>
+                        </div>
+                    </div>
+
+                    <div class="trend-chart-shell">
+                        <div class="trend-chart-meta">
+                            <span id="overviewTrendMeta">Нет данных по history series</span>
+                            <span id="overviewTrendFootnote">Показываем только реальные telemetry points.</span>
+                        </div>
+                        <div class="trend-chart-stage" id="overviewTrendChart">
+                            <div class="trend-empty">
+                                <div class="trend-empty-title">История ещё не накоплена</div>
+                                <div class="timeline-detail">Когда backend накопит реальные samples, здесь появится главный trend без synthetic interpolation.</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="overview-lower-grid">
+                    <article class="panel section-panel">
+                        <div class="section-head">
+                            <div>
+                                <div class="section-kicker">Recent events</div>
+                                <h2 class="section-title">Последние события</h2>
+                            </div>
+                        </div>
+                        <div class="event-card-list" id="overviewRecentEventsList">
+                            <article class="event-card">
+                                <div class="event-card-title">Ожидание event log</div>
+                                <div class="event-card-detail">После первой загрузки здесь появятся только последние события без перегруза полной лентой.</div>
+                            </article>
+                        </div>
+                    </article>
+
                     <article class="panel section-panel">
                         <div class="section-head">
                             <div class="title-row">
@@ -1433,109 +1162,121 @@
                                     <div class="section-kicker">Оперативное внимание</div>
                                     <h2 class="section-title">Предупреждения</h2>
                                 </div>
-                                <span class="info-chip" title="Показываются только реальные предупреждения из текущих runtime-полей. Фейковых алармов и управляющих действий здесь нет.">i</span>
+                                <span class="info-chip" title="Панель не скрывает реальные проблемы: warnings и critical signals остаются видимыми на главном экране.">i</span>
                             </div>
-                            <p class="section-description">Только реальные сигналы, требующие внимания.</p>
                         </div>
                         <div class="alert-list" id="alertList">
-                            <div class="alert-card severity-neutral">
-                                <div class="alert-title">
-                                    <span class="alert-title-dot"></span>
-                                    Ожидание первой сводки
-                                </div>
-                                <div class="alert-detail">После первого обновления здесь появятся рекомендации для оператора.</div>
-                            </div>
+                            <article class="summary-card">
+                                <div class="summary-label">Ожидание первой сводки</div>
+                                <div class="summary-value">Нет сигналов</div>
+                                <div class="summary-detail">После первого обновления здесь появятся реальные предупреждения из runtime-полей.</div>
+                            </article>
                         </div>
                     </article>
+                </section>
+            </section>
 
-                    <article class="panel section-panel">
-                        <details class="help-drawer" id="dashboardHelpDetails">
-                            <summary>
-                                <span>Как читать панель</span>
-                                <span class="help-drawer-summary">Термины, сигналы и ограничения</span>
-                            </summary>
-                            <div class="definition-list">
-                                <div class="definition-card">
-                                    <strong>Readiness</strong>
-                                    <div class="definition-text">Показывает, может ли система сейчас принять новые chat-задачи без дополнительного ожидания.</div>
-                                </div>
-                                <div class="definition-card">
-                                    <strong>Health</strong>
-                                    <div class="definition-text">Показывает, отвечают ли базовые компоненты, даже если свободной chat-мощности сейчас мало.</div>
-                                </div>
-                                <div class="definition-card">
-                                    <strong>Worker</strong>
-                                    <div class="definition-text">Процесс, который реально забирает задачу из dispatch и доводит её до terminal state.</div>
-                                </div>
-                                <div class="definition-card">
-                                    <strong>Target</strong>
-                                    <div class="definition-text">Вычислительная цель, на которую scheduler может допустить задачу после admission.</div>
-                                </div>
-                                <div class="definition-card">
-                                    <strong>Queue depth</strong>
-                                    <div class="definition-text">Сколько задач ещё ждут admission/start и не начали выполняться.</div>
-                                </div>
-                                <div class="definition-card">
-                                    <strong>Capacity / scaling hint</strong>
-                                    <div class="definition-text">Показывают, есть ли резерв для следующего chat-запроса и можно ли честно говорить о запасе без догадок.</div>
-                                </div>
-                            </div>
-                        </details>
+            <section class="dashboard-view" data-dashboard-view="resources">
+                <div class="view-header">
+                    <div class="view-header-copy">
+                        <div class="view-kicker">Monitoring Center</div>
+                        <h2 class="view-title">Ресурсы и operational detail</h2>
+                        <p class="view-description">
+                            Подробный слой для CPU, RAM, GPU, сети, моделей, workers и targets. Здесь уже можно провалиться глубже без засорения главного экрана.
+                        </p>
+                        <div class="view-meta">
+                            <span class="meta-pill">Вкладка: Ресурсы</span>
+                            <span class="meta-pill">Live telemetry: read-only</span>
+                        </div>
+                    </div>
+                    <div class="view-aside">
+                        <div class="view-aside-card">
+                            <div class="view-aside-label">Monitoring mode</div>
+                            <div class="view-aside-value" id="resourceLastUpdated">Ожидание live telemetry</div>
+                            <div class="view-aside-help" id="resourceScopeNote">Метрики показываются только там, где их реально сообщает target runtime.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="resource-grid" id="resourceTelemetryGrid">
+                    <article class="resource-card">
+                        <div class="resource-card-head">
+                            <div class="resource-label">CPU</div>
+                            <span class="resource-state severity-neutral">Ожидание</span>
+                        </div>
+                        <div class="resource-value">Нет данных</div>
+                        <div class="resource-detail">Live telemetry ещё не загружена.</div>
+                        <div class="resource-visual"><span style="--telemetry-fill:0%"></span></div>
                     </article>
                 </section>
 
-                <section class="dual-grid">
-                    <article class="panel section-panel">
+                <section class="resource-overview-grid">
+                    <article class="panel resource-panel">
                         <div class="section-head">
-                            <div class="title-row">
+                            <div class="resource-toolbar">
                                 <div>
-                                    <div class="section-kicker">Очереди</div>
-                                    <h2 class="section-title">Очереди и backlog</h2>
+                                    <div class="section-kicker">Operational notes</div>
+                                    <h2 class="section-title">Что уже реально видно</h2>
                                 </div>
-                                <span class="info-chip" title="Очередь показывает не только размер backlog, но и его смысл: нормальная занятость, parser-only давление или уже накопление chat-задач.">i</span>
+                                <div class="resource-updated" id="resourceUpdatedLabel">Последнее обновление: нет данных</div>
                             </div>
-                            <p class="section-description">Размер и смысл текущего backlog.</p>
                         </div>
-                        <div class="queue-overview" id="queueOverview">
+                        <div class="resource-secondary-list" id="resourceSecondaryList">
+                            <div class="resource-secondary-row">
+                                <div>
+                                    <div class="resource-secondary-title">Queue pressure</div>
+                                    <div class="resource-footnote">Используем текущие runtime summary поля.</div>
+                                </div>
+                                <div class="resource-secondary-value">Ожидание</div>
+                            </div>
+                        </div>
+                        <div class="resource-secondary-card" id="resourceNoDataCard">
+                            <div class="resource-label">Текущий статус</div>
+                            <div class="resource-value">Честный placeholder</div>
+                            <div class="resource-detail">Если telemetry отсутствует, панель прямо так и говорит и не рисует фейковые цифры.</div>
+                        </div>
+                    </article>
+
+                    <article class="panel resource-panel">
+                        <div class="section-head">
+                            <div>
+                                <div class="section-kicker">Активные модели</div>
+                                <h2 class="section-title">Что сейчас reported runtime path</h2>
+                            </div>
+                        </div>
+                        <div class="model-chip-list" id="resourceModelList">
                             <article class="summary-card">
-                                <div class="summary-label">Всего задач в очередях</div>
-                                <div class="summary-value">-</div>
-                                <div class="summary-detail">Собираем queue depth.</div>
-                            </article>
-                            <article class="summary-card">
-                                <div class="summary-label">Давление очереди</div>
-                                <div class="summary-value">Ожидание</div>
-                                <div class="summary-detail">После загрузки появится объяснение, является ли очередь деградацией или нормальной занятостью.</div>
-                            </article>
-                            <article class="summary-card">
-                                <div class="summary-label">Ожидающие chat-задачи</div>
-                                <div class="summary-value">-</div>
-                                <div class="summary-detail">Сколько chat-задач ждёт admission/start.</div>
-                            </article>
-                            <article class="summary-card">
-                                <div class="summary-label">Ожидающие parser-задачи</div>
-                                <div class="summary-value">-</div>
-                                <div class="summary-detail">Сколько parser/document задач ещё не начали выполняться.</div>
+                                <div class="summary-label">Модели</div>
+                                <div class="summary-value">Нет данных</div>
+                                <div class="summary-detail">Когда target heartbeat сообщит loaded models, они появятся здесь.</div>
                             </article>
                         </div>
+                    </article>
+                </section>
+
+                <section class="resource-overview-grid">
+                    <article class="panel resource-panel">
+                        <div class="section-head">
+                            <div>
+                                <div class="section-kicker">Runtime summary</div>
+                                <h2 class="section-title">Состояние runtime</h2>
+                            </div>
+                        </div>
+                        <div class="runtime-list" id="runtimeSummary"></div>
+                    </article>
+
+                    <article class="panel resource-panel">
+                        <div class="section-head">
+                            <div>
+                                <div class="section-kicker">Очереди</div>
+                                <h2 class="section-title">Queue и backlog detail</h2>
+                            </div>
+                        </div>
+                        <div class="queue-overview" id="queueOverview"></div>
                         <div class="queue-summary">
                             <div class="queue-list" id="queueBreakdown"></div>
                             <div class="workload-grid" id="workloadBreakdown"></div>
                         </div>
-                    </article>
-
-                    <article class="panel section-panel">
-                        <div class="section-head">
-                            <div class="title-row">
-                                <div>
-                                    <div class="section-kicker">Runtime</div>
-                                    <h2 class="section-title">Состояние runtime</h2>
-                                </div>
-                                <span class="info-chip" title="Здесь собраны readiness, health, scheduler, запас мощности и reported active models.">i</span>
-                            </div>
-                            <p class="section-description">Только ключевые runtime-сигналы.</p>
-                        </div>
-                        <div class="runtime-list" id="runtimeSummary"></div>
                     </article>
                 </section>
 
@@ -1549,25 +1290,26 @@
                                 </div>
                                 <span class="info-chip" title="Таблица показывает heartbeat snapshot. Если summary сообщает активную работу, а строка выглядит idle, snapshot мог кратковременно отстать.">i</span>
                             </div>
-                            <p class="section-description">Heartbeat snapshot по worker path.</p>
                         </div>
                         <div class="section-note" id="workersSectionNote"></div>
-                        <table class="data-table" id="workersTable">
-                            <thead>
-                                <tr>
-                                    <th>Воркер</th>
-                                    <th>Пул</th>
-                                    <th>Привязка к цели</th>
-                                    <th>Тип цели</th>
-                                    <th>Активные задачи</th>
-                                    <th>Последний heartbeat</th>
-                                    <th>Состояние</th>
-                                </tr>
-                            </thead>
-                            <tbody id="workersTableBody">
-                                <tr><td colspan="7" class="empty-state">Ожидание worker heartbeat данных</td></tr>
-                            </tbody>
-                        </table>
+                        <div class="table-shell">
+                            <table class="data-table" id="workersTable">
+                                <thead>
+                                    <tr>
+                                        <th>Воркер</th>
+                                        <th>Пул</th>
+                                        <th>Привязка к цели</th>
+                                        <th>Тип цели</th>
+                                        <th>Активные задачи</th>
+                                        <th>Последний heartbeat</th>
+                                        <th>Состояние</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="workersTableBody">
+                                    <tr><td colspan="7" class="empty-state">Ожидание worker heartbeat данных</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </article>
 
                     <article class="panel table-panel">
@@ -1577,104 +1319,29 @@
                                     <div class="section-kicker">Цели исполнения</div>
                                     <h2 class="section-title">Доступные вычислительные цели</h2>
                                 </div>
-                                <span class="info-chip" title="Поддержка workload — это reported capabilities target. Наблюдаемая нагрузка выводится отдельно по worker heartbeat, чтобы не путать возможности и реальное использование.">i</span>
+                                <span class="info-chip" title="Поддержка workload и наблюдаемая нагрузка показаны отдельно, чтобы не путать capability и фактическое использование.">i</span>
                             </div>
-                            <p class="section-description">Reported capabilities и наблюдаемая нагрузка.</p>
                         </div>
                         <div class="section-note" id="targetsSectionNote"></div>
-                        <table class="data-table" id="targetsTable">
-                            <thead>
-                                <tr>
-                                    <th>Цель</th>
-                                    <th>Тип</th>
-                                    <th>Reported / наблюдаемая нагрузка</th>
-                                    <th>Базовая вместимость</th>
-                                    <th>CPU</th>
-                                    <th>Свободная RAM</th>
-                                    <th>Свободная VRAM</th>
-                                    <th>Активные модели</th>
-                                    <th>Последний heartbeat</th>
-                                </tr>
-                            </thead>
-                            <tbody id="targetsTableBody">
-                                <tr><td colspan="9" class="empty-state">Ожидание target heartbeat данных</td></tr>
-                            </tbody>
-                        </table>
-                    </article>
-                </section>
-            </section>
-
-            <section class="dashboard-view" data-dashboard-view="resources">
-                <div class="view-header">
-                    <div class="view-header-copy">
-                        <div class="view-kicker">Monitoring Center</div>
-                        <h2 class="view-title">Мониторинг ресурсов</h2>
-                        <p class="view-description">
-                            Read-only layout под CPU, RAM, GPU, сеть, очередь и активные модели. Используются только реальные runtime-поля; при отсутствии telemetry панель честно показывает no-data state.
-                        </p>
-                        <div class="view-meta">
-                            <span class="meta-pill">Вкладка: Мониторинг ресурсов</span>
-                            <span class="meta-pill">Live telemetry: read-only</span>
-                        </div>
-                    </div>
-                    <div class="view-aside">
-                        <div class="view-aside-card">
-                            <div class="view-aside-label">Monitoring mode</div>
-                            <div class="view-aside-value" id="resourceLastUpdated">Ожидание live telemetry</div>
-                            <div class="view-aside-help" id="resourceScopeNote">Метрики будут показаны только там, где их реально сообщает target runtime.</div>
-                        </div>
-                    </div>
-                </div>
-
-                <section class="resource-grid" id="resourceTelemetryGrid">
-                    <article class="resource-card">
-                        <div class="resource-card-head">
-                            <div class="resource-label">CPU</div>
-                            <span class="resource-state severity-neutral">Ожидание</span>
-                        </div>
-                        <div class="resource-value">Нет данных</div>
-                        <div class="resource-detail">Данные будут доступны после подключения live telemetry.</div>
-                        <div class="resource-visual"><span style="--telemetry-fill:0%"></span></div>
-                    </article>
-                </section>
-
-                <section class="resource-aux-grid">
-                    <article class="panel resource-panel">
-                        <div class="section-head">
-                            <div class="resource-toolbar">
-                                <div>
-                                    <div class="section-kicker">Monitoring notes</div>
-                                    <h2 class="section-title">Что уже реально видно</h2>
-                                </div>
-                                <div class="resource-updated" id="resourceUpdatedLabel">Последнее обновление: нет данных</div>
-                            </div>
-                            <p class="section-description">Где данные уже приходят из текущего summary API, а где ещё нужен отдельный telemetry backend.</p>
-                        </div>
-                        <div class="resource-secondary-list" id="resourceSecondaryList">
-                            <div class="resource-secondary-row">
-                                <div>
-                                    <div class="resource-secondary-title">Queue pressure</div>
-                                    <div class="resource-footnote">Используем текущие runtime summary поля.</div>
-                                </div>
-                                <div class="resource-secondary-value">Ожидание</div>
-                            </div>
-                        </div>
-                    </article>
-
-                    <article class="panel resource-panel">
-                        <div class="section-head">
-                            <div class="title-row">
-                                <div>
-                                    <div class="section-kicker">Готовность telemetry</div>
-                                    <h2 class="section-title">No-data policy</h2>
-                                </div>
-                            </div>
-                            <p class="section-description">Никаких фейковых графиков и цифр. Если backend ещё не отдаёт signal, панель прямо так и говорит.</p>
-                        </div>
-                        <div class="resource-secondary-card" id="resourceNoDataCard">
-                            <div class="resource-label">Текущий статус</div>
-                            <div class="resource-value">Честный placeholder</div>
-                            <div class="resource-detail">CPU/RAM/GPU/сеть будут богаче после подключения live telemetry и history pipeline.</div>
+                        <div class="table-shell">
+                            <table class="data-table" id="targetsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Цель</th>
+                                        <th>Тип</th>
+                                        <th>Reported / наблюдаемая нагрузка</th>
+                                        <th>Базовая вместимость</th>
+                                        <th>CPU</th>
+                                        <th>Свободная RAM</th>
+                                        <th>Свободная VRAM</th>
+                                        <th>Активные модели</th>
+                                        <th>Последний heartbeat</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="targetsTableBody">
+                                    <tr><td colspan="9" class="empty-state">Ожидание target heartbeat данных</td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </article>
                 </section>
@@ -1686,10 +1353,10 @@
                         <div class="view-kicker">Monitoring Center</div>
                         <h2 class="view-title">История нагрузки</h2>
                         <p class="view-description">
-                            Реальная история нагрузки за 1 час, 6 часов и 24 часа на основе сохранённых telemetry samples. Если серия недоступна, панель прямо покажет no-data.
+                            Полный history view для 1 часа, 6 часов и 24 часов. Если series нет, панель показывает честный no-data state без synthetic interpolation.
                         </p>
                         <div class="view-meta">
-                            <span class="meta-pill">Вкладка: История нагрузки</span>
+                            <span class="meta-pill">Вкладка: История</span>
                             <span class="meta-pill">Диапазон: <span id="historyRangeLabel">24 часа</span></span>
                         </div>
                     </div>
@@ -1705,16 +1372,13 @@
                 <section class="history-grid">
                     <article class="panel history-panel">
                         <div class="section-head">
-                            <div class="title-row">
-                                <div>
-                                    <div class="section-kicker">Load history</div>
-                                    <h2 class="section-title">Timeline нагрузки</h2>
-                                </div>
+                            <div>
+                                <div class="section-kicker">Load history</div>
+                                <h2 class="section-title">Timeline нагрузки</h2>
                             </div>
-                            <p class="section-description">Реальные series без фейковых линий. Для 6h и 24h используется аккуратное bucketed представление из сохранённых samples.</p>
                         </div>
                         <div class="timeline-toolbar">
-                            <div class="range-switcher" id="historyRangeSwitcher">
+                            <div class="pill-switch" id="historyRangeSwitcher">
                                 <button class="range-button" type="button" data-history-range="1h">1 час</button>
                                 <button class="range-button" type="button" data-history-range="6h">6 часов</button>
                                 <button class="range-button is-active" type="button" data-history-range="24h">24 часа</button>
@@ -1725,8 +1389,7 @@
                             <div class="timeline-placeholder" id="historyTimelineCard">
                                 <div class="timeline-label">История нагрузки</div>
                                 <div class="timeline-title">Нет данных за выбранный диапазон</div>
-                                <div class="timeline-detail">Backend ещё не отдаёт series для CPU / RAM / GPU / queue depth / throughput. Layout подготовлен, но без фейковых линий.</div>
-                                <div class="timeline-rail"></div>
+                                <div class="timeline-detail">История появится только после накопления реальных telemetry points.</div>
                             </div>
                             <div class="timeline-slider-wrap">
                                 <input class="timeline-slider" id="historyTimelineSlider" type="range" min="0" max="0" value="0" step="1" disabled>
@@ -1737,9 +1400,9 @@
                             </div>
                             <div class="history-snapshot-grid" id="historySnapshotGrid">
                                 <article class="snapshot-card">
-                                    <div class="snapshot-label">CPU</div>
+                                    <div class="snapshot-label">История</div>
                                     <div class="snapshot-value">Нет данных</div>
-                                    <div class="snapshot-detail">Snapshot появится после загрузки истории.</div>
+                                    <div class="snapshot-detail">Snapshot появится после загрузки history samples.</div>
                                 </article>
                             </div>
                         </div>
@@ -1753,10 +1416,10 @@
                         <div class="view-kicker">Monitoring Center</div>
                         <h2 class="view-title">Журнал событий</h2>
                         <p class="view-description">
-                            Read-only журнал событий operator view. События появляются только из реального telemetry sampler и runtime-сигналов, без выдуманной истории.
+                            Полный read-only event log из telemetry sampler и runtime transition signals. Здесь остаётся полный список с фильтром severity и честными empty states.
                         </p>
                         <div class="view-meta">
-                            <span class="meta-pill">Вкладка: Журнал событий</span>
+                            <span class="meta-pill">Вкладка: События</span>
                             <span class="meta-pill" id="eventCountLabel">События: нет данных</span>
                         </div>
                     </div>
@@ -1764,7 +1427,7 @@
                         <div class="view-aside-card">
                             <div class="view-aside-label">Current status</div>
                             <div class="view-aside-value" id="eventLogUpdatedLabel">Ожидание event log</div>
-                            <div class="view-aside-help">Список ограничен по размеру и отсортирован от новых к старым.</div>
+                            <div class="view-aside-help">Список отсортирован от новых к старым и показывает только реальные события backend telemetry path.</div>
                         </div>
                     </div>
                 </div>
@@ -1784,15 +1447,14 @@
                                     <button class="event-filter-button" type="button" data-event-filter="error">Error</button>
                                 </div>
                             </div>
-                            <p class="section-description">Read-only operator event stream из telemetry sampler и runtime transition signals.</p>
                         </div>
                         <div class="events-table-shell">
                             <div class="events-list" id="eventLogList">
                                 <article class="event-row">
-                                    <div class="event-row-label">Ожидание backend event log</div>
+                                    <div class="event-row-label">Event log</div>
                                     <div class="events-empty-title">Нет событий для отображения</div>
-                                    <div class="events-empty-text">Сейчас backend не отдаёт отдельный журнал событий. Текущие operational warnings остаются во вкладке «Обзор».</div>
-                                    <div class="event-row-meta">После подключения event API здесь появится real event stream без изменения маршрута `/admin/dashboard`.</div>
+                                    <div class="events-empty-text">Telemetry sampler ещё не накопил transitions или runtime warnings.</div>
+                                    <div class="event-row-meta">Журнал остаётся честно пустым, пока backend не накопил реальные события.</div>
                                 </article>
                             </div>
                         </div>

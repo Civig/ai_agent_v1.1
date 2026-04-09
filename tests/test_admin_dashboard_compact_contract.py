@@ -35,7 +35,7 @@ def evaluate_dashboard_compact_contract(script_body: str) -> dict:
 
 
 class AdminDashboardCompactContractTests(unittest.TestCase):
-    def test_compact_top_level_contract_uses_short_cards_and_no_fake_latency(self):
+    def test_top_level_contract_uses_operator_summary_and_new_kpi_hierarchy(self):
         result = evaluate_dashboard_compact_contract(
             """
             const summary = {
@@ -56,11 +56,20 @@ class AdminDashboardCompactContractTests(unittest.TestCase):
               avg_latency_ms: 0,
               active_models: ["demo"],
             };
+            const live = {
+              cpu_percent: 42,
+              cpu_availability: "reported",
+              ram_used_mb: 6144,
+              ram_total_mb: 12288,
+              ram_availability: "reported",
+              gpu_availability: "not_configured",
+            };
 
             console.log(JSON.stringify({
               latency: mod.formatLatency(summary.avg_latency_ms),
               summaryLabels: mod.buildOperationalSummary(summary).map((item) => item.label),
-              kpiLabels: mod.buildKpiCards(summary).map((item) => item.label),
+              kpiLabels: mod.buildKpiCards(summary, live).map((item) => item.label),
+              gpuCard: mod.buildKpiCards(summary, live).find((item) => item.label === "GPU"),
             }));
             """
         )
@@ -72,8 +81,9 @@ class AdminDashboardCompactContractTests(unittest.TestCase):
         )
         self.assertEqual(
             result["kpiLabels"],
-            ["Состояние", "Запас", "Очередь", "Активные задачи", "Воркеры", "Цели", "Среднее время"],
+            ["Состояние", "CPU", "RAM", "GPU", "Очередь", "Нагрузка"],
         )
+        self.assertEqual(result["gpuCard"]["value"], "Не настроена")
 
     def test_worker_snapshot_note_honestly_explains_aggregate_lag(self):
         result = evaluate_dashboard_compact_contract(

@@ -162,10 +162,6 @@ function queueSeverity(summary) {
     return summary.capacity ? "warn" : "critical";
 }
 
-function capacitySeverity(summary) {
-    return summary.capacity ? "ok" : "critical";
-}
-
 function workersSeverity(summary) {
     if (Number(summary.workers_total || 0) <= 0 || Number(summary.workers_working || 0) <= 0) {
         return "critical";
@@ -175,10 +171,6 @@ function workersSeverity(summary) {
 
 function targetsSeverity(summary) {
     return Number(summary.targets || 0) > 0 ? "ok" : "critical";
-}
-
-function counterSeverity(value) {
-    return Number(value || 0) > 0 ? "warn" : "ok";
 }
 
 function hasSchedulerGap(summary) {
@@ -738,60 +730,92 @@ export function buildOperationalSummary(summary) {
     ];
 }
 
-export function buildKpiCards(summary) {
+function buildTelemetryCardState(state, fallback) {
+    const normalized = String(state || "").toLowerCase();
+    if (normalized === "reported") {
+        return { label: "reported", severity: "ok" };
+    }
+    if (normalized === "warming_up") {
+        return { label: "прогревается", severity: "warn" };
+    }
+    if (normalized === "not_configured") {
+        return { label: "не настроена", severity: "neutral" };
+    }
+    if (normalized === "runtime summary") {
+        return { label: "runtime summary", severity: "neutral" };
+    }
+    return { label: fallback, severity: "neutral" };
+}
+
+export function buildKpiCards(summary, live = {}) {
     const overall = deriveOverallState(summary);
+    const queue = deriveQueuePressure(summary);
     const capacity = deriveCapacityAssessment(summary);
+    const cpuValue = Number(live?.cpu_percent);
+    const ramUsed = Number(live?.ram_used_mb);
+    const ramTotal = Number(live?.ram_total_mb);
+    const gpuUtil = Number(live?.gpu_utilization_percent);
+    const activeJobs = Number(summary.active_jobs || 0);
+
+    const cpuState = buildTelemetryCardState(live?.cpu_availability, "нет telemetry");
+    const ramState = buildTelemetryCardState(live?.ram_availability, "нет telemetry");
+    const gpuState = buildTelemetryCardState(live?.gpu_availability, "нет telemetry");
+    const ramRatio = Number.isFinite(ramUsed) && Number.isFinite(ramTotal) && ramTotal > 0 ? ramUsed / ramTotal : null;
+
     return [
         {
             label: "Состояние",
             value: overall.badge,
-            help: "Главный operator-сигнал: всё штатно, система занята, новые chat-задачи будут ждать или данных недостаточно.",
+            help: "Главный operator-сигнал: норма, работа под нагрузкой, очередь или нехватка достоверного сигнала.",
             meta: overall.title,
             severity: overall.severity,
         },
         {
-            label: "Запас",
-            value: capacity.state,
-            help: "Показывает, есть ли подтверждённая свободная chat capacity для следующей задачи.",
-            meta: capacity.reason,
-            severity: capacity.severity,
+            label: "CPU",
+            value: Number.isFinite(cpuValue) ? `${cpuValue.toFixed(1)}%` : "Нет данных",
+            help: "Средняя CPU telemetry по online target heartbeat. При отсутствии telemetry панель не подставляет ноль.",
+            meta: Number.isFinite(cpuValue) ? `Состояние telemetry: ${cpuState.label}` : "CPU telemetry unavailable",
+            severity: Number.isFinite(cpuValue) ? (cpuValue >= 85 ? "warn" : "ok") : cpuState.severity,
+        },
+        {
+            label: "RAM",
+            value: Number.isFinite(ramUsed) && Number.isFinite(ramTotal) && ramTotal > 0
+                ? `${formatNumber(ramUsed)} / ${formatNumber(ramTotal)} MB`
+                : "Нет данных",
+            help: "Использованная и общая RAM по live telemetry target path. При отсутствии signal панель показывает honest no-data.",
+            meta: Number.isFinite(ramRatio)
+                ? `Состояние telemetry: ${ramState.label}`
+                : "RAM telemetry unavailable",
+            severity: Number.isFinite(ramRatio) ? (ramRatio >= 0.85 ? "warn" : "ok") : ramState.severity,
+        },
+        {
+            label: "GPU",
+            value: Number.isFinite(gpuUtil)
+                ? `${gpuUtil.toFixed(1)}%`
+                : live?.gpu_availability === "not_configured"
+                    ? "Не настроена"
+                    : "Нет данных",
+            help: "GPU utilization показывается только если GPU telemetry реально reported. Если GPU path не настроен, это видно явно.",
+            meta: Number.isFinite(Number(live?.vram_free_mb))
+                ? `Свободно VRAM: ${formatNumber(live.vram_free_mb)} MB`
+                : `Состояние telemetry: ${gpuState.label}`,
+            severity: Number.isFinite(gpuUtil)
+                ? (gpuUtil >= 90 ? "warn" : "ok")
+                : (live?.gpu_availability === "not_configured" ? "neutral" : gpuState.severity),
         },
         {
             label: "Очередь",
             value: formatNumber(summary.queue_depth),
-            help: "Сколько задач ещё ждут admission/start и не начали выполняться.",
-            meta: Number(summary.chat_backlog || 0) > 0
-                ? `chat backlog: ${formatNumber(summary.chat_backlog)}`
-                : "Новых chat-задач в ожидании не видно",
-            severity: queueSeverity(summary),
+            help: "Общее число pending-задач по очередям. Давление и chat backlog выводятся в подписи без фейковых выводов.",
+            meta: queue.state,
+            severity: queue.severity,
         },
         {
-            label: "Активные задачи",
-            value: formatNumber(summary.active_jobs),
-            help: "Сколько задач уже находятся в active runtime state.",
-            meta: Number(summary.active_jobs || 0) > 0 ? "Есть выполняющиеся задачи" : "Сейчас активных задач нет",
-            severity: Number(summary.active_jobs || 0) > 0 ? "ok" : "neutral",
-        },
-        {
-            label: "Воркеры",
-            value: `${formatNumber(summary.workers_working)} / ${formatNumber(summary.workers_total)}`,
-            help: "Worker — процесс, который забирает задачу из dispatch и выполняет её.",
-            meta: "Активно работают / всего видимых воркеров",
-            severity: workersSeverity(summary),
-        },
-        {
-            label: "Цели",
-            value: formatNumber(summary.targets),
-            help: "Target — цель исполнения, на которую scheduler может допустить задачу.",
-            meta: "Видимые вычислительные цели исполнения",
-            severity: targetsSeverity(summary),
-        },
-        {
-            label: "Среднее время",
-            value: formatLatency(summary.avg_latency_ms),
-            help: "Показывается только когда реально есть latency counters. Если значимых данных нет, панель честно выводит 'Нет данных'.",
-            meta: Number(summary.avg_latency_ms || 0) > 0 ? "По завершённым задачам" : "Нет данных по latency",
-            severity: Number(summary.avg_latency_ms || 0) > 0 ? "neutral" : "warn",
+            label: "Нагрузка",
+            value: activeJobs > 0 ? `${formatNumber(activeJobs)} активн.` : "0",
+            help: "Сколько задач уже выполняется и есть ли подтверждённый запас для следующей chat-задачи.",
+            meta: capacity.state,
+            severity: capacity.severity,
         },
     ];
 }
@@ -1161,6 +1185,13 @@ export function buildResourceSecondaryFacts(live, summary = {}) {
                 : "Нет данных",
         },
         {
+            label: "Network",
+            detail: "Показывается только после прогрева runtime namespace counters.",
+            value: Number.isFinite(Number(live?.network_rx_bytes_per_sec)) || Number.isFinite(Number(live?.network_tx_bytes_per_sec))
+                ? `${formatBytesPerSecond(live?.network_rx_bytes_per_sec)} / ${formatBytesPerSecond(live?.network_tx_bytes_per_sec)}`
+                : (live?.network_availability === "warming_up" ? "Телеметрия сети прогревается" : "Нет данных"),
+        },
+        {
             label: "Telemetry scope",
             detail: "Важно не путать target runtime telemetry с гарантированным host-level observability.",
             value: live?.telemetry_scope || "Нет данных",
@@ -1210,12 +1241,12 @@ export function buildEventLogViewModel(eventsPayload) {
 
 function metricChartDescriptor(key) {
     const descriptors = {
-        cpu_percent: { label: "CPU", unit: "percent", color: "#56d0ff" },
+        cpu_percent: { label: "CPU", unit: "percent", color: "#62c7ff" },
         ram_used_mb: { label: "RAM used", unit: "mb", color: "#54ddb6" },
         gpu_utilization_percent: { label: "GPU", unit: "percent", color: "#ffcb57" },
         queue_depth: { label: "Queue depth", unit: "count", color: "#ff7289" },
     };
-    return descriptors[key] || { label: key, unit: "count", color: "#56d0ff" };
+    return descriptors[key] || { label: key, unit: "count", color: "#62c7ff" };
 }
 
 function buildHistoryPolyline(points, metricKey, color) {
@@ -1225,41 +1256,56 @@ function buildHistoryPolyline(points, metricKey, color) {
     if (!values.length) {
         return null;
     }
+
     const maxValue = Math.max(...values, 1);
     const minValue = Math.min(...values, 0);
     const spread = Math.max(1, maxValue - minValue);
-    const width = 480;
-    const height = 160;
+    const width = 960;
+    const height = 280;
     const coordinates = points
         .map((point, index) => {
             const value = Number(point?.[metricKey]);
             if (!Number.isFinite(value)) {
                 return null;
             }
-            const x = points.length <= 1 ? 0 : (index / (points.length - 1)) * width;
-            const y = height - ((value - minValue) / spread) * (height - 18) - 9;
-            return `${x.toFixed(2)},${y.toFixed(2)}`;
+            const x = points.length <= 1 ? width / 2 : (index / (points.length - 1)) * width;
+            const y = height - ((value - minValue) / spread) * (height - 36) - 18;
+            return { x, y };
         })
         .filter(Boolean);
+
     if (!coordinates.length) {
         return null;
     }
+
+    if (coordinates.length === 1) {
+        const point = coordinates[0];
+        return `
+            <svg class="trend-chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="history chart">
+                <circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="7" fill="${color}"></circle>
+            </svg>
+        `;
+    }
+
+    const polyline = coordinates.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+    const areaPoints = [`0,${height}`, ...polyline.split(" "), `${width},${height}`].join(" ");
     return `
-        <svg class="history-chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="history chart">
-            <polyline fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${coordinates.join(" ")}"></polyline>
+        <svg class="trend-chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="history chart">
+            <polyline fill="rgba(255,255,255,0.03)" stroke="none" points="${areaPoints}"></polyline>
+            <polyline fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="${polyline}"></polyline>
         </svg>
     `;
 }
 
 export function buildQueueEntries(summary) {
     return Object.entries(summary.pending || {}).map(([queueKey, count]) => {
-        const [workload, priority = ""] = queueKey.split(":");
+        const [workload, priority] = queueKey.split(":");
         const numericCount = Number(count || 0);
         return {
             queueKey,
-            title: `${humanizeWorkload(workload)} · приоритет ${priority || "n/a"}`,
+            title: `${humanizeWorkload(workload)} / ${String(priority || "").toUpperCase()}`,
             value: numericCount,
-            help: numericCount > 0 ? "В этой очереди есть ожидающие задачи." : "Ожидающих задач сейчас нет.",
+            help: numericCount > 0 ? "В очереди есть ожидающие задачи." : "Очередь сейчас пуста.",
             severity: numericCount > 0 ? (workload === "chat" && !summary.capacity ? "critical" : "warn") : "ok",
         };
     });
@@ -1267,14 +1313,14 @@ export function buildQueueEntries(summary) {
 
 export function buildWorkloadEntries(summary) {
     return Object.entries(summary.by_workload || {}).map(([workload, payload]) => {
-        const priorities = Object.entries(payload.by_priority || {})
-            .map(([priority, count]) => `${priority}: ${formatNumber(count)}`)
+        const priorities = Object.entries(payload?.by_priority || {})
+            .map(([priority, count]) => `${String(priority).toUpperCase()}: ${formatNumber(count)}`)
             .join(" · ");
         return {
             workload: humanizeWorkload(workload),
-            total: Number(payload.total || 0),
-            priorities: priorities || "Нет разбивки по приоритетам",
-            severity: Number(payload.total || 0) > 0 ? (workload === "chat" && !summary.capacity ? "critical" : "warn") : "ok",
+            total: Number(payload?.total || 0),
+            priorities: priorities || "Нет данных по приоритетам",
+            severity: Number(payload?.total || 0) > 0 ? (workload === "chat" && !summary.capacity ? "critical" : "warn") : "ok",
         };
     });
 }
@@ -1285,6 +1331,79 @@ function renderChips(items, { mutedFallback = "Нет данных" } = {}) {
         return `<span class="chip chip--muted">${escapeHtml(mutedFallback)}</span>`;
     }
     return values.map((item) => `<span class="chip">${escapeHtml(item)}</span>`).join("");
+}
+
+function buildPrimaryTrendView(historyPayload, metricKey) {
+    const descriptor = metricChartDescriptor(metricKey);
+    const points = Array.isArray(historyPayload?.points) ? historyPayload.points : [];
+    const model = buildHistoryViewModel(historyPayload || {}, historyPayload?.range || "24h");
+    if (!points.length) {
+        return {
+            label: descriptor.label,
+            value: "Нет данных",
+            detail: "История ещё не накоплена для выбранного диапазона.",
+            meta: model.note,
+            footnote: "Показываем только реальные telemetry points.",
+            html: `
+                <div class="trend-empty">
+                    <div class="trend-empty-title">${escapeHtml(model.title)}</div>
+                    <div class="timeline-detail">${escapeHtml(model.detail)}</div>
+                </div>
+            `,
+        };
+    }
+
+    const latestPoint = points[points.length - 1] || {};
+    const latestValue = Number(latestPoint?.[metricKey]);
+    const svg = buildHistoryPolyline(points, metricKey, descriptor.color);
+    if (!svg || !Number.isFinite(latestValue)) {
+        return {
+            label: descriptor.label,
+            value: "Нет данных",
+            detail: `${descriptor.label} не reported для выбранного history диапазона.`,
+            meta: model.note,
+            footnote: "Если series отсутствует, панель не подставляет synthetic line.",
+            html: `
+                <div class="trend-empty">
+                    <div class="trend-empty-title">Нет history series для этой метрики</div>
+                    <div class="timeline-detail">Выбранная метрика не была reported в накопленных telemetry samples.</div>
+                </div>
+            `,
+        };
+    }
+
+    return {
+        label: descriptor.label,
+        value: formatMetricValue(latestValue, descriptor.unit),
+        detail: `Последняя точка: ${latestPoint?.captured_at_iso ? formatTimestamp(latestPoint.captured_at_iso) : "Нет времени"}.`,
+        meta: model.note,
+        footnote: "Линия строится только из реально сохранённых points без interpolation.",
+        html: svg,
+    };
+}
+
+function summarizeEventContext(context) {
+    if (!context || typeof context !== "object") {
+        return "Без дополнительного контекста";
+    }
+
+    const entries = Object.entries(context)
+        .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
+        .slice(0, 4);
+    if (!entries.length) {
+        return "Без дополнительного контекста";
+    }
+    return entries
+        .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
+        .join(" · ");
+}
+
+function activeModelsFromPayload(summary, live) {
+    const liveModels = Array.isArray(live?.active_models) ? live.active_models.filter(Boolean) : [];
+    if (liveModels.length) {
+        return liveModels;
+    }
+    return Array.isArray(summary?.active_models) ? summary.active_models.filter(Boolean) : [];
 }
 
 class AdminDashboardApp {
@@ -1299,6 +1418,9 @@ class AdminDashboardApp {
         this.elements = {
             tabs: Array.from(document.querySelectorAll("[data-dashboard-tab]")),
             views: Array.from(document.querySelectorAll("[data-dashboard-view]")),
+            historyRangeButtons: Array.from(document.querySelectorAll("[data-history-range]")),
+            trendMetricButtons: Array.from(document.querySelectorAll("[data-trend-metric]")),
+            eventFilterButtons: Array.from(document.querySelectorAll("[data-event-filter]")),
             heroMeaning: document.getElementById("heroMeaning"),
             overallStatusTitle: document.getElementById("overallStatusTitle"),
             overallStatusBadge: document.getElementById("overallStatusBadge"),
@@ -1312,6 +1434,15 @@ class AdminDashboardApp {
             operatorSummaryStrip: document.getElementById("operatorSummaryStrip"),
             kpiGrid: document.getElementById("kpiGrid"),
             alertList: document.getElementById("alertList"),
+            overviewTrendMetricLabel: document.getElementById("overviewTrendMetricLabel"),
+            overviewTrendValue: document.getElementById("overviewTrendValue"),
+            overviewTrendDetail: document.getElementById("overviewTrendDetail"),
+            overviewHistoryRangeLabel: document.getElementById("overviewHistoryRangeLabel"),
+            overviewTrendUpdatedLabel: document.getElementById("overviewTrendUpdatedLabel"),
+            overviewTrendMeta: document.getElementById("overviewTrendMeta"),
+            overviewTrendFootnote: document.getElementById("overviewTrendFootnote"),
+            overviewTrendChart: document.getElementById("overviewTrendChart"),
+            overviewRecentEventsList: document.getElementById("overviewRecentEventsList"),
             queueOverview: document.getElementById("queueOverview"),
             queueBreakdown: document.getElementById("queueBreakdown"),
             workloadBreakdown: document.getElementById("workloadBreakdown"),
@@ -1326,8 +1457,8 @@ class AdminDashboardApp {
             resourceLastUpdated: document.getElementById("resourceLastUpdated"),
             resourceUpdatedLabel: document.getElementById("resourceUpdatedLabel"),
             resourceScopeNote: document.getElementById("resourceScopeNote"),
+            resourceModelList: document.getElementById("resourceModelList"),
             historyRangeLabel: document.getElementById("historyRangeLabel"),
-            historyRangeSwitcher: document.getElementById("historyRangeSwitcher"),
             historyMetaNote: document.getElementById("historyMetaNote"),
             historyTimelineCard: document.getElementById("historyTimelineCard"),
             historyPointCountLabel: document.getElementById("historyPointCountLabel"),
@@ -1337,7 +1468,6 @@ class AdminDashboardApp {
             historyBucketLabel: document.getElementById("historyBucketLabel"),
             historySnapshotGrid: document.getElementById("historySnapshotGrid"),
             eventLogList: document.getElementById("eventLogList"),
-            eventSeverityFilter: document.getElementById("eventSeverityFilter"),
             eventCountLabel: document.getElementById("eventCountLabel"),
             eventLogUpdatedLabel: document.getElementById("eventLogUpdatedLabel"),
         };
@@ -1346,6 +1476,7 @@ class AdminDashboardApp {
         this.activeTab = "overview";
         this.historyRange = "24h";
         this.eventFilter = "all";
+        this.trendMetric = "queue_depth";
         this.summary = null;
         this.live = null;
         this.history = null;
@@ -1365,22 +1496,23 @@ class AdminDashboardApp {
         for (const button of this.elements.tabs) {
             button.addEventListener("click", () => {
                 this.setActiveTab(button.dataset.dashboardTab || "overview");
+                void this.refreshDeferredDataForActiveTab();
             });
         }
 
-        const rangeButtons = this.elements.historyRangeSwitcher
-            ? Array.from(this.elements.historyRangeSwitcher.querySelectorAll("[data-history-range]"))
-            : [];
-        for (const button of rangeButtons) {
+        for (const button of this.elements.historyRangeButtons) {
             button.addEventListener("click", () => {
                 void this.setHistoryRange(button.dataset.historyRange || "24h");
             });
         }
 
-        const filterButtons = this.elements.eventSeverityFilter
-            ? Array.from(this.elements.eventSeverityFilter.querySelectorAll("[data-event-filter]"))
-            : [];
-        for (const button of filterButtons) {
+        for (const button of this.elements.trendMetricButtons) {
+            button.addEventListener("click", () => {
+                this.setTrendMetric(button.dataset.trendMetric || "queue_depth");
+            });
+        }
+
+        for (const button of this.elements.eventFilterButtons) {
             button.addEventListener("click", () => {
                 this.setEventFilter(button.dataset.eventFilter || "all");
             });
@@ -1407,22 +1539,26 @@ class AdminDashboardApp {
 
     async setHistoryRange(range) {
         this.historyRange = range;
-        const rangeButtons = this.elements.historyRangeSwitcher
-            ? Array.from(this.elements.historyRangeSwitcher.querySelectorAll("[data-history-range]"))
-            : [];
-        for (const button of rangeButtons) {
+        for (const button of this.elements.historyRangeButtons) {
             button.classList.toggle("is-active", button.dataset.historyRange === range);
         }
-        await this.refreshHistory();
-        this.renderHistoryView(this.history);
+        await this.refreshHistory({ swallowError: true });
+        if (this.summary) {
+            this.render(this.summary);
+        }
+    }
+
+    setTrendMetric(metricKey) {
+        this.trendMetric = metricKey;
+        for (const button of this.elements.trendMetricButtons) {
+            button.classList.toggle("is-active", button.dataset.trendMetric === metricKey);
+        }
+        this.renderOverviewTrend(this.history);
     }
 
     setEventFilter(filter) {
         this.eventFilter = filter;
-        const buttons = this.elements.eventSeverityFilter
-            ? Array.from(this.elements.eventSeverityFilter.querySelectorAll("[data-event-filter]"))
-            : [];
-        for (const button of buttons) {
+        for (const button of this.elements.eventFilterButtons) {
             button.classList.toggle("is-active", button.dataset.eventFilter === filter);
         }
         this.renderEventLog(this.events);
@@ -1435,15 +1571,20 @@ class AdminDashboardApp {
 
         this.loading = true;
         try {
-            const [summary, live, events] = await Promise.all([
+            const [summary, live] = await Promise.all([
                 this.apiClient.requestJSON(this.bootstrap.apiUrl, { method: "GET", timeout: 10000 }),
                 this.apiClient.requestJSON(this.bootstrap.liveApiUrl, { method: "GET", timeout: 10000 }),
-                this.apiClient.requestJSON(this.bootstrap.eventsApiUrl, { method: "GET", timeout: 10000 }),
             ]);
             this.summary = summary;
             this.live = live;
-            this.events = events;
-            await this.refreshHistory();
+
+            if (this.activeTab === "overview" || this.activeTab === "history") {
+                await this.refreshHistory({ swallowError: true });
+            }
+            if (this.activeTab === "overview" || this.activeTab === "events") {
+                await this.refreshEvents({ swallowError: true });
+            }
+
             this.render(summary);
         } catch (error) {
             console.error("Admin dashboard refresh failed:", error);
@@ -1453,12 +1594,43 @@ class AdminDashboardApp {
         }
     }
 
-    async refreshHistory() {
-        const url = new URL(this.bootstrap.historyApiUrl, window.location.origin);
-        url.searchParams.set("range", this.historyRange);
-        this.history = await this.apiClient.requestJSON(`${url.pathname}${url.search}`, { method: "GET", timeout: 10000 });
-        const pointCount = Number(this.history?.point_count || 0);
-        this.selectedHistoryIndex = pointCount > 0 ? pointCount - 1 : 0;
+    async refreshDeferredDataForActiveTab() {
+        if (!this.summary) {
+            return;
+        }
+        if (this.activeTab === "overview" || this.activeTab === "history") {
+            await this.refreshHistory({ swallowError: true });
+        }
+        if (this.activeTab === "overview" || this.activeTab === "events") {
+            await this.refreshEvents({ swallowError: true });
+        }
+        this.render(this.summary);
+    }
+
+    async refreshHistory({ swallowError = false } = {}) {
+        try {
+            const url = new URL(this.bootstrap.historyApiUrl, window.location.origin);
+            url.searchParams.set("range", this.historyRange);
+            this.history = await this.apiClient.requestJSON(`${url.pathname}${url.search}`, { method: "GET", timeout: 10000 });
+            const pointCount = Number(this.history?.point_count || 0);
+            this.selectedHistoryIndex = pointCount > 0 ? pointCount - 1 : 0;
+        } catch (error) {
+            console.error("Dashboard history refresh failed:", error);
+            if (!swallowError) {
+                throw error;
+            }
+        }
+    }
+
+    async refreshEvents({ swallowError = false } = {}) {
+        try {
+            this.events = await this.apiClient.requestJSON(this.bootstrap.eventsApiUrl, { method: "GET", timeout: 10000 });
+        } catch (error) {
+            console.error("Dashboard events refresh failed:", error);
+            if (!swallowError) {
+                throw error;
+            }
+        }
     }
 
     render(summary) {
@@ -1469,6 +1641,7 @@ class AdminDashboardApp {
         const health = deriveHealthView(summary);
         const nextChat = deriveNextChatExpectation(summary);
         const schedulerSeverity = summary.scheduler_status === "healthy" ? "ok" : "critical";
+
         this.elements.heroMeaning.textContent = `${capacity.state}. ${derivePrimaryBottleneck(summary).title}.`;
         this.elements.overallStatusTitle.textContent = overall.title;
         this.elements.overallStatusBadge.className = `status-badge ${severityClass(overall.severity)}`;
@@ -1486,7 +1659,9 @@ class AdminDashboardApp {
         this.elements.queueStatusValue.textContent = queuePressure.state;
 
         this.renderSummaryStrip(summary);
-        this.renderKpis(summary);
+        this.renderKpis(summary, this.live);
+        this.renderOverviewTrend(this.history);
+        this.renderOverviewRecentEvents(this.events);
         this.renderAlerts(summary);
         this.renderQueueOverview(summary);
         this.renderQueueBreakdown(summary);
@@ -1495,6 +1670,7 @@ class AdminDashboardApp {
         this.renderWorkers(summary, summary.worker_rows || []);
         this.renderTargets(summary, summary.target_rows || []);
         this.renderResourceTelemetry(this.live, summary);
+        this.renderResourceModels(summary, this.live);
         this.renderHistoryView(this.history);
         this.renderEventLog(this.events);
     }
@@ -1513,8 +1689,8 @@ class AdminDashboardApp {
             .join("");
     }
 
-    renderKpis(summary) {
-        this.elements.kpiGrid.innerHTML = buildKpiCards(summary)
+    renderKpis(summary, live) {
+        this.elements.kpiGrid.innerHTML = buildKpiCards(summary, live || {})
             .map(
                 (item) => `
                     <article class="kpi-card ${severityClass(item.severity)}">
@@ -1530,15 +1706,74 @@ class AdminDashboardApp {
             .join("");
     }
 
+    renderOverviewTrend(historyPayload = null) {
+        const model = buildHistoryViewModel(historyPayload || {}, this.historyRange);
+        const trend = buildPrimaryTrendView(historyPayload || {}, this.trendMetric);
+        if (this.elements.overviewTrendMetricLabel) {
+            this.elements.overviewTrendMetricLabel.textContent = trend.label;
+        }
+        if (this.elements.overviewTrendValue) {
+            this.elements.overviewTrendValue.textContent = trend.value;
+        }
+        if (this.elements.overviewTrendDetail) {
+            this.elements.overviewTrendDetail.textContent = trend.detail;
+        }
+        if (this.elements.overviewHistoryRangeLabel) {
+            this.elements.overviewHistoryRangeLabel.textContent = model.rangeLabel;
+        }
+        if (this.elements.overviewTrendUpdatedLabel) {
+            const latestPoint = Array.isArray(historyPayload?.points) && historyPayload.points.length
+                ? historyPayload.points[historyPayload.points.length - 1]
+                : null;
+            this.elements.overviewTrendUpdatedLabel.textContent = latestPoint?.captured_at_iso
+                ? `Последняя точка: ${formatTimestamp(latestPoint.captured_at_iso)}`
+                : "История ещё не загружена.";
+        }
+        if (this.elements.overviewTrendMeta) {
+            this.elements.overviewTrendMeta.textContent = trend.meta;
+        }
+        if (this.elements.overviewTrendFootnote) {
+            this.elements.overviewTrendFootnote.textContent = trend.footnote;
+        }
+        if (this.elements.overviewTrendChart) {
+            this.elements.overviewTrendChart.innerHTML = trend.html;
+        }
+    }
+
+    renderOverviewRecentEvents(eventsPayload = null) {
+        const events = Array.isArray(eventsPayload?.events) ? eventsPayload.events : [];
+        const recentEvents = events.slice(0, 5);
+        if (!recentEvents.length) {
+            this.elements.overviewRecentEventsList.innerHTML = `
+                <article class="event-card">
+                    <div class="event-card-title">Нет событий</div>
+                    <div class="event-card-detail">Telemetry sampler ещё не накопил transitions или runtime warnings для overview.</div>
+                </article>
+            `;
+            return;
+        }
+
+        this.elements.overviewRecentEventsList.innerHTML = recentEvents
+            .map((event) => `
+                <article class="event-card ${severityClass(event.severity)}">
+                    <div class="event-card-head">
+                        <div class="event-card-title">${escapeHtml(event.message || "Событие")}</div>
+                        <div class="event-severity-badge ${severityClass(event.severity)}">${escapeHtml(event.severity || "info")}</div>
+                    </div>
+                    <div class="event-card-detail">${escapeHtml(summarizeEventContext(event.context || {}))}</div>
+                    <div class="event-row-meta">${escapeHtml(event.source || "runtime")} · ${escapeHtml(event.timestamp_iso ? formatTimestamp(event.timestamp_iso) : "Нет времени")}</div>
+                </article>
+            `)
+            .join("");
+    }
+
     renderAlerts(summary) {
         this.elements.alertList.innerHTML = buildAlertItems(summary)
             .map(
                 (item) => `
-                    <article class="alert-card ${severityClass(item.severity)}" title="${escapeHtml(item.recommendation)}">
-                        <div class="alert-title">
-                            <span class="alert-title-dot"></span>
-                            ${escapeHtml(item.title)}
-                        </div>
+                    <article class="summary-card ${severityClass(item.severity)}" title="${escapeHtml(item.recommendation)}">
+                        <div class="summary-label">${escapeHtml(item.title)}</div>
+                        <div class="summary-value">${escapeHtml(item.severity === "critical" ? "Требует внимания" : item.severity === "warn" ? "Нужно наблюдение" : "Штатно")}</div>
                         <div class="alert-detail">${escapeHtml(item.detail)}</div>
                     </article>
                 `,
@@ -1573,9 +1808,9 @@ class AdminDashboardApp {
                     <article class="queue-card ${severityClass(item.severity)}">
                         <div class="queue-card-head">
                             <div class="queue-key">${escapeHtml(item.title)}</div>
-                            <div class="queue-value">${formatNumber(item.value)}</div>
+                            <div class="summary-value">${formatNumber(item.value)}</div>
                         </div>
-                        <div class="queue-raw">${escapeHtml(item.queueKey)}</div>
+                        <div class="summary-detail">${escapeHtml(item.queueKey)}</div>
                         <div class="queue-help">${escapeHtml(item.help)}</div>
                     </article>
                 `,
@@ -1596,7 +1831,7 @@ class AdminDashboardApp {
                     <article class="queue-card ${severityClass(item.severity)}">
                         <div class="queue-card-head">
                             <div class="queue-key">${escapeHtml(item.workload)}</div>
-                            <div class="queue-value">${formatNumber(item.total)}</div>
+                            <div class="summary-value">${formatNumber(item.total)}</div>
                         </div>
                         <div class="queue-help">${escapeHtml(item.priorities)}</div>
                     </article>
@@ -1611,10 +1846,7 @@ class AdminDashboardApp {
                 (item) => `
                     <article class="runtime-card ${severityClass(item.severity)}">
                         <div class="runtime-card-head">
-                            <div class="runtime-key-wrap">
-                                <div class="runtime-key">${escapeHtml(item.label)}</div>
-                                <span class="info-chip" title="${escapeHtml(item.help)}">i</span>
-                            </div>
+                            <div class="runtime-key">${escapeHtml(item.label)}</div>
                             <div class="runtime-value">${escapeHtml(item.value)}</div>
                         </div>
                     </article>
@@ -1737,14 +1969,15 @@ class AdminDashboardApp {
         }
 
         if (this.elements.resourceNoDataCard) {
-            const missingCount = buildResourceTelemetryCards(live || {}, summary || {}).filter((item) => item.state !== "reported" && item.state !== "runtime summary").length;
+            const missingCount = buildResourceTelemetryCards(live || {}, summary || {})
+                .filter((item) => item.state !== "reported" && item.state !== "runtime summary").length;
             this.elements.resourceNoDataCard.innerHTML = `
                 <div class="resource-label">Текущий статус</div>
                 <div class="resource-value">${missingCount > 0 ? "Частичный telemetry mode" : "Runtime summary available"}</div>
                 <div class="resource-detail">${
                     missingCount > 0
-                        ? "Часть monitoring cards уже использует реальные runtime поля, а недостающие telemetry источники честно помечены как no-data."
-                        : "Все видимые cards сейчас заполнены реальными runtime полями без поддельных значений."
+                        ? "Часть resource cards уже опирается на реальные runtime поля, а недостающие telemetry источники честно помечены как no-data."
+                        : "Все видимые resource cards сейчас заполнены реальными runtime полями без поддельных значений."
                 }</div>
             `;
         }
@@ -1763,6 +1996,29 @@ class AdminDashboardApp {
                 ? `Scope: ${live.telemetry_scope}. Network: ${live.network_scope}.`
                 : "Метрики показываются только там, где их реально сообщает target runtime.";
         }
+    }
+
+    renderResourceModels(summary, live) {
+        const models = activeModelsFromPayload(summary, live);
+        if (!models.length) {
+            this.elements.resourceModelList.innerHTML = `
+                <article class="summary-card">
+                    <div class="summary-label">Модели</div>
+                    <div class="summary-value">Нет данных</div>
+                    <div class="summary-detail">Loaded models пока не были reported в видимом target heartbeat path.</div>
+                </article>
+            `;
+            return;
+        }
+
+        this.elements.resourceModelList.innerHTML = `
+            <article class="summary-card">
+                <div class="summary-label">Активные модели</div>
+                <div class="summary-value">${formatNumber(models.length)}</div>
+                <div class="chip-row">${renderChips(models, { mutedFallback: "Нет данных" })}</div>
+                <div class="summary-detail">Показываются только модели, которые реально reported target path.</div>
+            </article>
+        `;
     }
 
     renderHistoryView(historyPayload = null) {
@@ -1790,7 +2046,6 @@ class AdminDashboardApp {
                     <div class="timeline-label">История нагрузки</div>
                     <div class="timeline-title">${escapeHtml(model.title)}</div>
                     <div class="timeline-detail">${escapeHtml(model.detail)}</div>
-                    <div class="timeline-rail"></div>
                 `;
             } else {
                 const charts = [
@@ -1805,10 +2060,10 @@ class AdminDashboardApp {
                     return `
                         <article class="history-chart-card">
                             <div class="history-chart-head">
-                                <div class="history-chart-label">${escapeHtml(descriptor.label)}</div>
-                                <div class="history-chart-value">${escapeHtml(formatMetricValue(latestPoint[key], descriptor.unit))}</div>
+                                <div class="summary-label">${escapeHtml(descriptor.label)}</div>
+                                <div class="summary-value">${escapeHtml(formatMetricValue(latestPoint[key], descriptor.unit))}</div>
                             </div>
-                            ${svg || '<div class="history-chart-empty">Нет series для этой метрики</div>'}
+                            ${svg || '<div class="trend-empty"><div class="trend-empty-title">Нет series</div><div class="timeline-detail">Метрика не была reported в выбранном диапазоне.</div></div>'}
                         </article>
                     `;
                 });
@@ -1904,21 +2159,21 @@ class AdminDashboardApp {
                 `;
                 return;
             }
-            this.elements.eventLogList.innerHTML = `
-                ${filteredEvents
-                    .map(
-                        (event) => `
-                            <article class="event-row">
+            this.elements.eventLogList.innerHTML = filteredEvents
+                .map(
+                    (event) => `
+                        <article class="event-row ${severityClass(event.severity)}">
+                            <div class="event-row-head">
                                 <div class="event-row-label">${escapeHtml(event.source || "runtime")}</div>
                                 <div class="event-severity-badge ${severityClass(event.severity)}">${escapeHtml(event.severity || "info")}</div>
-                                <div class="events-empty-title">${escapeHtml(event.message || "Событие")}</div>
-                                <div class="events-empty-text">${escapeHtml(event.timestamp_iso ? formatTimestamp(event.timestamp_iso) : "Нет времени")}</div>
-                                <div class="event-row-meta">${escapeHtml(JSON.stringify(event.context || {}, null, 0))}</div>
-                            </article>
-                        `,
-                    )
-                    .join("")}
-            `;
+                            </div>
+                            <div class="events-empty-title">${escapeHtml(event.message || "Событие")}</div>
+                            <div class="events-empty-text">${escapeHtml(summarizeEventContext(event.context || {}))}</div>
+                            <div class="event-row-meta">${escapeHtml(event.timestamp_iso ? formatTimestamp(event.timestamp_iso) : "Нет времени")}</div>
+                        </article>
+                    `,
+                )
+                .join("");
         }
     }
 
@@ -1929,14 +2184,20 @@ class AdminDashboardApp {
         this.elements.overallStatusBadge.className = `status-badge ${severityClass("critical")}`;
         this.elements.overallStatusBadge.textContent = "Ошибка";
         this.elements.alertList.innerHTML = `
-            <article class="alert-card ${severityClass("critical")}" title="Проверьте доступность dashboard API и состояние runtime.">
-                <div class="alert-title">
-                    <span class="alert-title-dot"></span>
-                    Не удалось обновить dashboard
-                </div>
+            <article class="summary-card ${severityClass("critical")}">
+                <div class="summary-label">Не удалось обновить dashboard</div>
+                <div class="summary-value">Ошибка</div>
                 <div class="alert-detail">${escapeHtml(message)}</div>
             </article>
         `;
+        if (this.elements.overviewTrendChart) {
+            this.elements.overviewTrendChart.innerHTML = `
+                <div class="trend-empty">
+                    <div class="trend-empty-title">Нет новой history сводки</div>
+                    <div class="timeline-detail">Live overview unavailable, пока dashboard API недоступен.</div>
+                </div>
+            `;
+        }
     }
 }
 
