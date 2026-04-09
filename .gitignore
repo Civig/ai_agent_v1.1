@@ -50,7 +50,8 @@ Thumbs.db
 *.backup.*
 
 # Models (large GGUF files excluded from git)
-models/
+models/*
+!models/catalog.json
 *.gguf
 
 # Generated deployment files

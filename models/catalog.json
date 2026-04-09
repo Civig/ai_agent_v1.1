@@ -1,0 +1,1597 @@
+{
+  "schema_version": 1,
+  "source": "website_catalog_stage1",
+  "source_file": "website/app.js",
+  "website_adapter_file": "website/models-data.js",
+  "notes": [
+    "Stage 1 unified registry seeded from the existing website catalog.",
+    "Product support fields are conservative and intended for future installer/policy/runtime integration."
+  ],
+  "models": [
+    {
+      "id": "gpt_oss_20b",
+      "display_name": "GPT-OSS 20B",
+      "install_name": "gpt-oss:20b",
+      "family": "GPT-OSS",
+      "category": "Рассуждение",
+      "deployment": "Частный сервер",
+      "site_badge_text": "20B / 128K",
+      "site_badge_class": "tag-blue",
+      "description": "Открытая reasoning-модель OpenAI для локального запуска в своей инфраструктуре. Подходит для приватных корпоративных сценариев без зависимости от внешнего облачного API.",
+      "server_requirements": [
+        "Режим развёртывания: self-hosted / self-managed",
+        "Размер модели в Ollama: 14GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Точный порог по GPU/VRAM зависит от backend и квантования"
+      ],
+      "install_command": "ollama run gpt-oss:20b",
+      "official_url": "https://help.openai.com/en/articles/11870455-openai-open-weight-models-gpt-oss",
+      "ollama_url": "https://ollama.com/library/gpt-oss:20b",
+      "source_label": "Источник: OpenAI + Ollama",
+      "chips": [
+        "open-weight",
+        "reasoning",
+        "128K",
+        "self-hosted"
+      ],
+      "note": "Хороший вариант, если нужен локальный GPT-класс без внешнего облачного API.",
+      "recommended_for": [
+        "Продакшн",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "gpt_oss_120b",
+      "display_name": "GPT-OSS 120B",
+      "install_name": "gpt-oss:120b",
+      "family": "GPT-OSS",
+      "category": "Рассуждение",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "120B / 128K",
+      "site_badge_class": "tag-blue",
+      "description": "Старшая открытая reasoning-модель OpenAI для мощного on-prem deployment и приватной инфраструктуры.",
+      "server_requirements": [
+        "Режим развёртывания: self-hosted / self-managed",
+        "Размер модели в Ollama: 65GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Нужен выделенный сервер с большим запасом памяти"
+      ],
+      "install_command": "ollama run gpt-oss:120b",
+      "official_url": "https://help.openai.com/en/articles/11870455-openai-open-weight-models-gpt-oss",
+      "ollama_url": "https://ollama.com/library/gpt-oss:120b",
+      "source_label": "Источник: OpenAI + Ollama",
+      "chips": [
+        "open-weight",
+        "very large",
+        "128K",
+        "private infra"
+      ],
+      "note": "Подходит для тяжёлого локального inference-контура.",
+      "recommended_for": [
+        "Продакшн",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "qwen3_5_0_8b",
+      "display_name": "Qwen 3.5 0.8B",
+      "install_name": "qwen3.5:0.8b",
+      "family": "Qwen",
+      "category": "Мультимодальная",
+      "deployment": "Локально",
+      "site_badge_text": "0.8B / 256K",
+      "site_badge_class": "tag-green",
+      "description": "Компактная мультимодальная модель для текста и изображений. Подходит для пилота, тестового стенда и ограниченных ресурсов.",
+      "server_requirements": [
+        "Рекомендация по запуску: GPU preferred",
+        "Размер модели в Ollama: 1.0GB",
+        "Контекстное окно: 256K",
+        "Тип входа: текст и изображения",
+        "При нехватке памяти рекомендуется уменьшать длину контекста"
+      ],
+      "install_command": "ollama run qwen3.5:0.8b",
+      "official_url": "https://qwen.readthedocs.io/en/latest/",
+      "ollama_url": "https://ollama.com/library/qwen3.5:0.8b",
+      "source_label": "Источник: Qwen docs + Ollama",
+      "chips": [
+        "vision",
+        "пилот",
+        "256K",
+        "компактная"
+      ],
+      "note": "Хороший старт для very-light стенда и демонстрации.",
+      "recommended_for": [
+        "Пилот",
+        "Мультимодальность"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "catalog_only_not_integrated"
+    },
+    {
+      "id": "qwen3_5_4b",
+      "display_name": "Qwen 3.5 4B",
+      "install_name": "qwen3.5:4b",
+      "family": "Qwen",
+      "category": "Мультимодальная",
+      "deployment": "Локально",
+      "site_badge_text": "4B / 256K",
+      "site_badge_class": "tag-amber",
+      "description": "Сбалансированная мультимодальная модель для документов, чата и визуальных внутренних сценариев.",
+      "server_requirements": [
+        "Рекомендация по запуску: GPU preferred",
+        "Размер модели в Ollama: 3.4GB",
+        "Контекстное окно: 256K",
+        "Тип входа: текст и изображения",
+        "Подходит для локальной рабочей станции или тестового сервера"
+      ],
+      "install_command": "ollama run qwen3.5:4b",
+      "official_url": "https://qwen.readthedocs.io/en/latest/",
+      "ollama_url": "https://ollama.com/library/qwen3.5:4b",
+      "source_label": "Источник: Qwen docs + Ollama",
+      "chips": [
+        "vision",
+        "документы",
+        "256K",
+        "локально"
+      ],
+      "note": "Хороший компромисс между размером и возможностями.",
+      "recommended_for": [
+        "Пилот",
+        "Мультимодальность"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "catalog_only_not_integrated"
+    },
+    {
+      "id": "qwen3_5_9b",
+      "display_name": "Qwen 3.5 9B",
+      "install_name": "qwen3.5:9b",
+      "family": "Qwen",
+      "category": "Мультимодальная",
+      "deployment": "Частный сервер",
+      "site_badge_text": "9B / 256K",
+      "site_badge_class": "tag-amber",
+      "description": "Сильная мультимодальная модель для внутренних ассистентов, анализа документов, скриншотов и интерфейсов.",
+      "server_requirements": [
+        "Рекомендация по запуску: GPU preferred",
+        "Размер модели в Ollama: 6.6GB",
+        "Контекстное окно: 256K",
+        "Тип входа: текст и изображения",
+        "Для длинного контекста нужен запас памяти"
+      ],
+      "install_command": "ollama run qwen3.5:9b",
+      "official_url": "https://qwen.readthedocs.io/en/latest/inference/transformers.html",
+      "ollama_url": "https://ollama.com/library/qwen3.5",
+      "source_label": "Источник: Qwen docs + Ollama",
+      "chips": [
+        "vision",
+        "9B",
+        "256K",
+        "assistant"
+      ],
+      "note": "Один из самых удачных вариантов для корпоративного локального ассистента.",
+      "recommended_for": [
+        "Продакшн",
+        "Мультимодальность"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": false,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "qwen3_5_27b",
+      "display_name": "Qwen 3.5 27B",
+      "install_name": "qwen3.5:27b",
+      "family": "Qwen",
+      "category": "Мультимодальная",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "27B / 256K",
+      "site_badge_class": "tag-blue",
+      "description": "Тяжёлая мультимодальная модель Qwen для серьёзных on-prem сценариев и более высокого качества ответа.",
+      "server_requirements": [
+        "Рекомендация по запуску: выделенный GPU-сервер",
+        "Размер модели в Ollama: 17GB",
+        "Контекстное окно: 256K",
+        "Тип входа: текст и изображения",
+        "Длинный контекст требует существенного запаса памяти"
+      ],
+      "install_command": "ollama run qwen3.5:27b",
+      "official_url": "https://qwen.readthedocs.io/en/latest/",
+      "ollama_url": "https://ollama.com/library/qwen3.5",
+      "source_label": "Источник: Qwen docs + Ollama",
+      "chips": [
+        "27B",
+        "vision",
+        "256K",
+        "heavy"
+      ],
+      "note": "Уже уровень выделенного локального inference-сервера.",
+      "recommended_for": [
+        "Продакшн",
+        "Мультимодальность"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "qwen3_coder_30b",
+      "display_name": "Qwen3-Coder 30B",
+      "install_name": "qwen3-coder:30b",
+      "family": "Qwen",
+      "category": "Код",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "30B / 256K",
+      "site_badge_class": "tag-blue",
+      "description": "Специализированная coding-модель для agentic coding, репозиториев и длинного контекста.",
+      "server_requirements": [
+        "Режим запуска: локальный inference",
+        "Размер модели в Ollama: 19GB",
+        "Контекстное окно: 256K",
+        "Тип входа: текст",
+        "Подходит для выделенного coding-сервера"
+      ],
+      "install_command": "ollama run qwen3-coder:30b",
+      "official_url": "https://qwenlm.github.io/blog/qwen3-coder/",
+      "ollama_url": "https://ollama.com/library/qwen3-coder:30b",
+      "source_label": "Источник: Qwen3-Coder + Ollama",
+      "chips": [
+        "coding",
+        "agentic",
+        "256K",
+        "repo-scale"
+      ],
+      "note": "Сильный вариант для внутреннего dev-ассистента.",
+      "recommended_for": [
+        "Код",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "qwen3_coder_480b",
+      "display_name": "Qwen3-Coder 480B",
+      "install_name": "qwen3-coder:480b",
+      "family": "Qwen",
+      "category": "Код",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "480B / 256K",
+      "site_badge_class": "tag-blue",
+      "description": "Старшая coding-модель для тяжёлых agentic и repository-scale сценариев.",
+      "server_requirements": [
+        "Ориентир по локальному запуску: минимум 250GB памяти или unified memory",
+        "Размер модели в Ollama: 290GB",
+        "Контекстное окно: 256K",
+        "Тип входа: текст",
+        "Требует очень мощную инфраструктуру"
+      ],
+      "install_command": "ollama run qwen3-coder:480b",
+      "official_url": "https://ollama.com/library/qwen3-coder",
+      "ollama_url": "https://ollama.com/library/qwen3-coder:480b",
+      "source_label": "Источник: Ollama",
+      "chips": [
+        "coding",
+        "480B",
+        "256K",
+        "very large"
+      ],
+      "note": "Это уже не пилот, а тяжёлый локальный coding-контур.",
+      "recommended_for": [
+        "Код"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "qwen2_5_coder_0_5b",
+      "display_name": "Qwen2.5-Coder 0.5B",
+      "install_name": "qwen2.5-coder:0.5b",
+      "family": "Qwen",
+      "category": "Код",
+      "deployment": "Локально",
+      "site_badge_text": "0.5B / 32K",
+      "site_badge_class": "tag-green",
+      "description": "Очень компактная coding-модель для лёгкого пилота, быстрых тестов и простых задач разработки.",
+      "server_requirements": [
+        "Размер модели в Ollama: 398MB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Подходит для минимального локального стенда",
+        "Используется как very-light coding baseline"
+      ],
+      "install_command": "ollama run qwen2.5-coder:0.5b",
+      "official_url": "https://ollama.com/library/qwen2.5-coder",
+      "ollama_url": "https://ollama.com/library/qwen2.5-coder:0.5b",
+      "source_label": "Источник: Ollama",
+      "chips": [
+        "coding",
+        "0.5B",
+        "32K",
+        "compact"
+      ],
+      "note": "Минимальный вход в локальный coding-контур.",
+      "recommended_for": [
+        "Пилот",
+        "Код"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "qwen2_5_coder_7b",
+      "display_name": "Qwen2.5-Coder 7B",
+      "install_name": "qwen2.5-coder:7b",
+      "family": "Qwen",
+      "category": "Код",
+      "deployment": "Локально",
+      "site_badge_text": "7B / 32K",
+      "site_badge_class": "tag-amber",
+      "description": "Сбалансированная coding-модель для локального IDE-ассистента и внутренних инженерных задач.",
+      "server_requirements": [
+        "Размер модели в Ollama: 4.7GB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Подходит для локальной рабочей станции или небольшого сервера",
+        "Умеренные требования по ресурсам"
+      ],
+      "install_command": "ollama run qwen2.5-coder:7b",
+      "official_url": "https://ollama.com/library/qwen2.5-coder",
+      "ollama_url": "https://ollama.com/library/qwen2.5-coder:7b",
+      "source_label": "Источник: Ollama",
+      "chips": [
+        "coding",
+        "7B",
+        "32K",
+        "local dev"
+      ],
+      "note": "Хороший middle-range вариант для локальной разработки.",
+      "recommended_for": [
+        "Код",
+        "Пилот"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "coding",
+      "support_tier": "baseline_supported_now"
+    },
+    {
+      "id": "qwen2_5_coder_14b_instruct",
+      "display_name": "Qwen2.5-Coder 14B Instruct",
+      "install_name": "qwen2.5-coder:14b-instruct",
+      "family": "Qwen",
+      "category": "Код",
+      "deployment": "Частный сервер",
+      "site_badge_text": "14B / 32K",
+      "site_badge_class": "tag-blue",
+      "description": "Более сильная coding-модель для внутренних dev-сервисов, code review и генерации кода.",
+      "server_requirements": [
+        "Размер модели в Ollama: 9.0GB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Подходит для выделенного coding-сервера",
+        "Лучше использовать при постоянной инженерной нагрузке"
+      ],
+      "install_command": "ollama run qwen2.5-coder:14b-instruct",
+      "official_url": "https://ollama.com/library/qwen2.5-coder",
+      "ollama_url": "https://ollama.com/library/qwen2.5-coder",
+      "source_label": "Источник: Ollama",
+      "chips": [
+        "coding",
+        "14B",
+        "32K",
+        "instruct"
+      ],
+      "note": "Уже production-класс для локального coding-assistant.",
+      "recommended_for": [
+        "Код",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "qwen2_5_coder_32b_instruct",
+      "display_name": "Qwen2.5-Coder 32B Instruct",
+      "install_name": "qwen2.5-coder:32b-instruct",
+      "family": "Qwen",
+      "category": "Код",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "32B / 32K",
+      "site_badge_class": "tag-blue",
+      "description": "Тяжёлая локальная coding-модель для случаев, когда нужен заметный запас по качеству.",
+      "server_requirements": [
+        "Размер модели в Ollama: 20GB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Нужен серьёзный запас памяти",
+        "Подходит для выделенного локального dev-контура"
+      ],
+      "install_command": "ollama run qwen2.5-coder:32b-instruct",
+      "official_url": "https://ollama.com/library/qwen2.5-coder",
+      "ollama_url": "https://ollama.com/library/qwen2.5-coder",
+      "source_label": "Источник: Ollama",
+      "chips": [
+        "coding",
+        "32B",
+        "32K",
+        "heavy"
+      ],
+      "note": "Для выделенного on-prem coding-контура.",
+      "recommended_for": [
+        "Код",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "llama3_1_8b",
+      "display_name": "Llama 3.1 8B",
+      "install_name": "llama3.1:8b",
+      "family": "Llama",
+      "category": "Чат",
+      "deployment": "Локально",
+      "site_badge_text": "8B / 128K",
+      "site_badge_class": "tag-cyan",
+      "description": "Надёжная текстовая модель для корпоративного чата, поиска по знаниям, RAG и внутренних помощников.",
+      "server_requirements": [
+        "Ориентир Meta для fp16: GPU с 16GB VRAM",
+        "Размер модели в Ollama: 4.9GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Квантованные версии снижают требования к памяти"
+      ],
+      "install_command": "ollama run llama3.1:8b",
+      "official_url": "https://www.llama.com/docs/llama-everywhere/running-meta-llama-on-linux/",
+      "ollama_url": "https://ollama.com/library/llama3.1:8b",
+      "source_label": "Источник: Meta Llama + Ollama",
+      "chips": [
+        "chat",
+        "RAG",
+        "128K",
+        "8B"
+      ],
+      "note": "Один из лучших вариантов для старта локального корпоративного ассистента.",
+      "recommended_for": [
+        "Пилот",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "admin",
+      "support_tier": "baseline_supported_now"
+    },
+    {
+      "id": "llama3_1_70b",
+      "display_name": "Llama 3.1 70B",
+      "install_name": "llama3.1:70b",
+      "family": "Llama",
+      "category": "Чат",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "70B / 128K",
+      "site_badge_class": "tag-blue",
+      "description": "Тяжёлая Llama 3.1 для более серьёзных self-hosted сценариев и высокого качества ответа.",
+      "server_requirements": [
+        "Ориентир Meta для fp16: около 140GB VRAM",
+        "Размер модели в Ollama: 43GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Требуется very-high-end инфраструктура"
+      ],
+      "install_command": "ollama run llama3.1:70b",
+      "official_url": "https://www.llama.com/models/llama-3/",
+      "ollama_url": "https://ollama.com/library/llama3.1:70b",
+      "source_label": "Источник: Meta Llama + Ollama",
+      "chips": [
+        "70B",
+        "128K",
+        "large",
+        "on-prem"
+      ],
+      "note": "Подходит не для пилота, а для тяжёлого локального inference.",
+      "recommended_for": [
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "llama3_1_405b",
+      "display_name": "Llama 3.1 405B",
+      "install_name": "llama3.1:405b",
+      "family": "Llama",
+      "category": "Чат",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "405B / 128K",
+      "site_badge_class": "tag-blue",
+      "description": "Старшая Llama 3.1 с очень крупным весом артефакта и инфраструктурными требованиями enterprise-уровня.",
+      "server_requirements": [
+        "Размер модели в Ollama: 243GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Требует проектирования инфраструктуры как отдельной задачи",
+        "Это very-large self-hosted deployment"
+      ],
+      "install_command": "ollama run llama3.1:405b",
+      "official_url": "https://www.llama.com/models/llama-3/",
+      "ollama_url": "https://ollama.com/library/llama3.1:405b",
+      "source_label": "Источник: Meta Llama + Ollama",
+      "chips": [
+        "405B",
+        "128K",
+        "very large",
+        "server class"
+      ],
+      "note": "Карточка скорее как ориентир масштаба, чем как обычный стендовый выбор.",
+      "recommended_for": [
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "gemma3_270m",
+      "display_name": "Gemma 3 270M",
+      "install_name": "gemma3:270m",
+      "family": "Gemma",
+      "category": "Чат",
+      "deployment": "Локально",
+      "site_badge_text": "270M / 32K",
+      "site_badge_class": "tag-green",
+      "description": "Самый лёгкий Gemma 3-вариант для очень компактных локальных сценариев и тестов.",
+      "server_requirements": [
+        "Семейство Gemma 3 ориентировано на single GPU/TPU",
+        "Размер модели в Ollama: 292MB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Подходит для very-light локального стенда"
+      ],
+      "install_command": "ollama run gemma3:270m",
+      "official_url": "https://deepmind.google/models/gemma/gemma-3/",
+      "ollama_url": "https://ollama.com/library/gemma3:270m",
+      "source_label": "Источник: Google Gemma + Ollama",
+      "chips": [
+        "270M",
+        "32K",
+        "compact",
+        "single GPU"
+      ],
+      "note": "Максимально лёгкий вариант в семействе Gemma.",
+      "recommended_for": [
+        "Пилот"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "gemma3_4b",
+      "display_name": "Gemma 3 4B",
+      "install_name": "gemma3:4b",
+      "family": "Gemma",
+      "category": "Мультимодальная",
+      "deployment": "Локально",
+      "site_badge_text": "4B / 128K",
+      "site_badge_class": "tag-green",
+      "description": "Компактная мультимодальная Gemma 3 для текста, документов и изображений.",
+      "server_requirements": [
+        "Ориентир по весам int4: около 2.6GB VRAM только под веса",
+        "Размер модели в Ollama: 3.3GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст и изображения",
+        "Подходит для умеренного локального сервера"
+      ],
+      "install_command": "ollama run gemma3:4b",
+      "official_url": "https://developers.googleblog.com/en/gemma-3-quantized-aware-trained-state-of-the-art-ai-to-consumer-gpus/",
+      "ollama_url": "https://ollama.com/library/gemma3:4b",
+      "source_label": "Источник: Google Gemma + Ollama",
+      "chips": [
+        "vision",
+        "4B",
+        "128K",
+        "compact"
+      ],
+      "note": "Удобный мультимодальный вариант под умеренные ресурсы.",
+      "recommended_for": [
+        "Пилот",
+        "Мультимодальность"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "catalog_only_not_integrated"
+    },
+    {
+      "id": "gemma3_12b",
+      "display_name": "Gemma 3 12B",
+      "install_name": "gemma3:12b",
+      "family": "Gemma",
+      "category": "Мультимодальная",
+      "deployment": "Частный сервер",
+      "site_badge_text": "12B / 128K",
+      "site_badge_class": "tag-amber",
+      "description": "Сильная мультимодальная Gemma 3 для документов, изображений и внутренних AI-сервисов.",
+      "server_requirements": [
+        "Ориентир Google для Gemma 3 12B int4: RTX 4060 Laptop GPU с 8GB VRAM",
+        "Вес int4: около 6.6GB VRAM только под веса",
+        "Размер модели в Ollama: 8.1GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст и изображения"
+      ],
+      "install_command": "ollama run gemma3:12b",
+      "official_url": "https://developers.googleblog.com/en/gemma-3-quantized-aware-trained-state-of-the-art-ai-to-consumer-gpus/",
+      "ollama_url": "https://ollama.com/library/gemma3:12b",
+      "source_label": "Источник: Google Gemma + Ollama",
+      "chips": [
+        "vision",
+        "12B",
+        "8GB VRAM",
+        "128K"
+      ],
+      "note": "Сильный компромисс между качеством и требованиями к GPU.",
+      "recommended_for": [
+        "Продакшн",
+        "Мультимодальность"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": false,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "gemma3_27b",
+      "display_name": "Gemma 3 27B",
+      "install_name": "gemma3:27b",
+      "family": "Gemma",
+      "category": "Мультимодальная",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "27B / 128K",
+      "site_badge_class": "tag-blue",
+      "description": "Старшая мультимодальная Gemma 3 для тяжёлых on-prem сценариев.",
+      "server_requirements": [
+        "Ориентир Google для Gemma 3 27B int4: NVIDIA RTX 3090 с 24GB VRAM",
+        "Вес int4: около 14.1GB VRAM только под веса",
+        "Размер модели в Ollama: 17GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст и изображения"
+      ],
+      "install_command": "ollama run gemma3:27b",
+      "official_url": "https://developers.googleblog.com/en/gemma-3-quantized-aware-trained-state-of-the-art-ai-to-consumer-gpus/",
+      "ollama_url": "https://ollama.com/library/gemma3:27b",
+      "source_label": "Источник: Google Gemma + Ollama",
+      "chips": [
+        "vision",
+        "27B",
+        "24GB VRAM",
+        "128K"
+      ],
+      "note": "Серьёзный мультимодальный on-prem вариант.",
+      "recommended_for": [
+        "Продакшн",
+        "Мультимодальность"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "phi4_mini",
+      "display_name": "Phi-4 Mini",
+      "install_name": "phi4-mini",
+      "family": "Phi",
+      "category": "Чат",
+      "deployment": "Локально",
+      "site_badge_text": "3.8B / 128K",
+      "site_badge_class": "tag-green",
+      "description": "Лёгкая модель семейства Phi-4 для multilingual, reasoning-dense и function-calling сценариев.",
+      "server_requirements": [
+        "Требуется Ollama 0.5.13+",
+        "Для Foundry Local: минимум 8GB RAM и 3GB диска, рекомендовано 16GB RAM и 15GB диска",
+        "Размер модели в Ollama: 2.5GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст"
+      ],
+      "install_command": "ollama run phi4-mini",
+      "official_url": "https://learn.microsoft.com/en-us/azure/foundry-local/get-started",
+      "ollama_url": "https://ollama.com/library/phi4-mini",
+      "source_label": "Источник: Microsoft + Ollama",
+      "chips": [
+        "3.8B",
+        "128K",
+        "compact",
+        "function calling"
+      ],
+      "note": "Очень удобный вариант для пилота и небольших корпоративных сервисов.",
+      "recommended_for": [
+        "Пилот"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "phi4_mini_reasoning",
+      "display_name": "Phi-4 Mini Reasoning",
+      "install_name": "phi4-mini-reasoning",
+      "family": "Phi",
+      "category": "Рассуждение",
+      "deployment": "Локально",
+      "site_badge_text": "3.8B / 128K",
+      "site_badge_class": "tag-green",
+      "description": "Лёгкая reasoning-модель Phi для логики, математики и constrained environments.",
+      "server_requirements": [
+        "Если использовать Foundry Local: минимум 8GB RAM и 3GB диска, рекомендовано 16GB RAM и 15GB диска",
+        "Размер модели в Ollama: 3.2GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Подходит для memory-constrained локального стенда"
+      ],
+      "install_command": "ollama run phi4-mini-reasoning",
+      "official_url": "https://ollama.com/library/phi4-mini-reasoning",
+      "ollama_url": "https://ollama.com/library/phi4-mini-reasoning",
+      "source_label": "Источник: Microsoft + Ollama",
+      "chips": [
+        "reasoning",
+        "3.8B",
+        "128K",
+        "compact"
+      ],
+      "note": "Один из лучших лёгких reasoning-вариантов.",
+      "recommended_for": [
+        "Пилот",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "phi4",
+      "display_name": "Phi-4",
+      "install_name": "phi4",
+      "family": "Phi",
+      "category": "Рассуждение",
+      "deployment": "Частный сервер",
+      "site_badge_text": "14B / 16K",
+      "site_badge_class": "tag-blue",
+      "description": "14B open model от Microsoft для reasoning, аналитики и внутренних текстовых сервисов.",
+      "server_requirements": [
+        "Для Foundry Local: минимум 8GB RAM и 3GB диска, рекомендовано 16GB RAM и 15GB диска",
+        "Размер модели в Ollama: 9.1GB",
+        "Контекстное окно: 16K",
+        "Тип входа: текст",
+        "Ориентирована на low-latency локальный inference"
+      ],
+      "install_command": "ollama run phi4",
+      "official_url": "https://azure.microsoft.com/en-us/products/phi",
+      "ollama_url": "https://ollama.com/library/phi4",
+      "source_label": "Источник: Microsoft + Ollama",
+      "chips": [
+        "14B",
+        "16K",
+        "reasoning",
+        "low latency"
+      ],
+      "note": "Сильный локальный reasoning-вариант без экстремальных требований.",
+      "recommended_for": [
+        "Продакшн",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "phi4_reasoning",
+      "display_name": "Phi-4 Reasoning",
+      "install_name": "phi4-reasoning",
+      "family": "Phi",
+      "category": "Рассуждение",
+      "deployment": "Частный сервер",
+      "site_badge_text": "14B / 32K",
+      "site_badge_class": "tag-blue",
+      "description": "Open-weight reasoning-модель Phi для сложных логических и аналитических задач.",
+      "server_requirements": [
+        "Размер модели в Ollama: 11GB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Базовые требования Foundry Local: 8GB RAM минимум / 16GB рекомендовано",
+        "Подходит для локального reasoning-контра"
+      ],
+      "install_command": "ollama run phi4-reasoning",
+      "official_url": "https://ollama.com/library/phi4-reasoning",
+      "ollama_url": "https://ollama.com/library/phi4-reasoning",
+      "source_label": "Источник: Microsoft + Ollama",
+      "chips": [
+        "14B",
+        "32K",
+        "reasoning",
+        "open-weight"
+      ],
+      "note": "Подходит для внутренних аналитических задач и логики.",
+      "recommended_for": [
+        "Продакшн",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "deepseek_r1_1_5b",
+      "display_name": "DeepSeek-R1 1.5B",
+      "install_name": "deepseek-r1:1.5b",
+      "family": "DeepSeek",
+      "category": "Рассуждение",
+      "deployment": "Локально",
+      "site_badge_text": "1.5B / 128K",
+      "site_badge_class": "tag-green",
+      "description": "Компактный distilled reasoning-вариант для лёгкого локального стенда.",
+      "server_requirements": [
+        "Размер модели в Ollama: 1.1GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Подходит для very-light reasoning-пилота",
+        "Требования зависят от выбранного backend и квантования"
+      ],
+      "install_command": "ollama run deepseek-r1:1.5b",
+      "official_url": "https://github.com/deepseek-ai/DeepSeek-R1",
+      "ollama_url": "https://ollama.com/library/deepseek-r1:1.5b",
+      "source_label": "Источник: DeepSeek + Ollama",
+      "chips": [
+        "reasoning",
+        "1.5B",
+        "128K",
+        "compact"
+      ],
+      "note": "Минимальный вход в reasoning-семейство DeepSeek-R1.",
+      "recommended_for": [
+        "Пилот",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "deepseek_r1_8b",
+      "display_name": "DeepSeek-R1 8B",
+      "install_name": "deepseek-r1:8b",
+      "family": "DeepSeek",
+      "category": "Рассуждение",
+      "deployment": "Частный сервер",
+      "site_badge_text": "8B / 128K",
+      "site_badge_class": "tag-amber",
+      "description": "Популярный локальный reasoning-вариант для математики, логики и аналитики.",
+      "server_requirements": [
+        "Размер модели в Ollama: 5.2GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Точный minimum по VRAM зависит от квантования и backend",
+        "Подходит для on-prem reasoning-задач"
+      ],
+      "install_command": "ollama run deepseek-r1:8b",
+      "official_url": "https://github.com/deepseek-ai/DeepSeek-R1",
+      "ollama_url": "https://ollama.com/library/deepseek-r1:8b",
+      "source_label": "Источник: DeepSeek + Ollama",
+      "chips": [
+        "reasoning",
+        "8B",
+        "128K",
+        "math"
+      ],
+      "note": "Практичный on-prem вариант для reasoning-кейсов.",
+      "recommended_for": [
+        "Аналитика",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "deepseek_r1_32b",
+      "display_name": "DeepSeek-R1 32B",
+      "install_name": "deepseek-r1:32b",
+      "family": "DeepSeek",
+      "category": "Рассуждение",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "32B / 128K",
+      "site_badge_class": "tag-blue",
+      "description": "Тяжёлая reasoning-модель для более серьёзных on-prem сценариев.",
+      "server_requirements": [
+        "Размер модели в Ollama: 20GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст",
+        "Класс выделенного сервера",
+        "Нужен существенный запас памяти"
+      ],
+      "install_command": "ollama run deepseek-r1:32b",
+      "official_url": "https://github.com/deepseek-ai/DeepSeek-R1",
+      "ollama_url": "https://ollama.com/library/deepseek-r1:32b",
+      "source_label": "Источник: DeepSeek + Ollama",
+      "chips": [
+        "reasoning",
+        "32B",
+        "128K",
+        "heavy"
+      ],
+      "note": "Для сценариев, где 8B уже недостаточно.",
+      "recommended_for": [
+        "Продакшн",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "deepseek_coder_1_3b",
+      "display_name": "DeepSeek-Coder 1.3B",
+      "install_name": "deepseek-coder:1.3b",
+      "family": "DeepSeek",
+      "category": "Код",
+      "deployment": "Локально",
+      "site_badge_text": "1.3B / 16K",
+      "site_badge_class": "tag-green",
+      "description": "Лёгкая coding-модель для локального пилота и простых инженерных задач.",
+      "server_requirements": [
+        "Размер модели в Ollama: 776MB",
+        "Контекстное окно: 16K",
+        "Тип входа: текст",
+        "Подходит для very-light coding-стенда",
+        "Ориентирована на code generation и code completion"
+      ],
+      "install_command": "ollama run deepseek-coder:1.3b",
+      "official_url": "https://ollama.com/library/deepseek-coder",
+      "ollama_url": "https://ollama.com/library/deepseek-coder:1.3b",
+      "source_label": "Источник: DeepSeek-Coder + Ollama",
+      "chips": [
+        "coding",
+        "1.3B",
+        "16K",
+        "compact"
+      ],
+      "note": "Минимальный вход в DeepSeek coding-линейку.",
+      "recommended_for": [
+        "Пилот",
+        "Код"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "deepseek_coder_33b",
+      "display_name": "DeepSeek-Coder 33B",
+      "install_name": "deepseek-coder:33b",
+      "family": "DeepSeek",
+      "category": "Код",
+      "deployment": "Изолированный контур",
+      "site_badge_text": "33B / 16K",
+      "site_badge_class": "tag-blue",
+      "description": "Старший coding-вариант для локального dev-контура и тяжёлых инженерных задач.",
+      "server_requirements": [
+        "Размер модели в Ollama: 19GB",
+        "Контекстное окно: 16K",
+        "Тип входа: текст",
+        "Нужен выделенный coding-сервер",
+        "Подходит для серьёзной внутренней разработки"
+      ],
+      "install_command": "ollama run deepseek-coder:33b",
+      "official_url": "https://ollama.com/library/deepseek-coder",
+      "ollama_url": "https://ollama.com/library/deepseek-coder:33b",
+      "source_label": "Источник: DeepSeek-Coder + Ollama",
+      "chips": [
+        "coding",
+        "33B",
+        "16K",
+        "heavy"
+      ],
+      "note": "Хорош для выделенного локального coding-сервера.",
+      "recommended_for": [
+        "Код",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": false,
+      "gpu_required": true,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "deepseek_coder_v2_16b",
+      "display_name": "DeepSeek-Coder-V2 16B",
+      "install_name": "deepseek-coder-v2:16b",
+      "family": "DeepSeek",
+      "category": "Код",
+      "deployment": "Частный сервер",
+      "site_badge_text": "16B / 160K",
+      "site_badge_class": "tag-amber",
+      "description": "MoE coding-модель с большим контекстом для сложных coding-сессий и длинных задач.",
+      "server_requirements": [
+        "Размер модели в Ollama: 8.9GB",
+        "Контекстное окно: 160K",
+        "Тип входа: текст",
+        "Подходит для coding-задач с длинным контекстом",
+        "Хороша для внутреннего dev-ассистента"
+      ],
+      "install_command": "ollama run deepseek-coder-v2:16b",
+      "official_url": "https://ollama.com/library/deepseek-coder-v2",
+      "ollama_url": "https://ollama.com/library/deepseek-coder-v2:16b",
+      "source_label": "Источник: DeepSeek-Coder-V2 + Ollama",
+      "chips": [
+        "coding",
+        "16B",
+        "160K",
+        "MoE"
+      ],
+      "note": "Сильный вариант под длинные coding-сессии.",
+      "recommended_for": [
+        "Код",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "mistral",
+      "display_name": "Mistral 7B",
+      "install_name": "mistral",
+      "family": "Mistral",
+      "category": "Чат",
+      "deployment": "Локально",
+      "site_badge_text": "7B / 32K",
+      "site_badge_class": "tag-green",
+      "description": "Классический компактный Mistral для текста и локального чата.",
+      "server_requirements": [
+        "Размер модели в Ollama: 4.4GB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Подходит для лёгкого локального сервера",
+        "Хороший базовый текстовый вариант"
+      ],
+      "install_command": "ollama run mistral",
+      "official_url": "https://ollama.com/library/mistral",
+      "ollama_url": "https://ollama.com/library/mistral",
+      "source_label": "Источник: Mistral + Ollama",
+      "chips": [
+        "chat",
+        "7B",
+        "32K",
+        "light"
+      ],
+      "note": "Хорошая базовая текстовая модель без тяжёлых требований.",
+      "recommended_for": [
+        "Пилот"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "general",
+      "support_tier": "baseline_supported_now"
+    },
+    {
+      "id": "mistral_small",
+      "display_name": "Mistral Small 3 24B",
+      "install_name": "mistral-small",
+      "family": "Mistral",
+      "category": "Чат",
+      "deployment": "Частный сервер",
+      "site_badge_text": "24B / 32K",
+      "site_badge_class": "tag-amber",
+      "description": "Mistral Small 3 для быстрого локального чата и knowledge-dense сценариев.",
+      "server_requirements": [
+        "Ориентир по железу: одна RTX 4090 или MacBook с 32GB RAM после квантования",
+        "Размер модели в Ollama: 14GB",
+        "Контекстное окно: 32K",
+        "Тип входа: текст",
+        "Подходит для fast-response conversational agents"
+      ],
+      "install_command": "ollama run mistral-small",
+      "official_url": "https://ollama.com/library/mistral-small",
+      "ollama_url": "https://ollama.com/library/mistral-small",
+      "source_label": "Источник: Mistral + Ollama",
+      "chips": [
+        "24B",
+        "RTX 4090",
+        "32K",
+        "chat"
+      ],
+      "note": "Один из самых понятных по железу on-prem вариантов.",
+      "recommended_for": [
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": false,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "mistral_small3_1_24b",
+      "display_name": "Mistral Small 3.1 24B",
+      "install_name": "mistral-small3.1:24b",
+      "family": "Mistral",
+      "category": "Мультимодальная",
+      "deployment": "Частный сервер",
+      "site_badge_text": "24B / 128K",
+      "site_badge_class": "tag-amber",
+      "description": "Мультимодальная версия Mistral Small с текстом, изображениями и длинным контекстом.",
+      "server_requirements": [
+        "Требуется Ollama 0.6.5 или выше",
+        "Размер модели в Ollama: 15GB",
+        "Контекстное окно: 128K",
+        "Тип входа: текст и изображения",
+        "Для q8_0-варианта размер артефакта: 26GB"
+      ],
+      "install_command": "ollama run mistral-small3.1:24b",
+      "official_url": "https://ollama.com/library/mistral-small3.1",
+      "ollama_url": "https://ollama.com/library/mistral-small3.1:24b",
+      "source_label": "Источник: Mistral + Ollama",
+      "chips": [
+        "vision",
+        "24B",
+        "128K",
+        "Ollama 0.6.5+"
+      ],
+      "note": "Хороший мультимодальный on-prem вариант на одном сильном сервере.",
+      "recommended_for": [
+        "Мультимодальность",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text",
+        "image"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": true,
+      "cpu_supported": false,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": true,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "gpu_or_heavy_infra"
+    },
+    {
+      "id": "mistral_nemo",
+      "display_name": "Mistral Nemo 12B",
+      "install_name": "mistral-nemo",
+      "family": "Mistral",
+      "category": "Чат",
+      "deployment": "Частный сервер",
+      "site_badge_text": "12B / 1000K",
+      "site_badge_class": "tag-blue",
+      "description": "12B-модель Mistral с очень длинным контекстом для задач, где критичен большой контекстный буфер.",
+      "server_requirements": [
+        "Размер модели в Ollama: 7.1GB",
+        "Контекстное окно: 1000K",
+        "Тип входа: текст",
+        "Подходит для задач с очень длинным контекстом",
+        "Требует аккуратного контроля памяти на длинных запросах"
+      ],
+      "install_command": "ollama run mistral-nemo",
+      "official_url": "https://ollama.com/library/mistral-nemo",
+      "ollama_url": "https://ollama.com/library/mistral-nemo",
+      "source_label": "Источник: Mistral + Ollama",
+      "chips": [
+        "12B",
+        "1000K",
+        "long context",
+        "text"
+      ],
+      "note": "Сильный выбор, если важен очень длинный контекст.",
+      "recommended_for": [
+        "Продакшн",
+        "Аналитика"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": true,
+      "enabled_in_installer": false,
+      "enabled_for_validation_user": false,
+      "policy_tier": "unassigned",
+      "support_tier": "compatible_requires_validation"
+    }
+  ]
+}
