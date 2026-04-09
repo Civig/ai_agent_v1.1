@@ -120,6 +120,38 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
             category_dir.mkdir(parents=True, exist_ok=True)
             (category_dir / "policy.json").write_text(json.dumps(payload), encoding="utf-8")
 
+    @staticmethod
+    def write_model_registry(path: Path, *, models=None):
+        payload = {
+            "schema_version": 1,
+            "models": models
+            or [
+                {
+                    "install_name": "phi3:mini",
+                    "display_name": "Phi-3 Mini",
+                    "policy_tier": "general",
+                    "enabled_for_validation_user": True,
+                    "installer_order": 1,
+                },
+                {
+                    "install_name": "codellama:13b",
+                    "display_name": "Code Llama 13B",
+                    "policy_tier": "coding",
+                    "enabled_for_validation_user": True,
+                    "installer_order": 2,
+                },
+                {
+                    "install_name": "llama3.1:8b",
+                    "display_name": "Llama 3.1 8B",
+                    "policy_tier": "admin",
+                    "enabled_for_validation_user": True,
+                    "installer_order": 3,
+                },
+            ],
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
     def test_request_uses_bearer_auth_without_session_detects_bearer_only_mode(self):
         request = self.make_request(headers={"authorization": "Bearer abc"}, cookies={})
 
@@ -802,6 +834,124 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(validation_allowed.keys()), ["phi3:mini", "codellama:13b", "llama3.1:8b"])
         self.assertEqual(list(normal_allowed.keys()), ["phi3:mini"])
 
+    def test_model_authorization_validation_user_uses_registry_enabled_flag(self):
+        models = {
+            "phi3:mini": {"name": "phi3:mini", "description": "General"},
+            "codellama:13b": {"name": "codellama:13b", "description": "Coding"},
+            "llama3.1:8b": {"name": "llama3.1:8b", "description": "Admin"},
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            policy_root = Path(temp_dir) / "policy"
+            registry_path = Path(temp_dir) / "models.json"
+            self.write_policy_catalog(policy_root)
+            self.write_model_registry(
+                registry_path,
+                models=[
+                    {
+                        "install_name": "phi3:mini",
+                        "display_name": "Phi-3 Mini",
+                        "policy_tier": "general",
+                        "enabled_for_validation_user": True,
+                        "installer_order": 1,
+                    },
+                    {
+                        "install_name": "codellama:13b",
+                        "display_name": "Code Llama 13B",
+                        "policy_tier": "coding",
+                        "enabled_for_validation_user": False,
+                        "installer_order": 2,
+                    },
+                    {
+                        "install_name": "llama3.1:8b",
+                        "display_name": "Llama 3.1 8B",
+                        "policy_tier": "admin",
+                        "enabled_for_validation_user": True,
+                        "installer_order": 3,
+                    },
+                ],
+            )
+            with patch.object(auth_module.settings, "MODEL_POLICY_DIR", str(policy_root)), patch.object(
+                auth_module.settings, "MODEL_REGISTRY_PATH", str(registry_path)
+            ), patch.object(auth_module.settings, "INSTALL_TEST_USER", "aitest"), patch.object(
+                auth_module.settings, "MODEL_ACCESS_CODING_GROUPS", ""
+            ), patch.object(auth_module.settings, "MODEL_ACCESS_ADMIN_GROUPS", ""):
+                validation_allowed = auth_module.get_allowed_models_for_user(
+                    {"username": "aitest", "groups": ["domain_users"]},
+                    models,
+                )
+                normal_allowed = auth_module.get_allowed_models_for_user(
+                    {"username": "alice", "groups": ["domain_users"]},
+                    models,
+                )
+
+        self.assertEqual(list(validation_allowed.keys()), ["phi3:mini", "llama3.1:8b"])
+        self.assertEqual(list(normal_allowed.keys()), ["phi3:mini"])
+
+    def test_model_authorization_uses_registry_policy_tier_for_runtime_membership(self):
+        models = {
+            "phi3:mini": {"name": "phi3:mini", "description": "General"},
+            "codellama:13b": {"name": "codellama:13b", "description": "Coding"},
+            "qwen2.5-coder:7b": {"name": "qwen2.5-coder:7b", "description": "Coding"},
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            policy_root = Path(temp_dir) / "policy"
+            registry_path = Path(temp_dir) / "models.json"
+            self.write_policy_catalog(
+                policy_root,
+                categories={
+                    "general": {
+                        "category": "general",
+                        "display_name": "General-purpose models",
+                        "enabled": True,
+                        "models": [{"model_key": "phi3:mini", "display_name": "Phi-3 Mini"}],
+                    },
+                    "coding": {
+                        "category": "coding",
+                        "display_name": "Coding models",
+                        "enabled": True,
+                        "models": [{"model_key": "codellama:13b", "display_name": "Code Llama 13B"}],
+                    },
+                },
+            )
+            self.write_model_registry(
+                registry_path,
+                models=[
+                    {
+                        "install_name": "phi3:mini",
+                        "display_name": "Phi-3 Mini",
+                        "policy_tier": "general",
+                        "enabled_for_validation_user": True,
+                        "installer_order": 1,
+                    },
+                    {
+                        "install_name": "codellama:13b",
+                        "display_name": "Code Llama 13B",
+                        "policy_tier": "coding",
+                        "enabled_for_validation_user": True,
+                        "installer_order": 2,
+                    },
+                    {
+                        "install_name": "qwen2.5-coder:7b",
+                        "display_name": "Qwen 2.5 Coder 7B",
+                        "policy_tier": "coding",
+                        "enabled_for_validation_user": True,
+                        "installer_order": 3,
+                    },
+                ],
+            )
+            with patch.object(auth_module.settings, "MODEL_POLICY_DIR", str(policy_root)), patch.object(
+                auth_module.settings, "MODEL_REGISTRY_PATH", str(registry_path)
+            ), patch.object(auth_module.settings, "MODEL_ACCESS_CODING_GROUPS", "ai-developers"), patch.object(
+                auth_module.settings, "MODEL_ACCESS_ADMIN_GROUPS", "ai-admins"
+            ):
+                developer_allowed = auth_module.get_allowed_models_for_user({"groups": ["ai-developers"]}, models)
+                general_allowed = auth_module.get_allowed_models_for_user({"groups": ["domain_users"]}, models)
+
+        self.assertEqual(list(developer_allowed.keys()), ["phi3:mini", "codellama:13b", "qwen2.5-coder:7b"])
+        self.assertEqual(list(general_allowed.keys()), ["phi3:mini"])
+
     def test_model_authorization_fails_closed_when_policy_catalog_is_missing(self):
         models = {"phi3:mini": {"name": "phi3:mini", "description": "General"}}
 
@@ -892,6 +1042,59 @@ class AuthSsoPreparationTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["key"] for item in payload], ["phi3:mini", "codellama:13b", "llama3.1:8b"])
+
+    async def test_api_models_validation_user_uses_registry_enabled_flag(self):
+        models = {
+            "phi3:mini": {"name": "phi3:mini", "description": "General", "size": "1", "status": "active"},
+            "codellama:13b": {"name": "codellama:13b", "description": "Coding", "size": "2", "status": "active"},
+            "llama3.1:8b": {"name": "llama3.1:8b", "description": "Admin", "size": "3", "status": "active"},
+        }
+        gateway = types.SimpleNamespace(set_model_catalog=AsyncMock(return_value=None))
+        request = types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace(llm_gateway=gateway)))
+        current_user = {"username": "aitest", "groups": ["domain_users"], "auth_source": "password"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            policy_root = Path(temp_dir) / "policy"
+            registry_path = Path(temp_dir) / "models.json"
+            self.write_policy_catalog(policy_root)
+            self.write_model_registry(
+                registry_path,
+                models=[
+                    {
+                        "install_name": "phi3:mini",
+                        "display_name": "Phi-3 Mini",
+                        "policy_tier": "general",
+                        "enabled_for_validation_user": True,
+                        "installer_order": 1,
+                    },
+                    {
+                        "install_name": "codellama:13b",
+                        "display_name": "Code Llama 13B",
+                        "policy_tier": "coding",
+                        "enabled_for_validation_user": False,
+                        "installer_order": 2,
+                    },
+                    {
+                        "install_name": "llama3.1:8b",
+                        "display_name": "Llama 3.1 8B",
+                        "policy_tier": "admin",
+                        "enabled_for_validation_user": True,
+                        "installer_order": 3,
+                    },
+                ],
+            )
+            with patch.object(app_module.settings, "get_available_models", return_value=models), patch.object(
+                auth_module.settings, "MODEL_POLICY_DIR", str(policy_root)
+            ), patch.object(auth_module.settings, "MODEL_REGISTRY_PATH", str(registry_path)), patch.object(
+                auth_module.settings, "INSTALL_TEST_USER", "aitest"
+            ), patch.object(auth_module.settings, "MODEL_ACCESS_CODING_GROUPS", ""), patch.object(
+                auth_module.settings, "MODEL_ACCESS_ADMIN_GROUPS", ""
+            ):
+                response = await app_module.get_available_models(request, current_user=current_user)
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["key"] for item in payload], ["phi3:mini", "llama3.1:8b"])
 
     async def test_switch_model_rejects_disallowed_model_for_general_user(self):
         models = {

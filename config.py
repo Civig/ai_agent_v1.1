@@ -128,6 +128,7 @@ class Settings(BaseSettings):
     SSO_SERVICE_PRINCIPAL: str = ""
     SSO_KEYTAB_PATH: str = "/etc/corporate-ai-sso/http.keytab"
     MODEL_POLICY_DIR: str = "model_policies"
+    MODEL_REGISTRY_PATH: str = "models/catalog.json"
     MODEL_ACCESS_CODING_GROUPS: str = ""
     MODEL_ACCESS_ADMIN_GROUPS: str = ""
 
@@ -347,6 +348,14 @@ class Settings(BaseSettings):
     @property
     def model_policy_dir(self) -> Path:
         raw_path = (self.MODEL_POLICY_DIR or "model_policies").strip()
+        candidate = Path(raw_path)
+        if candidate.is_absolute():
+            return candidate
+        return Path(__file__).resolve().parent / candidate
+
+    @property
+    def model_registry_path(self) -> Path:
+        raw_path = (self.MODEL_REGISTRY_PATH or "models/catalog.json").strip()
         candidate = Path(raw_path)
         if candidate.is_absolute():
             return candidate

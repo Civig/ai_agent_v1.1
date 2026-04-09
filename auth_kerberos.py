@@ -386,6 +386,108 @@ def get_configured_model_access_groups_for_category(category_key: str) -> set[st
     return set(getattr(settings, settings_attr, ()) or ())
 
 
+def _normalize_registry_policy_tier(value: Any) -> str:
+    normalized = _normalize_policy_category_name(value)
+    if normalized in MODEL_POLICY_CATEGORY_ORDER:
+        return normalized
+    return ""
+
+
+def load_model_registry_catalog(registry_path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
+    root = Path(registry_path or settings.model_registry_path)
+    if not root.exists() or not root.is_file():
+        logger.error("Model registry file %s is missing or invalid", root)
+        return {}
+
+    try:
+        payload = json.loads(root.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error("Failed to load model registry file %s: %s", root, exc)
+        return {}
+
+    model_entries = payload.get("models")
+    if not isinstance(payload, dict) or not isinstance(model_entries, list):
+        logger.error("Model registry file %s does not contain a valid 'models' array", root)
+        return {}
+
+    catalog: Dict[str, Dict[str, Any]] = {}
+    for model_entry in model_entries:
+        if not isinstance(model_entry, dict):
+            continue
+
+        model_key = str(model_entry.get("install_name") or "").strip()
+        if not model_key:
+            continue
+
+        sort_order = model_entry.get("installer_order")
+        if isinstance(sort_order, bool) or not isinstance(sort_order, int):
+            sort_order = len(MODEL_POLICY_CATEGORY_ORDER) * 1000
+
+        catalog[model_key] = {
+            "model_key": model_key,
+            "display_name": str(model_entry.get("display_name") or model_key).strip() or model_key,
+            "category": _normalize_registry_policy_tier(model_entry.get("policy_tier")),
+            "enabled_for_validation_user": bool(model_entry.get("enabled_for_validation_user", False)),
+            "requires_gpu": bool(model_entry.get("gpu_required", False)),
+            "experimental": bool(model_entry.get("experimental", False)),
+            "sort_order": sort_order,
+        }
+
+    return catalog
+
+
+def _iter_registry_models(
+    registry_catalog: Dict[str, Dict[str, Any]],
+    *,
+    category_keys: Optional[set[str]] = None,
+    validation_only: bool = False,
+) -> list[Dict[str, Any]]:
+    models: list[Dict[str, Any]] = []
+    for model_entry in registry_catalog.values():
+        category_key = model_entry.get("category") or ""
+        if category_keys is not None and category_key not in category_keys:
+            continue
+        if validation_only and not model_entry.get("enabled_for_validation_user", False):
+            continue
+        models.append(model_entry)
+
+    return sorted(
+        models,
+        key=lambda item: (
+            MODEL_POLICY_CATEGORY_ORDER.get(item.get("category") or "", len(MODEL_POLICY_CATEGORY_ORDER)),
+            int(item.get("sort_order", len(MODEL_POLICY_CATEGORY_ORDER) * 1000)),
+            str(item.get("model_key") or ""),
+        ),
+    )
+
+
+def _resolve_model_access_entry(
+    live_model: Dict[str, str],
+    *,
+    model_key: str,
+    category_key: str,
+    policy_model: Optional[Dict[str, Any]] = None,
+    registry_model: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    effective_policy = policy_model or {}
+    effective_registry = registry_model or {}
+    display_name = (
+        str(effective_policy.get("display_name") or effective_registry.get("display_name") or model_key).strip() or model_key
+    )
+
+    merged_model = dict(live_model)
+    merged_model.setdefault("name", display_name)
+    merged_model["category"] = category_key or effective_policy.get("category") or effective_registry.get("category") or ""
+    merged_model["policy_display_name"] = display_name
+    merged_model["requires_gpu"] = bool(
+        effective_policy.get("requires_gpu", effective_registry.get("requires_gpu", False))
+    )
+    merged_model["experimental"] = bool(
+        effective_policy.get("experimental", effective_registry.get("experimental", False))
+    )
+    return merged_model
+
+
 def is_validation_user(user_info: Dict[str, Any]) -> bool:
     configured_validation_user = normalize_username(getattr(settings, "INSTALL_TEST_USER", ""))
     if not configured_validation_user:
@@ -459,12 +561,22 @@ def load_model_policy_catalog(policy_root: Optional[Path] = None) -> Dict[str, D
 def get_allowed_model_categories_for_user(
     user_info: Dict[str, Any],
     policy_catalog: Optional[Dict[str, Dict[str, Any]]] = None,
+    registry_catalog: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> list[str]:
     catalog = policy_catalog or load_model_policy_catalog()
     if not catalog:
         return []
 
     if is_validation_user(user_info):
+        registry = registry_catalog if registry_catalog is not None else load_model_registry_catalog()
+        if registry:
+            validation_categories = {
+                str(model_entry.get("category") or "")
+                for model_entry in registry.values()
+                if model_entry.get("enabled_for_validation_user", False)
+            }
+            if validation_categories:
+                return [category_key for category_key in catalog.keys() if category_key in validation_categories]
         return list(catalog.keys())
 
     groups_lower = set(_groups_lower(user_info))
@@ -527,29 +639,71 @@ def get_allowed_models_for_user(
         )
         return {}
 
-    allowed_categories = get_allowed_model_categories_for_user(user_info, policy_catalog)
-    if not allowed_categories:
-        logger.warning(
-            "No model policy categories are available for user %s",
-            user_info.get("username", "unknown"),
-        )
-        return {}
+    registry_catalog = load_model_registry_catalog()
+    validation_mode = is_validation_user(user_info) and bool(registry_catalog)
 
     allowed_models: Dict[str, Dict[str, str]] = {}
-    for category_key in allowed_categories:
-        category_policy = policy_catalog.get(category_key, {})
-        for model_key, model_policy in category_policy.get("models", {}).items():
+    if validation_mode:
+        for registry_model in _iter_registry_models(registry_catalog, validation_only=True):
+            model_key = str(registry_model.get("model_key") or "").strip()
+            if not model_key:
+                continue
             live_model = models.get(model_key)
             if live_model is None:
                 continue
 
-            merged_model = dict(live_model)
-            merged_model.setdefault("name", model_policy["display_name"])
-            merged_model["category"] = category_key
-            merged_model["policy_display_name"] = model_policy["display_name"]
-            merged_model["requires_gpu"] = model_policy["requires_gpu"]
-            merged_model["experimental"] = model_policy["experimental"]
-            allowed_models[model_key] = merged_model
+            category_key = str(registry_model.get("category") or "").strip()
+            model_policy = {}
+            if category_key:
+                model_policy = policy_catalog.get(category_key, {}).get("models", {}).get(model_key, {})
+
+            allowed_models[model_key] = _resolve_model_access_entry(
+                live_model,
+                model_key=model_key,
+                category_key=category_key,
+                policy_model=model_policy,
+                registry_model=registry_model,
+            )
+    else:
+        allowed_categories = get_allowed_model_categories_for_user(user_info, policy_catalog, registry_catalog)
+        if not allowed_categories:
+            logger.warning(
+                "No model policy categories are available for user %s",
+                user_info.get("username", "unknown"),
+            )
+            return {}
+
+        if registry_catalog:
+            for registry_model in _iter_registry_models(registry_catalog, category_keys=set(allowed_categories)):
+                model_key = str(registry_model.get("model_key") or "").strip()
+                if not model_key:
+                    continue
+                live_model = models.get(model_key)
+                if live_model is None:
+                    continue
+
+                category_key = str(registry_model.get("category") or "").strip()
+                model_policy = policy_catalog.get(category_key, {}).get("models", {}).get(model_key, {})
+                allowed_models[model_key] = _resolve_model_access_entry(
+                    live_model,
+                    model_key=model_key,
+                    category_key=category_key,
+                    policy_model=model_policy,
+                    registry_model=registry_model,
+                )
+        else:
+            for category_key in allowed_categories:
+                category_policy = policy_catalog.get(category_key, {})
+                for model_key, model_policy in category_policy.get("models", {}).items():
+                    live_model = models.get(model_key)
+                    if live_model is None:
+                        continue
+                    allowed_models[model_key] = _resolve_model_access_entry(
+                        live_model,
+                        model_key=model_key,
+                        category_key=category_key,
+                        policy_model=model_policy,
+                    )
 
     if not allowed_models:
         logger.warning(
