@@ -9,7 +9,13 @@ from pathlib import Path
 class InstallPostgresProfileTests(unittest.TestCase):
     def _copy_install_fixture(self, temp_dir: str) -> Path:
         repo_root = Path(__file__).resolve().parents[1]
-        for relative_path in ("install.sh", ".env.example", "docker-compose.yml"):
+        for relative_path in (
+            "install.sh",
+            ".env.example",
+            "docker-compose.yml",
+            "models/catalog.json",
+            "tools/export_installer_model_catalog.py",
+        ):
             source_path = repo_root / relative_path
             target_path = Path(temp_dir) / relative_path
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +119,35 @@ class InstallPostgresProfileTests(unittest.TestCase):
             text=True,
         )
 
+    def _run_model_catalog_records(self, temp_dir: str) -> str:
+        temp_root = self._copy_install_fixture(temp_dir)
+        shell_script = textwrap.dedent(
+            """
+            set -Eeuo pipefail
+            cd "$1"
+            export INSTALL_SH_SOURCE_ONLY=1
+            source ./install.sh
+            model_catalog_records
+            """
+        )
+        result = subprocess.run(
+            ["bash", "-lc", shell_script, "bash", str(temp_root)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
+
+    @staticmethod
+    def _parse_model_catalog_keys(records_text: str) -> list[str]:
+        keys: list[str] = []
+        for line in records_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            keys.append(line.split("|", 1)[0])
+        return keys
+
     @staticmethod
     def _get_env_value(env_text: str, key: str) -> str | None:
         prefix = f"{key}="
@@ -204,6 +239,34 @@ class InstallPostgresProfileTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+    def test_curated_installer_catalog_is_loaded_from_registry_in_expected_order(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            records_text = self._run_model_catalog_records(temp_dir)
+
+        self.assertEqual(
+            self._parse_model_catalog_keys(records_text),
+            [
+                "phi3:mini",
+                "gemma2:2b",
+                "mistral",
+                "deepseek-coder:7b",
+                "qwen2.5-coder:7b",
+                "llama3.1:8b",
+                "codellama:13b",
+                "qwen2.5:14b",
+            ],
+        )
+
+    def test_catalog_only_models_do_not_leak_into_curated_installer_shortlist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            records_text = self._run_model_catalog_records(temp_dir)
+
+        keys = self._parse_model_catalog_keys(records_text)
+        self.assertNotIn("gpt-oss:20b", keys)
+        self.assertNotIn("qwen3.5:0.8b", keys)
+        self.assertNotIn("gemma3:4b", keys)
+        self.assertNotIn("phi4-mini", keys)
 
     def test_smoke_validation_user_rejects_custom_model_outside_curated_catalog(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -481,7 +481,17 @@ window.__MODEL_CATALOG__ = [
     "enabled_in_installer": true,
     "enabled_for_validation_user": true,
     "policy_tier": "coding",
-    "support_tier": "baseline_supported_now"
+    "support_tier": "baseline_supported_now",
+    "installer_display_name": "Qwen 2.5 Coder 7B",
+    "installer_order": 5,
+    "installer_summary": "Coding-focused model with stronger multi-language code help",
+    "installer_cpu_guidance": "limited",
+    "installer_min_ram_gb": 16,
+    "installer_rec_ram_gb": 24,
+    "installer_gpu_guidance": "recommended",
+    "installer_min_vram_gb": 8,
+    "installer_comment": "Useful coding-focused default when a GPU-backed pilot is available.",
+    "installer_source_hint": "model_policies/coding"
   },
   {
     "id": "qwen2_5_coder_14b_instruct",
@@ -625,7 +635,17 @@ window.__MODEL_CATALOG__ = [
     "enabled_in_installer": true,
     "enabled_for_validation_user": true,
     "policy_tier": "admin",
-    "support_tier": "baseline_supported_now"
+    "support_tier": "baseline_supported_now",
+    "installer_display_name": "Llama 3.1 8B",
+    "installer_order": 6,
+    "installer_summary": "Stronger general/admin analysis model than the lightweight defaults",
+    "installer_cpu_guidance": "limited",
+    "installer_min_ram_gb": 16,
+    "installer_rec_ram_gb": 24,
+    "installer_gpu_guidance": "recommended",
+    "installer_min_vram_gb": 8,
+    "installer_comment": "Good step-up model for broader reasoning on better-equipped hosts.",
+    "installer_source_hint": "model_policies/admin"
   },
   {
     "id": "llama3_1_70b",
@@ -1439,7 +1459,17 @@ window.__MODEL_CATALOG__ = [
     "enabled_in_installer": true,
     "enabled_for_validation_user": true,
     "policy_tier": "general",
-    "support_tier": "baseline_supported_now"
+    "support_tier": "baseline_supported_now",
+    "installer_display_name": "Mistral 7B",
+    "installer_order": 3,
+    "installer_summary": "Balanced general-purpose model with better quality but more weight",
+    "installer_cpu_guidance": "limited",
+    "installer_min_ram_gb": 12,
+    "installer_rec_ram_gb": 16,
+    "installer_gpu_guidance": "optional",
+    "installer_min_vram_gb": 6,
+    "installer_comment": "Common general model in project docs and bootstrap fallback path.",
+    "installer_source_hint": "model_policies/general + bootstrap_ollama_models.sh + docs"
   },
   {
     "id": "mistral_small",

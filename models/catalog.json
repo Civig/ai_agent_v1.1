@@ -5,7 +5,8 @@
   "website_adapter_file": "website/models-data.js",
   "notes": [
     "Stage 1 unified registry seeded from the existing website catalog.",
-    "Product support fields are conservative and intended for future installer/policy/runtime integration."
+    "Product support fields are conservative and intended for future installer/policy/runtime integration.",
+    "Stage 2 installer shortlist is sourced from enabled_in_installer registry entries."
   ],
   "models": [
     {
@@ -489,7 +490,17 @@
       "enabled_in_installer": true,
       "enabled_for_validation_user": true,
       "policy_tier": "coding",
-      "support_tier": "baseline_supported_now"
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "Qwen 2.5 Coder 7B",
+      "installer_order": 5,
+      "installer_summary": "Coding-focused model with stronger multi-language code help",
+      "installer_cpu_guidance": "limited",
+      "installer_min_ram_gb": 16,
+      "installer_rec_ram_gb": 24,
+      "installer_gpu_guidance": "recommended",
+      "installer_min_vram_gb": 8,
+      "installer_comment": "Useful coding-focused default when a GPU-backed pilot is available.",
+      "installer_source_hint": "model_policies/coding"
     },
     {
       "id": "qwen2_5_coder_14b_instruct",
@@ -633,7 +644,17 @@
       "enabled_in_installer": true,
       "enabled_for_validation_user": true,
       "policy_tier": "admin",
-      "support_tier": "baseline_supported_now"
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "Llama 3.1 8B",
+      "installer_order": 6,
+      "installer_summary": "Stronger general/admin analysis model than the lightweight defaults",
+      "installer_cpu_guidance": "limited",
+      "installer_min_ram_gb": 16,
+      "installer_rec_ram_gb": 24,
+      "installer_gpu_guidance": "recommended",
+      "installer_min_vram_gb": 8,
+      "installer_comment": "Good step-up model for broader reasoning on better-equipped hosts.",
+      "installer_source_hint": "model_policies/admin"
     },
     {
       "id": "llama3_1_70b",
@@ -1447,7 +1468,17 @@
       "enabled_in_installer": true,
       "enabled_for_validation_user": true,
       "policy_tier": "general",
-      "support_tier": "baseline_supported_now"
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "Mistral 7B",
+      "installer_order": 3,
+      "installer_summary": "Balanced general-purpose model with better quality but more weight",
+      "installer_cpu_guidance": "limited",
+      "installer_min_ram_gb": 12,
+      "installer_rec_ram_gb": 16,
+      "installer_gpu_guidance": "optional",
+      "installer_min_vram_gb": 6,
+      "installer_comment": "Common general model in project docs and bootstrap fallback path.",
+      "installer_source_hint": "model_policies/general + bootstrap_ollama_models.sh + docs"
     },
     {
       "id": "mistral_small",
@@ -1592,6 +1623,294 @@
       "enabled_for_validation_user": false,
       "policy_tier": "unassigned",
       "support_tier": "compatible_requires_validation"
+    },
+    {
+      "id": "phi3_mini",
+      "display_name": "Phi-3 Mini",
+      "install_name": "phi3:mini",
+      "family": "Phi",
+      "category": "Чат",
+      "deployment": "Локально",
+      "site_badge_text": "Mini",
+      "site_badge_class": "tag-green",
+      "description": "Light general-purpose assistant for pilot and CPU-first deployments.",
+      "server_requirements": [
+        "CPU guidance: ok",
+        "Minimum RAM: 8 GB",
+        "Recommended RAM: 16 GB",
+        "GPU guidance: optional",
+        "Тип входа: текст"
+      ],
+      "install_command": "ollama run phi3:mini",
+      "official_url": "https://ollama.com/library/phi3:mini",
+      "ollama_url": "https://ollama.com/library/phi3:mini",
+      "source_label": "Источник: Ollama + curated installer baseline",
+      "chips": [
+        "chat",
+        "mini",
+        "cpu-first",
+        "pilot"
+      ],
+      "note": "Best default for conservative CPU-only rollouts.",
+      "recommended_for": [
+        "Пилот"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": false,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "general",
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "Phi-3 Mini",
+      "installer_order": 1,
+      "installer_summary": "Light general-purpose assistant for pilot and CPU-first deployments",
+      "installer_cpu_guidance": "ok",
+      "installer_min_ram_gb": 8,
+      "installer_rec_ram_gb": 16,
+      "installer_gpu_guidance": "optional",
+      "installer_min_vram_gb": 0,
+      "installer_comment": "Best default for conservative CPU-only rollouts.",
+      "installer_source_hint": "model_policies/general + .env.example + docs"
+    },
+    {
+      "id": "gemma2_2b",
+      "display_name": "Gemma 2 2B",
+      "install_name": "gemma2:2b",
+      "family": "Gemma",
+      "category": "Чат",
+      "deployment": "Локально",
+      "site_badge_text": "2B",
+      "site_badge_class": "tag-green",
+      "description": "Light general chat alternative with low resource expectations.",
+      "server_requirements": [
+        "CPU guidance: ok",
+        "Minimum RAM: 8 GB",
+        "Recommended RAM: 16 GB",
+        "GPU guidance: optional",
+        "Тип входа: текст"
+      ],
+      "install_command": "ollama run gemma2:2b",
+      "official_url": "https://ollama.com/library/gemma2:2b",
+      "ollama_url": "https://ollama.com/library/gemma2:2b",
+      "source_label": "Источник: Ollama + curated installer baseline",
+      "chips": [
+        "chat",
+        "2B",
+        "cpu-first",
+        "pilot"
+      ],
+      "note": "Good fallback when you want a small general model beside Phi-3.",
+      "recommended_for": [
+        "Пилот"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": false,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": false,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "general",
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "Gemma 2 2B",
+      "installer_order": 2,
+      "installer_summary": "Light general chat alternative with low resource expectations",
+      "installer_cpu_guidance": "ok",
+      "installer_min_ram_gb": 8,
+      "installer_rec_ram_gb": 16,
+      "installer_gpu_guidance": "optional",
+      "installer_min_vram_gb": 0,
+      "installer_comment": "Good fallback when you want a small general model beside Phi-3.",
+      "installer_source_hint": "model_policies/general + bootstrap_ollama_models.sh"
+    },
+    {
+      "id": "deepseek_coder_7b",
+      "display_name": "DeepSeek Coder 7B",
+      "install_name": "deepseek-coder:7b",
+      "family": "DeepSeek",
+      "category": "Код",
+      "deployment": "Локально",
+      "site_badge_text": "7B",
+      "site_badge_class": "tag-amber",
+      "description": "Code-oriented assistant for implementation and debugging tasks.",
+      "server_requirements": [
+        "CPU guidance: limited",
+        "Minimum RAM: 16 GB",
+        "Recommended RAM: 24 GB",
+        "GPU guidance: recommended",
+        "Тип входа: текст"
+      ],
+      "install_command": "ollama run deepseek-coder:7b",
+      "official_url": "https://ollama.com/library/deepseek-coder",
+      "ollama_url": "https://ollama.com/library/deepseek-coder",
+      "source_label": "Источник: curated installer baseline + Ollama family page",
+      "chips": [
+        "coding",
+        "7B",
+        "installer",
+        "text"
+      ],
+      "note": "Practical coding choice when CPU is acceptable but GPU is preferred.",
+      "recommended_for": [
+        "Код",
+        "Пилот"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": false,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "coding",
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "DeepSeek Coder 7B",
+      "installer_order": 4,
+      "installer_summary": "Code-oriented assistant for implementation and debugging tasks",
+      "installer_cpu_guidance": "limited",
+      "installer_min_ram_gb": 16,
+      "installer_rec_ram_gb": 24,
+      "installer_gpu_guidance": "recommended",
+      "installer_min_vram_gb": 8,
+      "installer_comment": "Practical coding choice when CPU is acceptable but GPU is preferred.",
+      "installer_source_hint": "model_policies/coding"
+    },
+    {
+      "id": "codellama_13b",
+      "display_name": "Code Llama 13B",
+      "install_name": "codellama:13b",
+      "family": "Llama",
+      "category": "Код",
+      "deployment": "Частный сервер",
+      "site_badge_text": "13B",
+      "site_badge_class": "tag-blue",
+      "description": "Heavier coding model for larger coding workloads.",
+      "server_requirements": [
+        "CPU guidance: not recommended",
+        "Minimum RAM: 24 GB",
+        "Recommended RAM: 32 GB",
+        "GPU guidance: recommended",
+        "Тип входа: текст"
+      ],
+      "install_command": "ollama run codellama:13b",
+      "official_url": "https://ollama.com/library/codellama:13b",
+      "ollama_url": "https://ollama.com/library/codellama:13b",
+      "source_label": "Источник: Ollama + curated installer baseline",
+      "chips": [
+        "coding",
+        "13B",
+        "installer",
+        "gpu-preferred"
+      ],
+      "note": "Large for CPU-only hosts; use mainly on better GPU-backed installs.",
+      "recommended_for": [
+        "Код",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": false,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "coding",
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "Code Llama 13B",
+      "installer_order": 7,
+      "installer_summary": "Heavier coding model for larger coding workloads",
+      "installer_cpu_guidance": "not recommended",
+      "installer_min_ram_gb": 24,
+      "installer_rec_ram_gb": 32,
+      "installer_gpu_guidance": "recommended",
+      "installer_min_vram_gb": 12,
+      "installer_comment": "Large for CPU-only hosts; use mainly on better GPU-backed installs.",
+      "installer_source_hint": "model_policies/coding"
+    },
+    {
+      "id": "qwen2_5_14b",
+      "display_name": "Qwen 2.5 14B",
+      "install_name": "qwen2.5:14b",
+      "family": "Qwen",
+      "category": "Рассуждение",
+      "deployment": "Частный сервер",
+      "site_badge_text": "14B",
+      "site_badge_class": "tag-blue",
+      "description": "Heavy admin-tier model for stronger reasoning and long-form analysis.",
+      "server_requirements": [
+        "CPU guidance: not recommended",
+        "Minimum RAM: 24 GB",
+        "Recommended RAM: 32 GB",
+        "GPU guidance: recommended",
+        "Тип входа: текст"
+      ],
+      "install_command": "ollama run qwen2.5:14b",
+      "official_url": "https://ollama.com/library/qwen2.5:14b",
+      "ollama_url": "https://ollama.com/library/qwen2.5:14b",
+      "source_label": "Источник: Ollama + curated installer baseline",
+      "chips": [
+        "reasoning",
+        "14B",
+        "installer",
+        "analysis"
+      ],
+      "note": "Marked experimental/heavier in repo policy; best on GPU-capable hosts.",
+      "recommended_for": [
+        "Аналитика",
+        "Продакшн"
+      ],
+      "input_types": [
+        "text"
+      ],
+      "supports_chat": true,
+      "supports_file_chat": true,
+      "supports_multimodal": false,
+      "cpu_supported": true,
+      "gpu_recommended": true,
+      "gpu_required": false,
+      "heavy_infra": false,
+      "enabled_in_catalog": false,
+      "enabled_in_installer": true,
+      "enabled_for_validation_user": true,
+      "policy_tier": "admin",
+      "support_tier": "baseline_supported_now",
+      "installer_display_name": "Qwen 2.5 14B",
+      "installer_order": 8,
+      "installer_summary": "Heavy admin-tier model for stronger reasoning and long-form analysis",
+      "installer_cpu_guidance": "not recommended",
+      "installer_min_ram_gb": 24,
+      "installer_rec_ram_gb": 32,
+      "installer_gpu_guidance": "recommended",
+      "installer_min_vram_gb": 12,
+      "installer_comment": "Marked experimental/heavier in repo policy; best on GPU-capable hosts.",
+      "installer_source_hint": "model_policies/admin"
     }
   ]
 }

@@ -1102,16 +1102,14 @@ is_ipv4() {
 }
 
 model_catalog_records() {
-    cat <<'EOF'
-phi3:mini|Phi-3 Mini|Light general-purpose assistant for pilot and CPU-first deployments|ok|8 GB|16 GB|optional|0 GB|Best default for conservative CPU-only rollouts.|model_policies/general + .env.example + docs
-gemma2:2b|Gemma 2 2B|Light general chat alternative with low resource expectations|ok|8 GB|16 GB|optional|0 GB|Good fallback when you want a small general model beside Phi-3.|model_policies/general + bootstrap_ollama_models.sh
-mistral|Mistral 7B|Balanced general-purpose model with better quality but more weight|limited|12 GB|16 GB|optional|6 GB|Common general model in project docs and bootstrap fallback path.|model_policies/general + bootstrap_ollama_models.sh + docs
-deepseek-coder:7b|DeepSeek Coder 7B|Code-oriented assistant for implementation and debugging tasks|limited|16 GB|24 GB|recommended|8 GB|Practical coding choice when CPU is acceptable but GPU is preferred.|model_policies/coding
-qwen2.5-coder:7b|Qwen 2.5 Coder 7B|Coding-focused model with stronger multi-language code help|limited|16 GB|24 GB|recommended|8 GB|Useful coding-focused default when a GPU-backed pilot is available.|model_policies/coding
-llama3.1:8b|Llama 3.1 8B|Stronger general/admin analysis model than the lightweight defaults|limited|16 GB|24 GB|recommended|8 GB|Good step-up model for broader reasoning on better-equipped hosts.|model_policies/admin
-codellama:13b|Code Llama 13B|Heavier coding model for larger coding workloads|not recommended|24 GB|32 GB|recommended|12 GB|Large for CPU-only hosts; use mainly on better GPU-backed installs.|model_policies/coding
-qwen2.5:14b|Qwen 2.5 14B|Heavy admin-tier model for stronger reasoning and long-form analysis|not recommended|24 GB|32 GB|recommended|12 GB|Marked experimental/heavier in repo policy; best on GPU-capable hosts.|model_policies/admin
-EOF
+    local registry_path="${ROOT_DIR}/models/catalog.json"
+    local exporter_path="${ROOT_DIR}/tools/export_installer_model_catalog.py"
+
+    [[ -f "${registry_path}" ]] || die "Installer model registry not found at ${registry_path}"
+    [[ -f "${exporter_path}" ]] || die "Installer model catalog exporter not found at ${exporter_path}"
+    command_exists python3 || die "python3 is required to read the installer model registry"
+
+    python3 "${exporter_path}" "${registry_path}" || die "Failed to read installer model registry"
 }
 
 is_model_in_installer_catalog() {
@@ -1134,7 +1132,7 @@ print_model_catalog() {
 
     print_header "Model Selection"
     print_info "Deployment profile: ${SELECTED_INSTALL_MODE^^}"
-    print_info "Installer model catalog: curated project-oriented options from bootstrap script, docs, policy files, and current defaults"
+    print_info "Installer model catalog: curated project-oriented options sourced from models/catalog.json"
 
     while IFS='|' read -r model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint; do
         [[ -n "${model_id}" ]] || continue
