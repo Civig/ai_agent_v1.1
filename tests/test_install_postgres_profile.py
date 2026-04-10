@@ -166,6 +166,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_PASSWORD"), "postgres-secret")
         self.assertEqual(self._get_env_value(env_text, "ADMIN_DASHBOARD_USERS"), "")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_PROXY_SOURCE_CIDRS"), "127.0.0.1/32,::1/128")
+        self.assertEqual(self._get_env_value(env_text, "OLLAMA_PULL_TIMEOUT_SECONDS"), "900")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_ENABLED"), "true")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_BOOTSTRAP_SCHEMA"), "true")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_DUAL_WRITE_CONVERSATION"), "true")
@@ -184,6 +185,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
             POSTGRES_USER=legacy_user
             POSTGRES_PASSWORD=legacy_pw
             TRUSTED_PROXY_SOURCE_CIDRS=10.0.0.0/24
+            OLLAMA_PULL_TIMEOUT_SECONDS=1800
             PERSISTENT_DB_ENABLED=false
             PERSISTENT_DB_URL=postgresql+psycopg://legacy_user:legacy_pw@postgres:5432/legacy_db
             PERSISTENT_DB_BOOTSTRAP_SCHEMA=false
@@ -203,6 +205,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_PASSWORD"), "legacy_pw")
         self.assertEqual(self._get_env_value(env_text, "ADMIN_DASHBOARD_USERS"), "")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_PROXY_SOURCE_CIDRS"), "10.0.0.0/24")
+        self.assertEqual(self._get_env_value(env_text, "OLLAMA_PULL_TIMEOUT_SECONDS"), "1800")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_ENABLED"), "false")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_BOOTSTRAP_SCHEMA"), "false")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_SHADOW_COMPARE"), "true")

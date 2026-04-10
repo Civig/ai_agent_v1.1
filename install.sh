@@ -1521,6 +1521,7 @@ write_env_file() {
     local temp_file preserved_file regex
     local gpu_enabled_value redis_url_value parser_stage_value parser_public_cutover_value
     local persistent_db_url_value trusted_proxy_source_cidrs_value forwarded_allow_ips_value admin_dashboard_users_value
+    local ollama_pull_timeout_value
     local existing_postgres_db existing_postgres_user existing_postgres_password
     local persistent_db_enabled_value persistent_db_bootstrap_value persistent_db_dual_write_value
     local persistent_db_read_threads_value persistent_db_read_messages_value persistent_db_shadow_compare_value
@@ -1533,7 +1534,7 @@ write_env_file() {
         COOKIE_SECURE COOKIE_SAMESITE COOKIE_DOMAIN TRUSTED_AUTH_PROXY_ENABLED
         SSO_ENABLED FORWARDED_ALLOW_IPS TRUSTED_PROXY_SOURCE_CIDRS SSO_LOGIN_PATH SSO_SERVICE_PRINCIPAL SSO_KEYTAB_PATH
         MODEL_POLICY_DIR MODEL_ACCESS_CODING_GROUPS MODEL_ACCESS_ADMIN_GROUPS ADMIN_DASHBOARD_USERS
-        OLLAMA_URL DEFAULT_MODEL AUTO_START_OLLAMA GPU_ENABLED
+        OLLAMA_URL DEFAULT_MODEL OLLAMA_PULL_TIMEOUT_SECONDS AUTO_START_OLLAMA GPU_ENABLED
         ENABLE_PARSER_STAGE ENABLE_PARSER_PUBLIC_CUTOVER
         REDIS_URL REDIS_PASSWORD RATE_LIMIT_REQUESTS RATE_LIMIT_WINDOW_SECONDS
         POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
@@ -1554,6 +1555,7 @@ write_env_file() {
     forwarded_allow_ips_value="$(get_env_value "${env_file}" "FORWARDED_ALLOW_IPS" || get_env_value "${ROOT_DIR}/.env.example" "FORWARDED_ALLOW_IPS" || true)"
     trusted_proxy_source_cidrs_value="$(get_env_value "${env_file}" "TRUSTED_PROXY_SOURCE_CIDRS" || get_env_value "${ROOT_DIR}/.env.example" "TRUSTED_PROXY_SOURCE_CIDRS" || printf "127.0.0.1/32,::1/128")"
     admin_dashboard_users_value="$(get_env_value "${env_file}" "ADMIN_DASHBOARD_USERS" || get_env_value "${ROOT_DIR}/.env.example" "ADMIN_DASHBOARD_USERS" || true)"
+    ollama_pull_timeout_value="$(get_env_value "${env_file}" "OLLAMA_PULL_TIMEOUT_SECONDS" || get_env_value "${ROOT_DIR}/.env.example" "OLLAMA_PULL_TIMEOUT_SECONDS" || printf "900")"
     parser_stage_value="$(normalize_boolean_input "${parser_stage_value:-true}")"
     parser_public_cutover_value="$(normalize_boolean_input "${parser_public_cutover_value:-true}")"
     existing_postgres_db="$(get_env_value "${env_file}" "POSTGRES_DB" || true)"
@@ -1624,6 +1626,7 @@ write_env_file() {
     printf '\n' >>"${temp_file}"
     append_env_line "${temp_file}" "OLLAMA_URL" "http://ollama:11434/api/chat"
     append_env_line "${temp_file}" "DEFAULT_MODEL" "${DEFAULT_MODEL}"
+    append_env_line "${temp_file}" "OLLAMA_PULL_TIMEOUT_SECONDS" "${ollama_pull_timeout_value}"
     append_env_line "${temp_file}" "AUTO_START_OLLAMA" "false"
     append_env_line "${temp_file}" "GPU_ENABLED" "${gpu_enabled_value}"
     append_env_line "${temp_file}" "ENABLE_PARSER_STAGE" "${parser_stage_value}"
@@ -2030,12 +2033,12 @@ ensure_default_model_available() {
         return
     fi
 
-    print_info "Attempting to pull selected default model ${DEFAULT_MODEL}"
-    if docker_compose exec -T ollama ollama pull "${DEFAULT_MODEL}"; then
+    print_info "Running bounded bootstrap for selected default model ${DEFAULT_MODEL}"
+    if DEFAULT_MODEL="${DEFAULT_MODEL}" SECONDARY_MODEL="" "${ROOT_DIR}/bootstrap_ollama_models.sh"; then
         MODEL_BOOTSTRAP_STATUS="done"
     else
         MODEL_BOOTSTRAP_STATUS="failed"
-        print_warning "Failed to pull selected default model ${DEFAULT_MODEL}"
+        print_warning "Bounded bootstrap failed for selected default model ${DEFAULT_MODEL}"
     fi
 
     if docker_compose exec -T ollama ollama list 2>/dev/null | awk 'NR>1 && NF {print $1}' | grep -Fx "${DEFAULT_MODEL}" >/dev/null 2>&1; then

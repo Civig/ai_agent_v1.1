@@ -239,7 +239,10 @@ INSTALL_MODE=gpu ./install.sh
 19. запускает stack в выбранном режиме:
    - CPU mode: обычный `docker compose ...`
    - GPU mode: `docker compose --profile gpu ...`
-20. выполняет bootstrap моделей через [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh)
+20. выполняет bounded bootstrap выбранной default-model через [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh):
+   - online-first: пытается `ollama pull` с bounded timeout
+   - если online pull не дал `DEFAULT_MODEL`, пробует local GGUF fallback, когда локальный asset подготовлен заранее
+   - если ни pull, ни local asset не дали `DEFAULT_MODEL`, завершает bootstrap с честным warning/failure outcome
 21. ждёт `https://127.0.0.1/health/ready`
 22. при наличии test account может выполнить auth smoke check
 
@@ -409,11 +412,19 @@ docker compose --profile gpu up -d
 
 Приложению нужна хотя бы одна доступная модель Ollama.
 
-Installer уже пытается выполнить bootstrap. При ручной установке можно запустить:
+Installer уже пытается выполнить bounded bootstrap выбранной `DEFAULT_MODEL`. При ручной установке можно запустить:
 
 ```bash
 ./bootstrap_ollama_models.sh
 ```
+
+Контракт bootstrap:
+
+- online-first path: `ollama pull` допускается, но каждый pull attempt ограничен `OLLAMA_PULL_TIMEOUT_SECONDS` из `.env` (по умолчанию `900`)
+- retry budget ограничен и предсказуем; bootstrap больше не должен висеть бесконечно на `ollama pull`
+- если online pull не дал `DEFAULT_MODEL`, script пытается использовать локальный `models/*.gguf`, если такой asset подготовлен заранее
+- если локального GGUF нет или он не может создать требуемую `DEFAULT_MODEL`, bootstrap завершается явным failure outcome и не маскирует проблему ложным success
+- fully offline bootstrap не обещается без заранее подготовленного локального model asset
 
 Полезные проверки:
 
@@ -574,6 +585,8 @@ docker compose exec -T ollama ollama list
 docker compose exec -T ollama ollama list
 ./bootstrap_ollama_models.sh
 ```
+
+Если нужен no-internet path, заранее подготовьте локальный `models/*.gguf`, чтобы bootstrap мог перейти на local fallback вместо online pull.
 
 ### GPU profile не стартует
 

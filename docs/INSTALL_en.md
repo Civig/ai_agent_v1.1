@@ -239,7 +239,10 @@ INSTALL_MODE=gpu ./install.sh
 19. starts the stack in the selected mode:
    - CPU mode: standard `docker compose ...`
    - GPU mode: `docker compose --profile gpu ...`
-20. runs model bootstrap through [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh)
+20. runs bounded bootstrap for the selected default model through [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh):
+   - online-first: it attempts `ollama pull` with a bounded timeout
+   - if online pull does not yield `DEFAULT_MODEL`, it tries the local GGUF fallback when a local asset has been prepared in advance
+   - if neither pull nor the local asset yields `DEFAULT_MODEL`, bootstrap finishes with an honest warning/failure outcome
 21. waits for `https://127.0.0.1/health/ready`
 22. optionally runs an auth smoke check if a test account was provided
 
@@ -409,11 +412,19 @@ Use GPU mode only when:
 
 The application depends on at least one Ollama model being available.
 
-The installer already tries to bootstrap models. Manual operators can run:
+The installer already tries to perform bounded bootstrap for the selected `DEFAULT_MODEL`. Manual operators can run:
 
 ```bash
 ./bootstrap_ollama_models.sh
 ```
+
+Bootstrap contract:
+
+- online-first path: `ollama pull` is allowed, but each pull attempt is bounded by `OLLAMA_PULL_TIMEOUT_SECONDS` from `.env` (default `900`)
+- the retry budget is small and predictable; bootstrap should no longer hang forever on `ollama pull`
+- if online pull does not yield `DEFAULT_MODEL`, the script tries a local `models/*.gguf` asset when one has been prepared in advance
+- if no local GGUF is available, or it cannot produce the required `DEFAULT_MODEL`, bootstrap exits with an explicit failure outcome instead of claiming success
+- a fully offline bootstrap is not promised unless the required local model asset has been prepared in advance
 
 Useful checks:
 

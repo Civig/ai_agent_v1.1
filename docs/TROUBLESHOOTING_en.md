@@ -233,9 +233,11 @@ docker compose logs --tail=100 app worker-chat
 ### How to fix
 
 ```bash
-docker compose exec -T ollama ollama pull phi3:mini
 ./bootstrap_ollama_models.sh
 ```
+
+- `./bootstrap_ollama_models.sh` now uses a bounded timeout for pull attempts and should no longer hang forever
+- if you need offline/no-internet bootstrap, prepare a local `models/*.gguf` asset in advance; without that local asset the script will exit with an explicit failure outcome
 
 ## File Upload Rejected
 

@@ -150,7 +150,7 @@ docker compose exec -T ollama ollama pull gemma2:2b
 ./bootstrap_ollama_models.sh
 ```
 
-If no models are present, the stack may be up while chat requests still fail.
+`bootstrap_ollama_models.sh` uses a bounded pull timeout and can fall back to a local `models/*.gguf` asset when one is available. If neither pull nor the local asset yields `DEFAULT_MODEL`, the script exits with an explicit failure.
 
 ## Queue and Job Lifecycle Checks
 
