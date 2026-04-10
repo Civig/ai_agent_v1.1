@@ -116,6 +116,20 @@ Installer по умолчанию генерирует self-signed certificates.
 - Redis по умолчанию single-node
 - HA Redis profile пока не поставляется
 
+## Supply-chain baseline
+
+### Что реализовано
+
+- Docker build теперь опирается на pinned [requirements.lock](../requirements.lock), а не только на loose `requirements.txt`
+- `Dockerfile` использует pinned Python base image digest
+- Compose external images для `redis`, `postgres`, `ollama` и `nginx` теперь имеют pinned baseline references вместо `latest`
+
+### Текущее ограничение
+
+- это minimal reproducibility baseline, а не полный software supply-chain framework
+- host apt repositories, Docker Engine packages и внешние installer downloads всё ещё зависят от operator-controlled infrastructure
+- digest/lock refresh остаётся осознанной operator/release задачей и требует повторной валидации
+
 ## Dashboard telemetry boundary
 
 ### Что реализовано

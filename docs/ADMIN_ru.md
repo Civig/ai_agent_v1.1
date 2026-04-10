@@ -26,6 +26,17 @@
 
 ## Базовые lifecycle-команды
 
+## Release artifact baseline
+
+Для воспроизводимого production rebuild текущий baseline теперь состоит из:
+
+- exact git commit
+- [requirements.lock](../requirements.lock)
+- pinned `PYTHON_BASE_IMAGE` в [Dockerfile](../Dockerfile)
+- pinned `REDIS_IMAGE`, `POSTGRES_IMAGE`, `OLLAMA_IMAGE`, `NGINX_IMAGE` в `.env`
+
+Перед intentional update проверьте, что изменение действительно включает новый reviewed lock/image baseline, а не случайный drift извне.
+
 ### Запуск stack
 
 ```bash
@@ -37,6 +48,8 @@ docker compose up -d
 ```bash
 docker compose up -d --build
 ```
+
+Если цель — воспроизводимый rebuild, сначала убедитесь, что `.env` не переопределяет image references неожиданными значениями и что [requirements.lock](../requirements.lock) соответствует ожидаемому release baseline.
 
 ### Запуск с optional GPU worker
 

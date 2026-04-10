@@ -167,6 +167,22 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "ADMIN_DASHBOARD_USERS"), "")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_PROXY_SOURCE_CIDRS"), "127.0.0.1/32,::1/128")
         self.assertEqual(self._get_env_value(env_text, "OLLAMA_PULL_TIMEOUT_SECONDS"), "900")
+        self.assertEqual(
+            self._get_env_value(env_text, "REDIS_IMAGE"),
+            "redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065",
+        )
+        self.assertEqual(
+            self._get_env_value(env_text, "POSTGRES_IMAGE"),
+            "postgres@sha256:2586e2a95d1c9b31cb2967feb562948f7d364854453d703039b6efa45fe48417",
+        )
+        self.assertEqual(
+            self._get_env_value(env_text, "OLLAMA_IMAGE"),
+            "ollama/ollama@sha256:5a5d014aa774f78ebe1340c0d4afc2e35afc12a2c3b34c84e71f78ea20af4ba3",
+        )
+        self.assertEqual(
+            self._get_env_value(env_text, "NGINX_IMAGE"),
+            "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+        )
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_ENABLED"), "true")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_BOOTSTRAP_SCHEMA"), "true")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_DUAL_WRITE_CONVERSATION"), "true")
@@ -186,6 +202,10 @@ class InstallPostgresProfileTests(unittest.TestCase):
             POSTGRES_PASSWORD=legacy_pw
             TRUSTED_PROXY_SOURCE_CIDRS=10.0.0.0/24
             OLLAMA_PULL_TIMEOUT_SECONDS=1800
+            REDIS_IMAGE=redis@sha256:legacy
+            POSTGRES_IMAGE=postgres@sha256:legacy
+            OLLAMA_IMAGE=ollama/ollama@sha256:legacy
+            NGINX_IMAGE=nginx@sha256:legacy
             PERSISTENT_DB_ENABLED=false
             PERSISTENT_DB_URL=postgresql+psycopg://legacy_user:legacy_pw@postgres:5432/legacy_db
             PERSISTENT_DB_BOOTSTRAP_SCHEMA=false
@@ -206,6 +226,10 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "ADMIN_DASHBOARD_USERS"), "")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_PROXY_SOURCE_CIDRS"), "10.0.0.0/24")
         self.assertEqual(self._get_env_value(env_text, "OLLAMA_PULL_TIMEOUT_SECONDS"), "1800")
+        self.assertEqual(self._get_env_value(env_text, "REDIS_IMAGE"), "redis@sha256:legacy")
+        self.assertEqual(self._get_env_value(env_text, "POSTGRES_IMAGE"), "postgres@sha256:legacy")
+        self.assertEqual(self._get_env_value(env_text, "OLLAMA_IMAGE"), "ollama/ollama@sha256:legacy")
+        self.assertEqual(self._get_env_value(env_text, "NGINX_IMAGE"), "nginx@sha256:legacy")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_ENABLED"), "false")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_BOOTSTRAP_SCHEMA"), "false")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_SHADOW_COMPARE"), "true")
@@ -237,7 +261,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn("postgres:", compose_text)
-        self.assertIn("image: postgres:16", compose_text)
+        self.assertIn("image: ${POSTGRES_IMAGE:-postgres@sha256:2586e2a95d1c9b31cb2967feb562948f7d364854453d703039b6efa45fe48417}", compose_text)
         self.assertIn("POSTGRES_DB: ${POSTGRES_DB:-corporate_ai}", compose_text)
         self.assertIn("POSTGRES_USER: ${POSTGRES_USER:-corporate_ai}", compose_text)
         self.assertIn("POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}", compose_text)

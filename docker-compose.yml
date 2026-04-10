@@ -255,7 +255,7 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065}
     container_name: corporate-ai-redis
     env_file:
       - .env
@@ -275,7 +275,7 @@ services:
       start_period: 10s
 
   postgres:
-    image: postgres:16
+    image: ${POSTGRES_IMAGE:-postgres@sha256:2586e2a95d1c9b31cb2967feb562948f7d364854453d703039b6efa45fe48417}
     container_name: corporate-ai-postgres
     env_file:
       - .env
@@ -296,7 +296,7 @@ services:
       start_period: 15s
 
   ollama:
-    image: ollama/ollama:latest
+    image: ${OLLAMA_IMAGE:-ollama/ollama@sha256:5a5d014aa774f78ebe1340c0d4afc2e35afc12a2c3b34c84e71f78ea20af4ba3}
     container_name: ollama-server
     expose:
       - '11434'
@@ -314,7 +314,7 @@ services:
       start_period: 20s
 
   nginx:
-    image: nginx:1.27-alpine
+    image: ${NGINX_IMAGE:-nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10}
     container_name: corporate-ai-nginx
     depends_on:
       app:

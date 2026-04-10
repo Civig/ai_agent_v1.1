@@ -138,6 +138,35 @@ Compose stack реально включает:
   - `PERSISTENT_DB_BOOTSTRAP_SCHEMA`
   - `PERSISTENT_DB_SHADOW_COMPARE`
   - `PERSISTENT_DB_READ_THREADS`
+- reproducible image baseline:
+  - `REDIS_IMAGE`
+  - `POSTGRES_IMAGE`
+  - `OLLAMA_IMAGE`
+  - `NGINX_IMAGE`
+
+## Reproducible build baseline
+
+Для production rollout текущий repository baseline теперь включает:
+
+- exact git commit
+- [requirements.lock](../requirements.lock) как pinned Python dependency set для Docker build
+- pinned `PYTHON_BASE_IMAGE` digest в [Dockerfile](../Dockerfile)
+- pinned external service image references в `.env` / [`.env.example`](../.env.example) и [docker-compose.yml](../docker-compose.yml)
+
+Практический контракт такой:
+
+- [requirements.txt](../requirements.txt) остаётся human-edited source файлом с direct dependency intent
+- [requirements.lock](../requirements.lock) является reproducible install baseline для Docker image build
+- `docker compose build` должен идти с тем же `requirements.lock`, а не только с loose `>=`
+- production deploy/rebuild должен опираться на pinned image baseline из `.env`, если вы не выполняете осознанный artifact refresh
+
+Что этот baseline не фиксирует полностью:
+
+- host apt repositories и их текущее состояние
+- Docker Engine / host package versions
+- внешние installer downloads вне репозитория
+
+Если вы хотите намеренно обновить dependency/image baseline, это нужно делать как отдельное изменение репозитория: обновить lock file и image digests, затем заново валидировать deploy.
   - `PERSISTENT_DB_READ_MESSAGES`
   - `PERSISTENT_DB_DUAL_WRITE_CONVERSATION`
 - runtime:

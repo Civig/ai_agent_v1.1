@@ -1,4 +1,5 @@
-﻿FROM python:3.11-slim
+ARG PYTHON_BASE_IMAGE=python:3.11-slim@sha256:ad65166ad2583036804a3f772ec8f1cad733cf77d631c6840ab1ea9231b6b350
+FROM ${PYTHON_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -17,9 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 

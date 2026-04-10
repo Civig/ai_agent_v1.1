@@ -138,6 +138,35 @@ Key environment groups include:
   - `PERSISTENT_DB_BOOTSTRAP_SCHEMA`
   - `PERSISTENT_DB_SHADOW_COMPARE`
   - `PERSISTENT_DB_READ_THREADS`
+- reproducible image baseline:
+  - `REDIS_IMAGE`
+  - `POSTGRES_IMAGE`
+  - `OLLAMA_IMAGE`
+  - `NGINX_IMAGE`
+
+## Reproducible Build Baseline
+
+For production rollout, the current repository baseline now includes:
+
+- the exact git commit
+- [requirements.lock](../requirements.lock) as the pinned Python dependency set for Docker builds
+- the pinned `PYTHON_BASE_IMAGE` digest in [Dockerfile](../Dockerfile)
+- pinned external service image references in `.env` / [`.env.example`](../.env.example) and [docker-compose.yml](../docker-compose.yml)
+
+The practical contract is:
+
+- [requirements.txt](../requirements.txt) remains the human-edited source file describing direct dependency intent
+- [requirements.lock](../requirements.lock) is the reproducible install baseline used for Docker image builds
+- `docker compose build` should use that same `requirements.lock`, not only loose `>=` constraints
+- production deploy/rebuild should stay on the pinned image baseline from `.env` unless you are intentionally refreshing artifacts
+
+What this baseline does not fully freeze:
+
+- host apt repositories and their current state
+- Docker Engine / host package versions
+- external installer downloads outside the repository
+
+If you intentionally want to refresh the dependency or image baseline, treat that as a separate repository change: update the lock file and image digests, then re-validate the deploy.
   - `PERSISTENT_DB_READ_MESSAGES`
   - `PERSISTENT_DB_DUAL_WRITE_CONVERSATION`
 - runtime:
