@@ -1425,7 +1425,7 @@ write_env_file() {
     local backup_file=""
     local temp_file preserved_file regex
     local gpu_enabled_value redis_url_value parser_stage_value parser_public_cutover_value
-    local persistent_db_url_value trusted_proxy_source_cidrs_value
+    local persistent_db_url_value trusted_proxy_source_cidrs_value forwarded_allow_ips_value
     local existing_postgres_db existing_postgres_user existing_postgres_password
     local persistent_db_enabled_value persistent_db_bootstrap_value persistent_db_dual_write_value
     local persistent_db_read_threads_value persistent_db_read_messages_value persistent_db_shadow_compare_value
@@ -1436,7 +1436,7 @@ write_env_file() {
         KERBEROS_REALM KERBEROS_KDC
         SECRET_KEY ALGORITHM ACCESS_TOKEN_EXPIRE_MINUTES REFRESH_TOKEN_EXPIRE_DAYS
         COOKIE_SECURE COOKIE_SAMESITE COOKIE_DOMAIN TRUSTED_AUTH_PROXY_ENABLED
-        SSO_ENABLED TRUSTED_PROXY_SOURCE_CIDRS SSO_LOGIN_PATH SSO_SERVICE_PRINCIPAL SSO_KEYTAB_PATH
+        SSO_ENABLED FORWARDED_ALLOW_IPS TRUSTED_PROXY_SOURCE_CIDRS SSO_LOGIN_PATH SSO_SERVICE_PRINCIPAL SSO_KEYTAB_PATH
         MODEL_POLICY_DIR MODEL_ACCESS_CODING_GROUPS MODEL_ACCESS_ADMIN_GROUPS
         OLLAMA_URL DEFAULT_MODEL AUTO_START_OLLAMA GPU_ENABLED
         ENABLE_PARSER_STAGE ENABLE_PARSER_PUBLIC_CUTOVER
@@ -1456,6 +1456,7 @@ write_env_file() {
     redis_url_value="redis://:${REDIS_PASSWORD}@redis:6379/0"
     parser_stage_value="$(get_env_value "${env_file}" "ENABLE_PARSER_STAGE" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_STAGE" || true)"
     parser_public_cutover_value="$(get_env_value "${env_file}" "ENABLE_PARSER_PUBLIC_CUTOVER" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_PUBLIC_CUTOVER" || true)"
+    forwarded_allow_ips_value="$(get_env_value "${env_file}" "FORWARDED_ALLOW_IPS" || get_env_value "${ROOT_DIR}/.env.example" "FORWARDED_ALLOW_IPS" || true)"
     trusted_proxy_source_cidrs_value="$(get_env_value "${env_file}" "TRUSTED_PROXY_SOURCE_CIDRS" || get_env_value "${ROOT_DIR}/.env.example" "TRUSTED_PROXY_SOURCE_CIDRS" || printf "127.0.0.1/32,::1/128")"
     parser_stage_value="$(normalize_boolean_input "${parser_stage_value:-true}")"
     parser_public_cutover_value="$(normalize_boolean_input "${parser_public_cutover_value:-true}")"
@@ -1514,6 +1515,7 @@ write_env_file() {
     append_env_line "${temp_file}" "COOKIE_SAMESITE" "lax"
     append_env_line "${temp_file}" "TRUSTED_AUTH_PROXY_ENABLED" "${SSO_ENABLED}"
     append_env_line "${temp_file}" "SSO_ENABLED" "${SSO_ENABLED}"
+    append_env_line "${temp_file}" "FORWARDED_ALLOW_IPS" "${forwarded_allow_ips_value}"
     append_env_line "${temp_file}" "TRUSTED_PROXY_SOURCE_CIDRS" "${trusted_proxy_source_cidrs_value}"
     append_env_line "${temp_file}" "SSO_LOGIN_PATH" "/auth/sso/login"
     append_env_line "${temp_file}" "SSO_SERVICE_PRINCIPAL" "${SSO_SERVICE_PRINCIPAL}"

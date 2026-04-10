@@ -123,6 +123,7 @@ Key environment groups include:
   - cookie settings
   - `TRUSTED_AUTH_PROXY_ENABLED`
   - `SSO_ENABLED`
+  - `FORWARDED_ALLOW_IPS`
   - `TRUSTED_PROXY_SOURCE_CIDRS`
   - `SSO_LOGIN_PATH`
   - `SSO_SERVICE_PRINCIPAL`
@@ -152,6 +153,8 @@ Key environment groups include:
 The installer writes `.env` for you. On a fresh install it enables the new parser file path out of the box with `ENABLE_PARSER_STAGE=true` and `ENABLE_PARSER_PUBLIC_CUTOVER=true`, and it also writes the current PostgreSQL-backed conversation persistence baseline with `PERSISTENT_DB_ENABLED=true`, schema bootstrap, dual-write, and read-cutover flags. If `.env` already exists and those values are set explicitly, the installer keeps them.
 
 For trusted reverse-proxy SSO, operators must verify `TRUSTED_PROXY_SOURCE_CIDRS` separately. It must list the source addresses/CIDRs of the reverse proxy hop that actually reaches `app`. A loopback-only value is correct only when that hop really arrives from loopback.
+
+Uvicorn proxy-header trust uses a separate runtime knob, `FORWARDED_ALLOW_IPS`. When it is left empty, container startup automatically limits trust to loopback addresses plus the local CIDRs attached to the `app` container so the current Docker Compose + nginx baseline keeps working without wildcard trust. For production, operators should explicitly set the exact reverse-proxy source IP/CIDR that reaches `app`.
 
 The same file-processing baseline also supports additional parser/file-chat limit knobs through env/settings overrides, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout. `.env.example` intentionally keeps the template compact and does not enumerate every advanced parser limit by default.
 

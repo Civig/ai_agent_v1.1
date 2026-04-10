@@ -54,6 +54,7 @@ The application currently includes:
   - placeholder passwords embedded in `REDIS_URL` and `PERSISTENT_DB_URL` are rejected
   - explicit passwords are required for non-local Redis/PostgreSQL deployments
   - `TRUSTED_PROXY_SOURCE_CIDRS` must be valid and is mandatory when trusted-proxy SSO is enabled
+- Uvicorn proxy-header trust no longer relies on a wildcard allowlist; it is configured through `FORWARDED_ALLOW_IPS`
 
 ### Current SSO implementation status
 
@@ -62,6 +63,7 @@ The repository now includes an actual SSO path, but only under a strict trusted-
 - password login remains active as a fallback
 - SSO is disabled by default
 - SSO works only when both `SSO_ENABLED=true` and `TRUSTED_AUTH_PROXY_ENABLED=true`
+- Uvicorn must trust forwarded headers only from the reverse-proxy hop; this is configured through `FORWARDED_ALLOW_IPS`
 - `TRUSTED_PROXY_SOURCE_CIDRS` must explicitly list the source addresses/CIDRs of the reverse proxy hop that reaches `app`
 - the browser-facing Kerberos/SPNEGO negotiation is terminated before the main app
 - the main app only accepts proxy-validated identity headers on the dedicated SSO entry path
@@ -75,6 +77,7 @@ The repository now includes an actual SSO path, but only under a strict trusted-
   - trusted HTTPS FQDN
   - valid `HTTP/<fqdn>@REALM` SPN
   - service keytab mounted into `deploy/sso/`
+  - a correct `FORWARDED_ALLOW_IPS` value matching the reverse-proxy source IP/CIDR that reaches `app`
   - a correct `TRUSTED_PROXY_SOURCE_CIDRS` value matching the reverse-proxy addresses on the hop to `app`
   - domain-joined clients and browser trust-zone configuration
 - app logout only clears the local application session; it does not claim to log the user out of Windows, Kerberos, or the browser's SPNEGO state

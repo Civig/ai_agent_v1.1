@@ -123,6 +123,7 @@ Compose stack реально включает:
   - cookie settings
   - `TRUSTED_AUTH_PROXY_ENABLED`
   - `SSO_ENABLED`
+  - `FORWARDED_ALLOW_IPS`
   - `TRUSTED_PROXY_SOURCE_CIDRS`
   - `SSO_LOGIN_PATH`
   - `SSO_SERVICE_PRINCIPAL`
@@ -152,6 +153,8 @@ Compose stack реально включает:
 `install.sh` пишет `.env` сам. Для fresh install он сразу включает новый parser file path через `ENABLE_PARSER_STAGE=true` и `ENABLE_PARSER_PUBLIC_CUTOVER=true`, а также текущий PostgreSQL-backed conversation persistence baseline через `PERSISTENT_DB_ENABLED=true`, schema bootstrap, dual-write и read-cutover flags. Если `.env` уже существует и в нём эти значения заданы явно, installer их сохраняет.
 
 Для trusted reverse-proxy SSO оператор должен отдельно проверить `TRUSTED_PROXY_SOURCE_CIDRS`: это должен быть список source addresses/CIDR того reverse proxy, который реально обращается к `app`. Значение loopback подходит только там, где hop до `app` действительно приходит с loopback.
+
+Для Uvicorn proxy-header trust действует отдельный runtime knob `FORWARDED_ALLOW_IPS`. Если он пустой, container startup автоматически ограничивает доверие loopback-адресами и локальными CIDR сетевых интерфейсов самого `app` container, чтобы текущий Docker Compose + nginx baseline продолжал работать без wildcard trust. Для production оператор должен явно задать точный source IP/CIDR reverse proxy hop, который доходит до `app`.
 
 Тот же file-processing baseline также поддерживает дополнительные env/settings knobs для parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout. Шаблон `.env.example` сознательно не перечисляет каждый advanced parser limit по отдельности.
 

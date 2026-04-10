@@ -54,6 +54,7 @@
   - placeholder passwords в `REDIS_URL` и `PERSISTENT_DB_URL` отклоняются
   - для non-local Redis/PostgreSQL требуется явный пароль
   - `TRUSTED_PROXY_SOURCE_CIDRS` должен быть валиден и обязателен при включённом trusted-proxy SSO
+- Uvicorn proxy-header trust больше не использует wildcard allowlist; он задаётся через `FORWARDED_ALLOW_IPS`
 
 ### Текущий статус SSO
 
@@ -62,6 +63,7 @@
 - password login остаётся рабочим fallback
 - SSO по умолчанию выключен
 - SSO работает только если одновременно включены `SSO_ENABLED=true` и `TRUSTED_AUTH_PROXY_ENABLED=true`
+- Uvicorn должен доверять forwarded headers только от reverse-proxy hop; это настраивается через `FORWARDED_ALLOW_IPS`
 - `TRUSTED_PROXY_SOURCE_CIDRS` должен явно перечислять source addresses/CIDR того reverse proxy, который делает hop до `app`
 - browser-facing Kerberos/SPNEGO negotiation завершается до основного app
 - основной app принимает только proxy-validated identity headers и только на выделенном SSO entry path
@@ -75,6 +77,7 @@
   - trusted HTTPS FQDN
   - валидный `HTTP/<fqdn>@REALM` SPN
   - service keytab, смонтированный в `deploy/sso/`
+  - корректный `FORWARDED_ALLOW_IPS`, совпадающий с source IP/CIDR reverse proxy hop до `app`
   - корректный `TRUSTED_PROXY_SOURCE_CIDRS`, совпадающий с адресами reverse proxy на hop до `app`
   - domain-joined clients и корректную browser trust-zone configuration
 - logout в app очищает только локальную application session и не означает logout из Windows, Kerberos или browser SPNEGO state
