@@ -131,7 +131,7 @@ The installer generates self-signed certificates by default. This is acceptable 
 
 ### Current limitation
 
-- the current dashboard access model remains a narrow temporary operator gate, not production-ready RBAC
+- the current dashboard access model remains a narrow env-driven operator gate (`ADMIN_DASHBOARD_USERS`), not production-ready RBAC
 - dashboard payloads expose operational telemetry, history, and event context, so this surface should remain operator-only
 - if SSO is expected to cover dashboard access, that still requires separate real-infrastructure validation
 

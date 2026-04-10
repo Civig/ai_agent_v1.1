@@ -171,6 +171,19 @@ class AdminDashboardAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["capacity_scope"], app_module.WORKLOAD_CHAT)
         self.assertEqual(payload["current_user"], "aitest")
 
+    async def test_allowed_user_can_access_dashboard_guard_and_summary_api(self):
+        gateway = FakeDashboardGateway()
+        request = build_request(gateway)
+
+        with patch.object(app_module.settings, "ADMIN_DASHBOARD_USERS", "alice"):
+            app_module.parse_admin_dashboard_allowed_users.cache_clear()
+            current_user = await app_module.get_admin_dashboard_user_required({"username": "alice"})
+            response = await app_module.get_admin_dashboard_summary(request, current_user=current_user)
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["current_user"], "alice")
+
     async def test_summary_endpoint_reports_degraded_state_when_capacity_is_unavailable(self):
         now_ts = 1_800_000_123
         gateway = FakeDashboardGateway(

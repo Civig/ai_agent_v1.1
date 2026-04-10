@@ -164,6 +164,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_DB"), "corporate_ai")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_USER"), "corporate_ai")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_PASSWORD"), "postgres-secret")
+        self.assertEqual(self._get_env_value(env_text, "ADMIN_DASHBOARD_USERS"), "")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_PROXY_SOURCE_CIDRS"), "127.0.0.1/32,::1/128")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_ENABLED"), "true")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_BOOTSTRAP_SCHEMA"), "true")
@@ -200,6 +201,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_DB"), "legacy_db")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_USER"), "legacy_user")
         self.assertEqual(self._get_env_value(env_text, "POSTGRES_PASSWORD"), "legacy_pw")
+        self.assertEqual(self._get_env_value(env_text, "ADMIN_DASHBOARD_USERS"), "")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_PROXY_SOURCE_CIDRS"), "10.0.0.0/24")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_ENABLED"), "false")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_BOOTSTRAP_SCHEMA"), "false")
@@ -211,6 +213,21 @@ class InstallPostgresProfileTests(unittest.TestCase):
             self._get_env_value(env_text, "PERSISTENT_DB_URL"),
             "postgresql+psycopg://legacy_user:legacy_pw@postgres:5432/legacy_db",
         )
+
+    def test_existing_env_preserves_dashboard_allowlist(self):
+        existing_env = textwrap.dedent(
+            """
+            ADMIN_DASHBOARD_USERS=alice, bob
+            REDIS_PASSWORD=old-redis
+            POSTGRES_DB=legacy_db
+            POSTGRES_USER=legacy_user
+            POSTGRES_PASSWORD=legacy_pw
+            """
+        ).strip()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_text = self._run_write_env_file(temp_dir, existing_env=existing_env)
+
+        self.assertEqual(self._get_env_value(env_text, "ADMIN_DASHBOARD_USERS"), "alice, bob")
 
     def test_compose_declares_postgres_service_and_volume(self):
         repo_root = Path(__file__).resolve().parents[1]

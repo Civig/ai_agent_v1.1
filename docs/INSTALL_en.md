@@ -128,6 +128,7 @@ Key environment groups include:
   - `SSO_LOGIN_PATH`
   - `SSO_SERVICE_PRINCIPAL`
   - `SSO_KEYTAB_PATH`
+  - `ADMIN_DASHBOARD_USERS`
 - persistence / PostgreSQL:
   - `POSTGRES_DB`
   - `POSTGRES_USER`
@@ -155,6 +156,8 @@ The installer writes `.env` for you. On a fresh install it enables the new parse
 For trusted reverse-proxy SSO, operators must verify `TRUSTED_PROXY_SOURCE_CIDRS` separately. It must list the source addresses/CIDRs of the reverse proxy hop that actually reaches `app`. A loopback-only value is correct only when that hop really arrives from loopback.
 
 Uvicorn proxy-header trust uses a separate runtime knob, `FORWARDED_ALLOW_IPS`. When it is left empty, container startup automatically limits trust to loopback addresses plus the local CIDRs attached to the `app` container so the current Docker Compose + nginx baseline keeps working without wildcard trust. For production, operators should explicitly set the exact reverse-proxy source IP/CIDR that reaches `app`.
+
+The read-only dashboard operator gate is now configured through `ADMIN_DASHBOARD_USERS`. It is a CSV list of usernames; values are trimmed and normalized with the same logic used for login usernames. An empty value means the dashboard is closed for everyone. Runtime no longer falls back to a test user.
 
 The same file-processing baseline also supports additional parser/file-chat limit knobs through env/settings overrides, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout. `.env.example` intentionally keeps the template compact and does not enumerate every advanced parser limit by default.
 

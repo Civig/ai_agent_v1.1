@@ -128,6 +128,7 @@ Compose stack реально включает:
   - `SSO_LOGIN_PATH`
   - `SSO_SERVICE_PRINCIPAL`
   - `SSO_KEYTAB_PATH`
+  - `ADMIN_DASHBOARD_USERS`
 - persistence / PostgreSQL:
   - `POSTGRES_DB`
   - `POSTGRES_USER`
@@ -155,6 +156,8 @@ Compose stack реально включает:
 Для trusted reverse-proxy SSO оператор должен отдельно проверить `TRUSTED_PROXY_SOURCE_CIDRS`: это должен быть список source addresses/CIDR того reverse proxy, который реально обращается к `app`. Значение loopback подходит только там, где hop до `app` действительно приходит с loopback.
 
 Для Uvicorn proxy-header trust действует отдельный runtime knob `FORWARDED_ALLOW_IPS`. Если он пустой, container startup автоматически ограничивает доверие loopback-адресами и локальными CIDR сетевых интерфейсов самого `app` container, чтобы текущий Docker Compose + nginx baseline продолжал работать без wildcard trust. Для production оператор должен явно задать точный source IP/CIDR reverse proxy hop, который доходит до `app`.
+
+Read-only dashboard operator gate теперь задаётся через `ADMIN_DASHBOARD_USERS`. Это CSV-список usernames; значения trim'ятся и нормализуются той же логикой, что и login usernames. Пустое значение означает, что dashboard закрыт для всех. Runtime больше не использует fallback на тестового пользователя.
 
 Тот же file-processing baseline также поддерживает дополнительные env/settings knobs для parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout. Шаблон `.env.example` сознательно не перечисляет каждый advanced parser limit по отдельности.
 

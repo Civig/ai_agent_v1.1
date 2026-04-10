@@ -20,24 +20,43 @@ class AdminDashboardAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(app_module.user_is_admin({"groups": ["readmin-team"]}))
         self.assertFalse(app_module.user_is_admin({"groups": ["admin-console-users"]}))
 
-    async def test_guard_allows_aitest(self):
-        user = {"username": "aitest", "display_name": "AI Test"}
+    def test_parse_admin_dashboard_allowed_users_normalizes_and_ignores_empty_entries(self):
+        allowed = app_module.parse_admin_dashboard_allowed_users(" aitest@corp.local , , CORP\\alice,invalid user ")
 
-        result = await app_module.get_admin_dashboard_user_required(user)
+        self.assertEqual(allowed, frozenset({"aitest", "alice"}))
 
-        self.assertEqual(result["username"], "aitest")
+    async def test_guard_allows_user_from_env_allowlist(self):
+        user = {"username": "alice", "display_name": "Alice"}
+
+        with unittest.mock.patch.object(app_module.settings, "ADMIN_DASHBOARD_USERS", "alice"):
+            app_module.parse_admin_dashboard_allowed_users.cache_clear()
+            result = await app_module.get_admin_dashboard_user_required(user)
+
+        self.assertEqual(result["username"], "alice")
 
     async def test_guard_normalizes_username_before_allow_check(self):
         user = {"username": "AITEST@CORP.LOCAL"}
 
-        result = await app_module.get_admin_dashboard_user_required(user)
+        with unittest.mock.patch.object(app_module.settings, "ADMIN_DASHBOARD_USERS", " aitest , "):
+            app_module.parse_admin_dashboard_allowed_users.cache_clear()
+            result = await app_module.get_admin_dashboard_user_required(user)
+            self.assertTrue(app_module.user_can_access_admin_dashboard(user))
 
         self.assertEqual(result["username"], "AITEST@CORP.LOCAL")
-        self.assertTrue(app_module.user_can_access_admin_dashboard(user))
 
-    async def test_guard_denies_non_aitest_user(self):
-        with self.assertRaises(HTTPException) as error:
-            await app_module.get_admin_dashboard_user_required({"username": "alice"})
+    async def test_empty_allowlist_denies_everyone(self):
+        with unittest.mock.patch.object(app_module.settings, "ADMIN_DASHBOARD_USERS", ""):
+            app_module.parse_admin_dashboard_allowed_users.cache_clear()
+            with self.assertRaises(HTTPException) as error:
+                await app_module.get_admin_dashboard_user_required({"username": "alice"})
+
+        self.assertEqual(error.exception.status_code, 403)
+
+    async def test_guard_denies_user_outside_allowlist(self):
+        with unittest.mock.patch.object(app_module.settings, "ADMIN_DASHBOARD_USERS", "bob"):
+            app_module.parse_admin_dashboard_allowed_users.cache_clear()
+            with self.assertRaises(HTTPException) as error:
+                await app_module.get_admin_dashboard_user_required({"username": "alice"})
 
         self.assertEqual(error.exception.status_code, 403)
 

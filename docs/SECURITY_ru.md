@@ -131,7 +131,7 @@ Installer по умолчанию генерирует self-signed certificates.
 
 ### Текущее ограничение
 
-- текущая модель доступа к dashboard остаётся временным узким operator gate, а не production-ready RBAC
+- текущая модель доступа к dashboard остаётся узким env-driven operator gate (`ADMIN_DASHBOARD_USERS`), а не production-ready RBAC
 - dashboard payloads раскрывают operational telemetry, history и event context, поэтому этот surface нужно считать operator-only
 - если SSO планируется использовать и для dashboard access, это всё равно требует отдельной real-infra validation
 

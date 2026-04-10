@@ -1425,7 +1425,7 @@ write_env_file() {
     local backup_file=""
     local temp_file preserved_file regex
     local gpu_enabled_value redis_url_value parser_stage_value parser_public_cutover_value
-    local persistent_db_url_value trusted_proxy_source_cidrs_value forwarded_allow_ips_value
+    local persistent_db_url_value trusted_proxy_source_cidrs_value forwarded_allow_ips_value admin_dashboard_users_value
     local existing_postgres_db existing_postgres_user existing_postgres_password
     local persistent_db_enabled_value persistent_db_bootstrap_value persistent_db_dual_write_value
     local persistent_db_read_threads_value persistent_db_read_messages_value persistent_db_shadow_compare_value
@@ -1437,7 +1437,7 @@ write_env_file() {
         SECRET_KEY ALGORITHM ACCESS_TOKEN_EXPIRE_MINUTES REFRESH_TOKEN_EXPIRE_DAYS
         COOKIE_SECURE COOKIE_SAMESITE COOKIE_DOMAIN TRUSTED_AUTH_PROXY_ENABLED
         SSO_ENABLED FORWARDED_ALLOW_IPS TRUSTED_PROXY_SOURCE_CIDRS SSO_LOGIN_PATH SSO_SERVICE_PRINCIPAL SSO_KEYTAB_PATH
-        MODEL_POLICY_DIR MODEL_ACCESS_CODING_GROUPS MODEL_ACCESS_ADMIN_GROUPS
+        MODEL_POLICY_DIR MODEL_ACCESS_CODING_GROUPS MODEL_ACCESS_ADMIN_GROUPS ADMIN_DASHBOARD_USERS
         OLLAMA_URL DEFAULT_MODEL AUTO_START_OLLAMA GPU_ENABLED
         ENABLE_PARSER_STAGE ENABLE_PARSER_PUBLIC_CUTOVER
         REDIS_URL REDIS_PASSWORD RATE_LIMIT_REQUESTS RATE_LIMIT_WINDOW_SECONDS
@@ -1458,6 +1458,7 @@ write_env_file() {
     parser_public_cutover_value="$(get_env_value "${env_file}" "ENABLE_PARSER_PUBLIC_CUTOVER" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_PUBLIC_CUTOVER" || true)"
     forwarded_allow_ips_value="$(get_env_value "${env_file}" "FORWARDED_ALLOW_IPS" || get_env_value "${ROOT_DIR}/.env.example" "FORWARDED_ALLOW_IPS" || true)"
     trusted_proxy_source_cidrs_value="$(get_env_value "${env_file}" "TRUSTED_PROXY_SOURCE_CIDRS" || get_env_value "${ROOT_DIR}/.env.example" "TRUSTED_PROXY_SOURCE_CIDRS" || printf "127.0.0.1/32,::1/128")"
+    admin_dashboard_users_value="$(get_env_value "${env_file}" "ADMIN_DASHBOARD_USERS" || get_env_value "${ROOT_DIR}/.env.example" "ADMIN_DASHBOARD_USERS" || true)"
     parser_stage_value="$(normalize_boolean_input "${parser_stage_value:-true}")"
     parser_public_cutover_value="$(normalize_boolean_input "${parser_public_cutover_value:-true}")"
     existing_postgres_db="$(get_env_value "${env_file}" "POSTGRES_DB" || true)"
@@ -1523,6 +1524,7 @@ write_env_file() {
     append_env_line "${temp_file}" "MODEL_POLICY_DIR" "model_policies"
     append_env_line "${temp_file}" "MODEL_ACCESS_CODING_GROUPS" "${MODEL_ACCESS_CODING_GROUPS}"
     append_env_line "${temp_file}" "MODEL_ACCESS_ADMIN_GROUPS" "${MODEL_ACCESS_ADMIN_GROUPS}"
+    append_env_line "${temp_file}" "ADMIN_DASHBOARD_USERS" "${admin_dashboard_users_value}"
     append_env_line "${temp_file}" "COOKIE_DOMAIN" ""
     printf '\n' >>"${temp_file}"
     append_env_line "${temp_file}" "OLLAMA_URL" "http://ollama:11434/api/chat"

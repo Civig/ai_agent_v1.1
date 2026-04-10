@@ -154,7 +154,6 @@ RESERVED_AUTH_PROXY_HEADERS = frozenset(
         "x-authenticated-groups",
     }
 )
-ADMIN_DASHBOARD_ALLOWED_USERS = frozenset({"aitest"})
 ADMIN_DASHBOARD_REFRESH_INTERVAL_MS = 8000
 
 sanitize_upload_filename = parser_stage.sanitize_upload_filename
@@ -661,6 +660,16 @@ def parse_trusted_proxy_source_cidrs(raw_value: str) -> tuple[ipaddress._BaseNet
     return tuple(cidrs)
 
 
+@lru_cache(maxsize=16)
+def parse_admin_dashboard_allowed_users(raw_value: str) -> frozenset[str]:
+    allowed_users: set[str] = set()
+    for item in raw_value.split(","):
+        normalized = normalize_username(item)
+        if normalized:
+            allowed_users.add(normalized)
+    return frozenset(allowed_users)
+
+
 def get_request_client_host(request: Request) -> str:
     client = getattr(request, "client", None)
     return str(getattr(client, "host", "") or "").strip()
@@ -709,7 +718,8 @@ def user_is_admin(user_info: Dict[str, Any]) -> bool:
 
 def user_can_access_admin_dashboard(user_info: Dict[str, Any]) -> bool:
     username = normalize_username(user_info.get("username") or "")
-    return username in ADMIN_DASHBOARD_ALLOWED_USERS
+    allowed_users = parse_admin_dashboard_allowed_users(settings.ADMIN_DASHBOARD_USERS or "")
+    return bool(username) and username in allowed_users
 
 
 async def get_admin_dashboard_user_required(
