@@ -200,15 +200,21 @@ INSTALL_MODE=gpu ./install.sh
    - outbound connectivity probes for Docker download, Docker registry, Ollama, and PyPI
    - GPU signals such as `nvidia-smi`, `lspci`, Docker GPU runtime visibility, and whether the `gpu` Compose profile exists
 3. recommends `cpu` or `gpu` installation mode and asks for confirmation in interactive mode
-4. warns about low resources and unknown checks, and fails early on critical outbound connectivity problems
-5. installs Docker Engine and the Compose plugin if needed
-6. installs Kerberos/LDAP-related host packages
-7. installs the Ollama CLI if needed
-8. re-validates GPU prerequisites after Docker is available:
+4. warns about low resources and unknown checks
+5. requires outbound connectivity for the first deploy when the host still needs Docker packages, Docker images, the Ollama installer, or model downloads
+6. can switch into post-deploy local repair mode when the system has already been deployed and the required local artifacts are still present:
+   - local regenerate/reconfigure steps continue
+   - outbound connectivity probes no longer block the run by themselves
+   - `docker compose build` is skipped when the required images are already present locally
+   - the installer still stops later with a clear error if required local packages or Docker images are missing
+7. installs Docker Engine and the Compose plugin if needed
+8. installs Kerberos/LDAP-related host packages
+9. installs the Ollama CLI if needed
+10. re-validates GPU prerequisites after Docker is available:
    - if GPU mode is selected and prerequisites are ready, it keeps GPU mode
    - if `INSTALL_MODE=auto`, it falls back to CPU when GPU prerequisites are incomplete
    - if `INSTALL_MODE=gpu` is requested explicitly and prerequisites are still incomplete, it stops instead of continuing blindly
-9. prompts for:
+11. prompts for:
    - AD domain
    - LDAP host
    - optional separate Kerberos KDC host
@@ -223,19 +229,30 @@ INSTALL_MODE=gpu ./install.sh
      - the in-container keytab path, which must stay under `/etc/corporate-ai-sso/`
    - Redis password
    - JWT secret
-10. validates that the LDAP/KDC hostnames resolve on the host, unless an explicit AD IP override was provided
-11. if SSO is enabled, validates that the required HTTP service keytab is present under `deploy/sso/`
-12. writes `.env`, including `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, PostgreSQL/persistence flags, exact-match model access group mappings, and SSO-related flags
-13. writes `deploy/krb5.conf`
-14. optionally writes installer-managed `docker-compose.override.yml`
-15. ensures the host-side Ollama model directory exists
-16. generates self-signed TLS material in `deploy/certs/` if missing
-17. starts the stack in the selected mode:
+12. validates that the LDAP/KDC hostnames resolve on the host, unless an explicit AD IP override was provided
+13. if SSO is enabled, validates that the required HTTP service keytab is present under `deploy/sso/`
+14. writes `.env`, including `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, PostgreSQL/persistence flags, exact-match model access group mappings, and SSO-related flags
+15. writes `deploy/krb5.conf`
+16. optionally writes installer-managed `docker-compose.override.yml`
+17. ensures the host-side Ollama model directory exists
+18. generates self-signed TLS material in `deploy/certs/` if missing
+19. starts the stack in the selected mode:
    - CPU mode: standard `docker compose ...`
    - GPU mode: `docker compose --profile gpu ...`
-18. runs model bootstrap through [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh)
-19. waits for `https://127.0.0.1/health/ready`
-20. optionally runs an auth smoke check if a test account was provided
+20. runs model bootstrap through [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh)
+21. waits for `https://127.0.0.1/health/ready`
+22. optionally runs an auth smoke check if a test account was provided
+
+### Internet access contract
+
+- the first deploy remains online-first: if Docker/Compose, Docker images, the Ollama installer, or model pulls are still needed, the installer will honestly require outbound connectivity
+- this installer does not claim to support a fully offline fresh install from scratch
+- a repeat installer run on an already deployed system can continue without outbound internet when:
+  - `.env` already exists
+  - installer state/host manifests or existing stack containers are present
+  - Docker/Compose are already installed
+  - the required Docker images already exist locally
+- if those local artifacts are missing, the installer does not hide the problem and will stop with a clear error at the stage that still genuinely needs network access
 
 ### What the installer does not automate
 

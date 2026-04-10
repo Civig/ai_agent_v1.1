@@ -27,6 +27,7 @@ curl -k -i https://127.0.0.1/health/ready
 - host DNS issue
 - temporary upstream registry/package-host outage
 - Docker/container DNS issue if host checks pass but Docker pulls or later container lookups still fail
+- this is a hard blocker for the first deploy, but not necessarily for an already deployed system whose local artifacts are still present
 
 ### How to check
 
@@ -48,10 +49,11 @@ docker compose logs --tail=100 ollama
 
 ### How to fix
 
-- if host DNS or HTTPS reachability is failing, fix that first and retry the installer only after the host can repeatedly resolve and reach the required endpoints
+- if this is the first deploy, or the host is missing required local Docker images / host packages / other artifacts, fix host DNS or HTTPS reachability first and retry the installer only after the host can repeatedly resolve and reach the required endpoints
+- if the system has already been deployed and the installer reports post-deploy local repair mode, let it complete the local regenerate/reconfigure steps; network access is only needed in that mode for artifacts that are genuinely missing locally
 - if host checks succeed but Docker pulls still fail, continue with the Docker/container DNS checks below
 - if the upstream registry or package host is temporarily unavailable, wait and retry later
-- this class of failure is outside application scope until basic outbound connectivity is healthy
+- if the installer later stops on a missing local package or Docker image, that specific post-deploy step still cannot proceed without network and the artifact must be prepared in advance
 
 ## Host DNS, `/etc/resolv.conf`, or `systemd-resolved` Is Wrong
 

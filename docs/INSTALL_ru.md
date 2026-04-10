@@ -200,15 +200,21 @@ INSTALL_MODE=gpu ./install.sh
    - outbound connectivity checks до Docker download, Docker registry, Ollama и PyPI
    - GPU signals: `nvidia-smi`, `lspci`, видимость Docker GPU runtime и наличие `gpu` profile в Compose
 3. рекомендует режим `cpu` или `gpu` и в interactive mode просит подтверждение
-4. предупреждает о низких ресурсах и unknown checks, а при критических outbound проблемах останавливается заранее
-5. ставит Docker Engine и Compose plugin, если их нет
-6. ставит Kerberos/LDAP-related host packages
-7. ставит Ollama CLI, если он отсутствует
-8. повторно проверяет GPU prerequisites после появления Docker:
+4. предупреждает о низких ресурсах и unknown checks
+5. для первого deploy требует рабочую outbound connectivity, если хосту ещё нужно скачать Docker packages, Docker images, Ollama installer или модели
+6. если система уже была развёрнута и локальные артефакты сохранились, может перейти в post-deploy local repair mode:
+   - продолжает local regenerate/reconfigure steps
+   - не падает только из-за outbound checks
+   - пропускает `docker compose build`, если нужные images уже есть локально
+   - честно останавливается позже, если без сети отсутствуют обязательные локальные пакеты или Docker images
+7. ставит Docker Engine и Compose plugin, если их нет
+8. ставит Kerberos/LDAP-related host packages
+9. ставит Ollama CLI, если он отсутствует
+10. повторно проверяет GPU prerequisites после появления Docker:
    - если выбран GPU mode и prerequisites готовы, режим сохраняется
    - если используется `INSTALL_MODE=auto`, при неполной GPU readiness installer откатывается на CPU
    - если явно запрошен `INSTALL_MODE=gpu`, а prerequisites всё ещё неполные, installer останавливается и не продолжает “вслепую”
-9. запрашивает:
+11. запрашивает:
    - AD domain
    - LDAP host
    - optional отдельный Kerberos KDC host
@@ -223,19 +229,30 @@ INSTALL_MODE=gpu ./install.sh
      - путь к keytab внутри контейнера, который должен оставаться под `/etc/corporate-ai-sso/`
    - Redis password
    - JWT secret
-10. проверяет, что LDAP/KDC hostnames разрешаются на хосте, если не задан явный AD IP override
-11. если SSO включён, проверяет наличие требуемого HTTP service keytab в `deploy/sso/`
-12. пишет `.env`, включая `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, PostgreSQL/persistence flags, exact-match group mappings для модельных категорий и SSO-related flags
-13. генерирует `deploy/krb5.conf`
-14. при необходимости пишет installer-managed `docker-compose.override.yml`
-15. подготавливает host-side директорию для Ollama models
-16. генерирует self-signed TLS material в `deploy/certs/`, если её ещё нет
-17. запускает stack в выбранном режиме:
+12. проверяет, что LDAP/KDC hostnames разрешаются на хосте, если не задан явный AD IP override
+13. если SSO включён, проверяет наличие требуемого HTTP service keytab в `deploy/sso/`
+14. пишет `.env`, включая `GPU_ENABLED=true|false`, `ENABLE_PARSER_STAGE=true`, `ENABLE_PARSER_PUBLIC_CUTOVER=true`, PostgreSQL/persistence flags, exact-match group mappings для модельных категорий и SSO-related flags
+15. генерирует `deploy/krb5.conf`
+16. при необходимости пишет installer-managed `docker-compose.override.yml`
+17. подготавливает host-side директорию для Ollama models
+18. генерирует self-signed TLS material в `deploy/certs/`, если её ещё нет
+19. запускает stack в выбранном режиме:
    - CPU mode: обычный `docker compose ...`
    - GPU mode: `docker compose --profile gpu ...`
-18. выполняет bootstrap моделей через [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh)
-19. ждёт `https://127.0.0.1/health/ready`
-20. при наличии test account может выполнить auth smoke check
+20. выполняет bootstrap моделей через [`bootstrap_ollama_models.sh`](../bootstrap_ollama_models.sh)
+21. ждёт `https://127.0.0.1/health/ready`
+22. при наличии test account может выполнить auth smoke check
+
+### Контракт по интернет-доступу
+
+- первый deploy остаётся online-first: если Docker/Compose, Docker images, Ollama installer или model pull ещё нужны, installer честно потребует outbound connectivity
+- fully offline fresh install с нуля этот installer не обещает
+- повторный запуск installer на уже развёрнутой системе может продолжиться без внешней сети, если:
+  - уже есть `.env`
+  - уже есть installer state/host manifest или существующие контейнеры стека
+  - Docker/Compose уже установлены
+  - нужные Docker images уже есть локально
+- если этих локальных артефактов нет, installer не маскирует проблему и завершится с явным сообщением на том шаге, где без сети продолжать нельзя
 
 ### Что installer не автоматизирует
 

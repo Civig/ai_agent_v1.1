@@ -27,6 +27,7 @@ curl -k -i https://127.0.0.1/health/ready
 - проблема с host DNS
 - временная недоступность upstream registry/package host
 - проблема Docker/container DNS, если host checks проходят, а Docker pull или дальнейшие container lookup всё равно ломаются
+- это жёсткий blocker для первого deploy, но не обязательно для уже развёрнутой системы с локально сохранёнными артефактами
 
 ### Как проверить
 
@@ -48,10 +49,11 @@ docker compose logs --tail=100 ollama
 
 ### Как исправить
 
-- если не работает host DNS или HTTPS reachability, сначала исправьте это и повторяйте installer только после того, как хост стабильно резолвит и достигает нужные endpoints
+- если это первый deploy или на хосте отсутствуют обязательные локальные Docker images / host packages / другие артефакты, сначала исправьте host DNS или HTTPS reachability и только потом повторяйте installer
+- если система уже была развёрнута и installer сообщает про post-deploy local repair mode, дайте ему пройти local regenerate/reconfigure steps; сеть в этом режиме нужна только для реально отсутствующих локальных артефактов
 - если host checks проходят, а Docker pull всё равно падает, переходите к проверке Docker/container DNS ниже
 - если временно недоступен upstream registry или package host, подождите и повторите позже
-- до восстановления базовой outbound connectivity это проблема инфраструктуры, а не приложения
+- если installer позже останавливается на отсутствующем local package или Docker image, это означает, что конкретный post-deploy шаг без сети всё ещё невозможен и нужный артефакт надо подготовить заранее
 
 ## Host DNS, `/etc/resolv.conf` или `systemd-resolved` настроены неправильно
 

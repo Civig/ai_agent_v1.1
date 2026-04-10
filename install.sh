@@ -119,6 +119,8 @@ INSTALLER_INSTALLED_DOCKER_COMPOSE_PLUGIN="0"
 INSTALLER_INSTALLED_OLLAMA_CLI="0"
 POSTINSTALL_OLLAMA_BIN_PATH=""
 POSTINSTALL_OLLAMA_SERVICE_FRAGMENT=""
+POST_DEPLOY_LOCAL_REPAIR_MODE="0"
+POST_DEPLOY_LOCAL_REPAIR_REASON=""
 
 declare -a APT_PACKAGES_INSTALLED_BY_INSTALLER=()
 
@@ -331,6 +333,81 @@ capture_preinstall_state() {
         if systemd_unit_active ollama.service; then
             PREINSTALL_OLLAMA_SERVICE_ACTIVE="1"
         fi
+    fi
+
+    return 0
+}
+
+stack_containers_present() {
+    command_exists docker || return 1
+
+    local known_container
+    local known_containers=(
+        corporate-ai-assistant
+        corporate-ai-nginx
+        corporate-ai-postgres
+        corporate-ai-redis
+        ollama-server
+    )
+
+    for known_container in "${known_containers[@]}"; do
+        if docker_cmd ps -a --format '{{.Names}}' 2>/dev/null | grep -Fx "${known_container}" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+existing_installation_signals_present() {
+    [[ -f "${ROOT_DIR}/.env" ]] || return 1
+
+    if [[ -f "${STATE_FILE}" || -f "${HOST_STATE_FILE}" ]]; then
+        return 0
+    fi
+
+    stack_containers_present
+}
+
+can_use_post_deploy_local_repair_mode() {
+    [[ "${AUDIT_OUTBOUND_DOCKER_DOWNLOAD}" == "failed" || \
+       "${AUDIT_OUTBOUND_DOCKER_REGISTRY}" == "failed" || \
+       "${AUDIT_OUTBOUND_OLLAMA}" == "failed" || \
+       "${AUDIT_OUTBOUND_PYPI}" == "failed" ]] || return 1
+
+    existing_installation_signals_present || return 1
+    command_exists docker || return 1
+    docker compose version >/dev/null 2>&1 || return 1
+    return 0
+}
+
+enable_post_deploy_local_repair_mode() {
+    POST_DEPLOY_LOCAL_REPAIR_MODE="1"
+    POST_DEPLOY_LOCAL_REPAIR_REASON="$1"
+}
+
+compose_declared_images() {
+    [[ -f "${ROOT_DIR}/.env" ]] || return 1
+    docker_compose_for_install_mode config --images 2>/dev/null
+}
+
+compose_required_local_images_present() {
+    local images_output image
+    local -a missing_images=()
+
+    images_output="$(compose_declared_images)" || return 1
+
+    while IFS= read -r image; do
+        image="$(trim_whitespace "${image}")"
+        [[ -n "${image}" ]] || continue
+        if ! docker_cmd image inspect "${image}" >/dev/null 2>&1; then
+            missing_images+=("${image}")
+        fi
+    done <<< "${images_output}"
+
+    if [[ "${#missing_images[@]}" -gt 0 ]]; then
+        print_warning "Offline post-deploy mode is missing local Docker images: ${missing_images[*]}"
+        return 1
     fi
 
     return 0
@@ -791,7 +868,15 @@ network_check() {
     [[ "${AUDIT_OUTBOUND_PYPI}" == "failed" ]] && failed_checks+=("pypi.org")
 
     if [[ "${#failed_checks[@]}" -gt 0 ]]; then
-        die "Critical outbound connectivity check failed for: ${failed_checks[*]}"
+        if can_use_post_deploy_local_repair_mode; then
+            enable_post_deploy_local_repair_mode "${failed_checks[*]}"
+            print_warning "Outbound connectivity is unavailable for: ${failed_checks[*]}"
+            print_warning "Existing deployment signals were detected (.env plus install manifests and/or existing containers)"
+            print_info "Continuing in post-deploy local repair mode because the host already looks prepared"
+            print_info "Fresh install/bootstrap still requires outbound network when Docker, packages, images, or model assets are missing"
+            return
+        fi
+        die "Critical outbound connectivity check failed for: ${failed_checks[*]}. Fresh install/bootstrap still requires outbound network until the system has already been deployed"
     fi
 
     print_success "Outbound network looks healthy"
@@ -816,6 +901,10 @@ apt_install_if_missing() {
 
     if [[ "${#missing[@]}" -eq 0 ]]; then
         return
+    fi
+
+    if bool_is_true "${POST_DEPLOY_LOCAL_REPAIR_MODE}"; then
+        die "Post-deploy local repair mode cannot install missing host packages without outbound access. Missing packages: ${missing[*]}"
     fi
 
     apt_update_if_needed
@@ -884,6 +973,9 @@ ensure_docker_installed() {
     if command_exists docker && docker compose version >/dev/null 2>&1; then
         print_success "Docker and docker compose plugin are already installed"
     else
+        if bool_is_true "${POST_DEPLOY_LOCAL_REPAIR_MODE}"; then
+            die "Post-deploy local repair mode requires Docker Engine and docker compose plugin to already be installed on the host"
+        fi
         print_info "Installing Docker Engine and docker compose plugin"
         apt_install_if_missing ca-certificates curl gnupg
         configure_docker_repository
@@ -917,6 +1009,9 @@ ensure_ollama_cli() {
 
     if command_exists ollama; then
         print_success "Ollama CLI is already installed"
+    elif bool_is_true "${POST_DEPLOY_LOCAL_REPAIR_MODE}"; then
+        print_warning "Host Ollama CLI is not installed, but post-deploy local repair mode will continue because the containerized runtime does not require downloading it again"
+        return
     else
         local installer
         installer="$(mktemp)"
@@ -2017,7 +2112,14 @@ initialize_parser_staging_permissions() {
 
 build_and_start_stack() {
     print_header "Docker Compose Deployment"
-    docker_compose_for_install_mode build
+    if bool_is_true "${POST_DEPLOY_LOCAL_REPAIR_MODE}"; then
+        if ! compose_required_local_images_present; then
+            die "Post-deploy local repair mode requires all Docker Compose images to already exist locally before continuing without outbound network"
+        fi
+        print_info "Skipping docker compose build in post-deploy local repair mode because local images are already present"
+    else
+        docker_compose_for_install_mode build
+    fi
     initialize_parser_staging_permissions
     docker_compose_for_install_mode up -d redis postgres ollama
     wait_for_ollama_container
