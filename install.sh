@@ -54,6 +54,8 @@ KERBEROS_REALM=""
 KERBEROS_KDC=""
 DEFAULT_MODEL="phi3:mini"
 DOWNLOAD_DEFAULT_MODEL_NOW="true"
+SELECTED_INSTALLER_MODELS=""
+SELECTED_SECONDARY_MODELS=""
 MODEL_ACCESS_CODING_GROUPS=""
 MODEL_ACCESS_ADMIN_GROUPS=""
 SSO_ENABLED="false"
@@ -121,8 +123,12 @@ POSTINSTALL_OLLAMA_BIN_PATH=""
 POSTINSTALL_OLLAMA_SERVICE_FRAGMENT=""
 POST_DEPLOY_LOCAL_REPAIR_MODE="0"
 POST_DEPLOY_LOCAL_REPAIR_REASON=""
+BOOTSTRAP_SUCCESSFUL_MODELS=""
+BOOTSTRAP_FAILED_MODELS=""
+BOOTSTRAP_FAILED_DETAILS=""
 
 declare -a APT_PACKAGES_INSTALLED_BY_INSTALLER=()
+declare -a INSTALLER_MODEL_RECORDS=()
 
 readonly SUPPORTED_INSTALL_MODES="auto cpu gpu"
 readonly MIN_RECOMMENDED_CPU_CORES=4
@@ -1192,6 +1198,17 @@ normalize_group_mapping_csv() {
     printf "%s" "${result}"
 }
 
+join_csv() {
+    local result=""
+    local item
+    for item in "$@"; do
+        [[ -n "${item}" ]] || continue
+        [[ -n "${result}" ]] && result+=","
+        result+="${item}"
+    done
+    printf "%s" "${result}"
+}
+
 is_ipv4() {
     [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
 }
@@ -1205,6 +1222,136 @@ model_catalog_records() {
     command_exists python3 || die "python3 is required to read the installer model registry"
 
     python3 "${exporter_path}" "${registry_path}" || die "Failed to read installer model registry"
+}
+
+load_installer_model_records() {
+    INSTALLER_MODEL_RECORDS=()
+    local record=""
+    while IFS= read -r record; do
+        [[ -n "${record}" ]] || continue
+        INSTALLER_MODEL_RECORDS+=("${record}")
+    done < <(model_catalog_records)
+
+    [[ "${#INSTALLER_MODEL_RECORDS[@]}" -gt 0 ]] || die "Installer model registry does not contain installable models"
+}
+
+installer_record_field() {
+    local record="$1"
+    local field_name="$2"
+    local model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint
+
+    IFS='|' read -r model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint <<<"${record}"
+    case "${field_name}" in
+        model_id) printf '%s' "${model_id}" ;;
+        display_name) printf '%s' "${display_name}" ;;
+        purpose) printf '%s' "${purpose}" ;;
+        cpu_guidance) printf '%s' "${cpu_guidance}" ;;
+        min_ram) printf '%s' "${min_ram}" ;;
+        rec_ram) printf '%s' "${rec_ram}" ;;
+        gpu_guidance) printf '%s' "${gpu_guidance}" ;;
+        min_vram) printf '%s' "${min_vram}" ;;
+        comment) printf '%s' "${comment}" ;;
+        source_hint) printf '%s' "${source_hint}" ;;
+        *) return 1 ;;
+    esac
+}
+
+installer_model_id_by_number() {
+    local choice_number="$1"
+    local record_index=$((choice_number - 1))
+
+    if [[ "${#INSTALLER_MODEL_RECORDS[@]}" -eq 0 ]]; then
+        load_installer_model_records
+    fi
+    if [[ "${choice_number}" -lt 1 || "${record_index}" -ge "${#INSTALLER_MODEL_RECORDS[@]}" ]]; then
+        return 1
+    fi
+
+    installer_record_field "${INSTALLER_MODEL_RECORDS[${record_index}]}" "model_id"
+}
+
+installer_default_choice_number() {
+    local default_model="$1"
+    local index=1
+    local record=""
+
+    if [[ "${#INSTALLER_MODEL_RECORDS[@]}" -eq 0 ]]; then
+        load_installer_model_records
+    fi
+    for record in "${INSTALLER_MODEL_RECORDS[@]}"; do
+        if [[ "$(installer_record_field "${record}" "model_id")" == "${default_model}" ]]; then
+            printf '%s' "${index}"
+            return 0
+        fi
+        index=$((index + 1))
+    done
+
+    return 1
+}
+
+parse_numeric_model_selection() {
+    local selection="$1"
+    local total_models=0
+    local trimmed_selection=""
+    local -a raw_choices=()
+    local -a chosen_numbers=()
+    local choice=""
+    local choice_number=0
+    local model_id=""
+
+    if [[ "${#INSTALLER_MODEL_RECORDS[@]}" -eq 0 ]]; then
+        load_installer_model_records
+    fi
+    total_models="${#INSTALLER_MODEL_RECORDS[@]}"
+
+    trimmed_selection="$(trim_whitespace "${selection}")"
+    if [[ -z "${trimmed_selection}" ]]; then
+        printf 'Model selection cannot be empty\n' >&2
+        return 1
+    fi
+
+    IFS=',' read -r -a raw_choices <<<"${trimmed_selection}"
+    for choice in "${raw_choices[@]}"; do
+        choice="$(trim_whitespace "${choice}")"
+        if [[ -z "${choice}" ]]; then
+            printf 'Model selection contains an empty item\n' >&2
+            return 1
+        fi
+        if [[ ! "${choice}" =~ ^[0-9]+$ ]]; then
+            printf 'Model selection must use only installer numbers: %s\n' "${choice}" >&2
+            return 1
+        fi
+
+        choice_number="${choice}"
+        if [[ "${choice_number}" -lt 1 || "${choice_number}" -gt "${total_models}" ]]; then
+            printf 'Model selection number is out of range: %s\n' "${choice}" >&2
+            return 1
+        fi
+        if array_contains "${choice_number}" "${chosen_numbers[@]}"; then
+            printf 'Duplicate model selection number: %s\n' "${choice}" >&2
+            return 1
+        fi
+
+        chosen_numbers+=("${choice_number}")
+        model_id="$(installer_model_id_by_number "${choice_number}")" || return 1
+        printf '%s\n' "${model_id}"
+    done
+}
+
+apply_installer_model_selection() {
+    local selection="$1"
+    local -a selected_models=()
+
+    mapfile -t selected_models < <(parse_numeric_model_selection "${selection}") || die "Invalid installer model selection: ${selection}"
+    [[ "${#selected_models[@]}" -gt 0 ]] || die "At least one installer model must be selected"
+
+    DEFAULT_MODEL="${selected_models[0]}"
+    SELECTED_INSTALLER_MODELS="$(join_csv "${selected_models[@]}")"
+    if [[ "${#selected_models[@]}" -gt 1 ]]; then
+        SELECTED_SECONDARY_MODELS="$(join_csv "${selected_models[@]:1}")"
+    else
+        SELECTED_SECONDARY_MODELS=""
+    fi
 }
 
 is_model_in_installer_catalog() {
@@ -1223,98 +1370,99 @@ is_model_in_installer_catalog() {
 
 print_model_catalog() {
     local index=1
-    local model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint
+    local record=""
 
+    if [[ "${#INSTALLER_MODEL_RECORDS[@]}" -eq 0 ]]; then
+        load_installer_model_records
+    fi
     print_header "Model Selection"
     print_info "Deployment profile: ${SELECTED_INSTALL_MODE^^}"
-    print_info "Installer model catalog: curated project-oriented options sourced from models/catalog.json"
+    print_info "Installer model catalog: installable project-oriented options sourced from models/catalog.json"
+    print_info "Choose one or more installer numbers such as 1 or 1,2,5"
 
-    while IFS='|' read -r model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint; do
-        [[ -n "${model_id}" ]] || continue
-        printf "%2d. %s (%s)\n" "${index}" "${model_id}" "${display_name}"
-        printf "    Purpose: %s\n" "${purpose}"
-        printf "    CPU: %s | Minimum RAM: %s | Recommended RAM: %s\n" "${cpu_guidance}" "${min_ram}" "${rec_ram}"
-        printf "    GPU: %s | Minimum VRAM: %s\n" "${gpu_guidance}" "${min_vram}"
-        printf "    Comment: %s\n" "${comment}"
-        printf "    Source: %s\n" "${source_hint}"
+    for record in "${INSTALLER_MODEL_RECORDS[@]}"; do
+        printf "%2d. %s (%s)\n" "${index}" \
+            "$(installer_record_field "${record}" "model_id")" \
+            "$(installer_record_field "${record}" "display_name")"
+        printf "    Purpose: %s\n" "$(installer_record_field "${record}" "purpose")"
+        printf "    CPU: %s | Minimum RAM: %s | Recommended RAM: %s\n" \
+            "$(installer_record_field "${record}" "cpu_guidance")" \
+            "$(installer_record_field "${record}" "min_ram")" \
+            "$(installer_record_field "${record}" "rec_ram")"
+        printf "    GPU: %s | Minimum VRAM: %s\n" \
+            "$(installer_record_field "${record}" "gpu_guidance")" \
+            "$(installer_record_field "${record}" "min_vram")"
+        printf "    Comment: %s\n" "$(installer_record_field "${record}" "comment")"
+        printf "    Source: %s | Installable: true\n" "$(installer_record_field "${record}" "source_hint")"
         index=$((index + 1))
-    done < <(model_catalog_records)
-
-    printf "%2d. custom (enter any Ollama model name manually)\n" "${index}"
-    printf "    Purpose: use a model not listed in the curated project catalog\n"
-    printf "    CPU: depends on model | Minimum RAM: depends on model | Recommended RAM: depends on model\n"
-    printf "    GPU: depends on model | Minimum VRAM: depends on model\n"
-    printf "    Comment: choose this if your target model is supported by your runtime but not listed above\n"
-}
-
-resolve_model_choice() {
-    local choice="$1"
-    local default_model="$2"
-    local index=1
-    local custom_index=1
-    local model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint
-
-    while IFS='|' read -r model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint; do
-        [[ -n "${model_id}" ]] || continue
-        custom_index=$((custom_index + 1))
-        if [[ "${model_id}" == "${default_model}" ]]; then
-            custom_index="${index}"
-        fi
-        if [[ "${choice}" == "${index}" ]]; then
-            printf '%s' "${model_id}"
-            return 0
-        fi
-        index=$((index + 1))
-    done < <(model_catalog_records)
-
-    if [[ "${choice}" == "${custom_index}" || "${choice}" == "custom" ]]; then
-        printf 'custom'
-        return 0
-    fi
-    return 1
+    done
 }
 
 prompt_default_model_selection() {
     local existing_default_model="$1"
     local default_choice_model="${existing_default_model:-${DEFAULT_MODEL}}"
+    local default_choice_number=""
     local model_choice=""
-    local resolved_choice=""
-    local custom_model=""
 
     if ! is_interactive_shell; then
         DEFAULT_MODEL="${default_choice_model}"
+        SELECTED_INSTALLER_MODELS="${DEFAULT_MODEL}"
+        SELECTED_SECONDARY_MODELS=""
         DOWNLOAD_DEFAULT_MODEL_NOW="true"
         print_info "Selected default model: ${DEFAULT_MODEL} (non-interactive)"
         print_info "Model pre-pull: enabled by default in non-interactive mode"
         return
     fi
 
+    load_installer_model_records
+    if ! default_choice_number="$(installer_default_choice_number "${default_choice_model}" || true)"; then
+        default_choice_number=""
+    fi
+    if [[ -z "${default_choice_number}" ]]; then
+        default_choice_number="1"
+        default_choice_model="$(installer_record_field "${INSTALLER_MODEL_RECORDS[0]}" "model_id")"
+        print_warning "Existing/default model is not in the installable installer catalog; falling back to ${default_choice_model}"
+    fi
+
     print_model_catalog
-    read -r -p "Default model / Модель по умолчанию: choose number or 'custom' [default: ${default_choice_model}] (example: phi3:mini): " model_choice
+    read -r -p "Installer models / Модели installer: choose one or more numbers [default: ${default_choice_number}] (examples: 1 or 1,2,5): " model_choice
     model_choice="$(trim_whitespace "${model_choice}")"
 
     if [[ -z "${model_choice}" ]]; then
-        DEFAULT_MODEL="${default_choice_model}"
-    elif [[ "${model_choice}" == *:* || "${model_choice}" == *"/"* ]]; then
-        DEFAULT_MODEL="${model_choice}"
-    else
-        resolved_choice="$(resolve_model_choice "${model_choice}" "${default_choice_model}" || true)"
-        if [[ -z "${resolved_choice}" ]]; then
-            die "Unsupported model selection"
-        fi
-        if [[ "${resolved_choice}" == "custom" ]]; then
-            read -r -p "Custom Ollama model name / Пользовательская Ollama-модель (example: qwen2.5:7b or llama3.1:8b): " custom_model
-            custom_model="$(trim_whitespace "${custom_model}")"
-            [[ -n "${custom_model}" ]] || die "Custom model name cannot be empty"
-            DEFAULT_MODEL="${custom_model}"
-        else
-            DEFAULT_MODEL="${resolved_choice}"
-        fi
+        model_choice="${default_choice_number}"
     fi
+    apply_installer_model_selection "${model_choice}"
 
     DOWNLOAD_DEFAULT_MODEL_NOW="$(prompt_boolean_with_default "Download selected model now so chat is ready immediately / Скачать выбранную модель сейчас, чтобы чат был готов сразу (example: y)" "true")"
+    print_info "Selected installer models: ${SELECTED_INSTALLER_MODELS}"
     print_info "Selected default model: ${DEFAULT_MODEL}"
+    print_info "Selected secondary models: ${SELECTED_SECONDARY_MODELS:-<none>}"
     print_info "Model pre-pull requested: ${DOWNLOAD_DEFAULT_MODEL_NOW}"
+}
+
+capture_bootstrap_summary_from_output() {
+    local bootstrap_output="$1"
+    local line=""
+
+    BOOTSTRAP_SUCCESSFUL_MODELS=""
+    BOOTSTRAP_FAILED_MODELS=""
+    BOOTSTRAP_FAILED_DETAILS=""
+    while IFS= read -r line; do
+        case "${line}" in
+            BOOTSTRAP_SUMMARY\|successful\|*)
+                BOOTSTRAP_SUCCESSFUL_MODELS="${line#BOOTSTRAP_SUMMARY|successful|}"
+                ;;
+            BOOTSTRAP_SUMMARY\|failed\|*)
+                BOOTSTRAP_FAILED_MODELS="${line#BOOTSTRAP_SUMMARY|failed|}"
+                ;;
+            BOOTSTRAP_FAILURE_DETAIL\|*)
+                if [[ -n "${BOOTSTRAP_FAILED_DETAILS}" ]]; then
+                    BOOTSTRAP_FAILED_DETAILS+=$'\n'
+                fi
+                BOOTSTRAP_FAILED_DETAILS+="${line#BOOTSTRAP_FAILURE_DETAIL|}"
+                ;;
+        esac
+    done <<<"${bootstrap_output}"
 }
 
 validate_smoke_test_model_contract() {
@@ -1326,7 +1474,7 @@ validate_smoke_test_model_contract() {
         return 0
     fi
 
-    die "Selected default model '${DEFAULT_MODEL}' is outside the curated installer catalog and cannot be used with smoke validation user '${TEST_ADMIN_USER}'. Choose a catalog baseline model or leave the smoke user blank."
+    die "Selected default model '${DEFAULT_MODEL}' is outside the installable installer catalog and cannot be used with smoke validation user '${TEST_ADMIN_USER}'. Choose an installable catalog model or leave the smoke user blank."
 }
 
 collect_configuration() {
@@ -1455,7 +1603,9 @@ collect_configuration() {
     printf "  NETBIOS=%s\n" "${NETBIOS_DOMAIN}"
     printf "  KERBEROS_REALM=%s\n" "${KERBEROS_REALM}"
     printf "  KERBEROS_KDC=%s\n" "${KERBEROS_KDC}"
+    printf "  SELECTED_INSTALLER_MODELS=%s\n" "${SELECTED_INSTALLER_MODELS:-${DEFAULT_MODEL}}"
     printf "  DEFAULT_MODEL=%s\n" "${DEFAULT_MODEL}"
+    printf "  SECONDARY_SELECTED_MODELS=%s\n" "${SELECTED_SECONDARY_MODELS:-<none>}"
     printf "  DOWNLOAD_DEFAULT_MODEL_NOW=%s\n" "${DOWNLOAD_DEFAULT_MODEL_NOW}"
     printf "  POSTGRES_DB=%s\n" "${POSTGRES_DB}"
     printf "  POSTGRES_USER=%s\n" "${POSTGRES_USER}"
@@ -2025,8 +2175,14 @@ wait_for_ollama_container() {
 }
 
 ensure_default_model_available() {
+    local bootstrap_output=""
+
     print_header "Ollama Model"
-    if docker_compose exec -T ollama ollama list 2>/dev/null | awk 'NR>1 && NF {print $1}' | grep -Fx "${DEFAULT_MODEL}" >/dev/null 2>&1; then
+    print_info "Installer-selected models: ${SELECTED_INSTALLER_MODELS:-${DEFAULT_MODEL}}"
+    print_info "Default model: ${DEFAULT_MODEL}"
+    print_info "Secondary selected models: ${SELECTED_SECONDARY_MODELS:-<none>}"
+
+    if docker_compose exec -T ollama ollama list 2>/dev/null | awk 'NR>1 && NF {print $1}' | grep -Fx "${DEFAULT_MODEL}" >/dev/null 2>&1 && [[ -z "${SELECTED_SECONDARY_MODELS}" ]]; then
         MODEL_BOOTSTRAP_STATUS="already-present"
         MODEL_PRESENT_AFTER_BOOTSTRAP="yes"
         CHAT_READY_IMMEDIATELY="yes"
@@ -2038,17 +2194,32 @@ ensure_default_model_available() {
         MODEL_BOOTSTRAP_STATUS="skipped"
         MODEL_PRESENT_AFTER_BOOTSTRAP="no"
         CHAT_READY_IMMEDIATELY="no"
-        print_warning "Selected default model ${DEFAULT_MODEL} was not downloaded during install"
+        print_warning "Selected installer models were not downloaded during install"
         print_warning "The stack can start, but chat will not be ready until the selected model is installed"
         return
     fi
 
-    print_info "Running bounded bootstrap for selected default model ${DEFAULT_MODEL}"
-    if DEFAULT_MODEL="${DEFAULT_MODEL}" SECONDARY_MODEL="" bash "${ROOT_DIR}/bootstrap_ollama_models.sh"; then
+    print_info "Running bounded bootstrap for selected installer models"
+    if bootstrap_output="$(DEFAULT_MODEL="${DEFAULT_MODEL}" SECONDARY_MODELS="${SELECTED_SECONDARY_MODELS}" SECONDARY_MODEL="" bash "${ROOT_DIR}/bootstrap_ollama_models.sh" 2>&1)"; then
         MODEL_BOOTSTRAP_STATUS="done"
     else
         MODEL_BOOTSTRAP_STATUS="failed"
+    fi
+    [[ -n "${bootstrap_output}" ]] && printf '%s\n' "${bootstrap_output}"
+    capture_bootstrap_summary_from_output "${bootstrap_output}"
+    if [[ "${MODEL_BOOTSTRAP_STATUS}" != "done" ]]; then
         print_warning "Bounded bootstrap failed for selected default model ${DEFAULT_MODEL}"
+    elif [[ -n "${BOOTSTRAP_SUCCESSFUL_MODELS}" ]]; then
+        print_info "Bootstrap successful models: ${BOOTSTRAP_SUCCESSFUL_MODELS}"
+    fi
+    if [[ -n "${BOOTSTRAP_FAILED_MODELS}" ]]; then
+        print_warning "Bootstrap failed models: ${BOOTSTRAP_FAILED_MODELS}"
+    fi
+    if [[ -n "${BOOTSTRAP_FAILED_DETAILS}" ]]; then
+        while IFS= read -r failure_detail; do
+            [[ -n "${failure_detail}" ]] || continue
+            print_warning "Bootstrap failure detail: ${failure_detail}"
+        done <<<"${BOOTSTRAP_FAILED_DETAILS}"
     fi
 
     if docker_compose exec -T ollama ollama list 2>/dev/null | awk 'NR>1 && NF {print $1}' | grep -Fx "${DEFAULT_MODEL}" >/dev/null 2>&1; then
@@ -2056,10 +2227,10 @@ ensure_default_model_available() {
         CHAT_READY_IMMEDIATELY="yes"
         print_success "Selected default model ${DEFAULT_MODEL} is present in runtime"
         return
+    else
+        MODEL_PRESENT_AFTER_BOOTSTRAP="no"
+        CHAT_READY_IMMEDIATELY="no"
     fi
-
-    MODEL_PRESENT_AFTER_BOOTSTRAP="no"
-    CHAT_READY_IMMEDIATELY="no"
     print_warning "Selected default model ${DEFAULT_MODEL} is still missing after bootstrap attempt"
     print_warning "The application will start, but chat requests will return a model-unavailable error until the model is installed"
 }
@@ -2146,10 +2317,18 @@ print_final_summary() {
     host_ip="$(detect_primary_ip)"
     print_header "Deployment Complete"
     print_success "System is ready: https://${host_ip:-localhost}"
+    print_info "Selected installer models=${SELECTED_INSTALLER_MODELS:-${DEFAULT_MODEL}}"
     print_info "DEFAULT_MODEL=${DEFAULT_MODEL}"
+    print_info "Secondary selected models=${SELECTED_SECONDARY_MODELS:-<none>}"
     print_info "Model pre-pull: ${MODEL_BOOTSTRAP_STATUS}"
     print_info "Model present in runtime: ${MODEL_PRESENT_AFTER_BOOTSTRAP}"
     print_info "Chat ready immediately: ${CHAT_READY_IMMEDIATELY}"
+    if [[ -n "${BOOTSTRAP_SUCCESSFUL_MODELS}" ]]; then
+        print_info "Bootstrap successful models=${BOOTSTRAP_SUCCESSFUL_MODELS}"
+    fi
+    if [[ -n "${BOOTSTRAP_FAILED_MODELS}" ]]; then
+        print_warning "Bootstrap failed models=${BOOTSTRAP_FAILED_MODELS}"
+    fi
     print_info "If the browser warns about TLS, accept the self-signed certificate once / Если браузер предупреждает о TLS, один раз примите self-signed certificate"
     print_info "Install log: ${LOG_FILE}"
 }

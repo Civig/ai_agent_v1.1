@@ -441,7 +441,14 @@ Use GPU mode only when:
 
 The application depends on at least one Ollama model being available.
 
-The installer already tries to perform bounded bootstrap for the selected `DEFAULT_MODEL`. Manual operators can run:
+The installer now shows only installable models from the installer view and accepts numeric selections:
+
+- `1` for a single model
+- `1,2,5` for multiple models
+- the first selected model becomes `DEFAULT_MODEL`
+- the remaining selected models become the automatic secondary pre-pull set
+
+The installer already tries to perform bounded bootstrap for the selected `DEFAULT_MODEL` and the selected secondary models. Manual operators can run:
 
 ```bash
 ./bootstrap_ollama_models.sh
@@ -451,8 +458,10 @@ Bootstrap contract:
 
 - online-first path: `ollama pull` is allowed, but each pull attempt is bounded by `OLLAMA_PULL_TIMEOUT_SECONDS` from `.env` (default `900`)
 - the retry budget is small and predictable; bootstrap should no longer hang forever on `ollama pull`
+- selected secondary models are also pulled automatically after the `DEFAULT_MODEL` path is handled
 - if online pull does not yield `DEFAULT_MODEL`, the script tries a local `models/*.gguf` asset when one has been prepared in advance
 - if no local GGUF is available, or it cannot produce the required `DEFAULT_MODEL`, bootstrap exits with an explicit failure outcome instead of claiming success
+- the installer now reports which selected models succeeded and which failed, including the failure reason
 - a fully offline bootstrap is not promised unless the required local model asset has been prepared in advance
 
 Useful checks:

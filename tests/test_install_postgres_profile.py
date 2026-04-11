@@ -294,7 +294,6 @@ class InstallPostgresProfileTests(unittest.TestCase):
                 "phi3:mini",
                 "gemma2:2b",
                 "mistral",
-                "deepseek-coder:7b",
                 "qwen2.5-coder:7b",
                 "llama3.1:8b",
                 "codellama:13b",
@@ -302,11 +301,12 @@ class InstallPostgresProfileTests(unittest.TestCase):
             ],
         )
 
-    def test_catalog_only_models_do_not_leak_into_curated_installer_shortlist(self):
+    def test_non_installable_and_catalog_only_models_do_not_leak_into_installer_shortlist(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             records_text = self._run_model_catalog_records(temp_dir)
 
         keys = self._parse_model_catalog_keys(records_text)
+        self.assertNotIn("deepseek-coder:7b", keys)
         self.assertNotIn("gpt-oss:20b", keys)
         self.assertNotIn("qwen3.5:0.8b", keys)
         self.assertNotIn("gemma3:4b", keys)
@@ -321,7 +321,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
             )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("outside the curated installer catalog", result.stdout)
+        self.assertIn("outside the installable installer catalog", result.stdout)
 
     def test_custom_model_stays_allowed_when_smoke_validation_user_is_not_configured(self):
         with tempfile.TemporaryDirectory() as temp_dir:

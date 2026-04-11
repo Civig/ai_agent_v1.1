@@ -180,18 +180,60 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertIn("status=0", result.stdout)
         self.assertIn("available after bounded online bootstrap", result.stdout)
 
+    def test_main_bootstraps_selected_secondary_models_and_reports_failures(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_bootstrap_shell(
+                temp_dir,
+                """
+                available_models=""
+                DEFAULT_MODEL="phi3:mini"
+                SECONDARY_MODELS="gemma2:2b,codellama:13b"
+                list_models() {
+                    local model=""
+                    for model in ${available_models}; do
+                        printf '%s\\n' "${model}"
+                    done
+                }
+                has_model() {
+                    [[ " ${available_models} " == *" $1 "* ]]
+                }
+                can_reach_ollama_registry() { return 0; }
+                pull_model() {
+                    if [[ "$1" == "phi3:mini" || "$1" == "gemma2:2b" ]]; then
+                        available_models="${available_models} $1"
+                        return 0
+                    fi
+                    return 1
+                }
+                set +e
+                output="$(main 2>&1)"
+                status=$?
+                set -e
+                printf 'status=%s\\n' "${status}"
+                printf '%s\\n' "${output}"
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("status=0", result.stdout)
+        self.assertIn("BOOTSTRAP_SUMMARY|successful|phi3:mini,gemma2:2b", result.stdout)
+        self.assertIn("BOOTSTRAP_SUMMARY|failed|codellama:13b", result.stdout)
+        self.assertIn("BOOTSTRAP_FAILURE_DETAIL|codellama:13b|pull exited with status 1", result.stdout)
+
     def test_install_uses_bootstrap_script_contract_without_exec_bit_dependency(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_install_shell(
                 temp_dir,
                 """
                 DEFAULT_MODEL="phi3:mini"
+                SELECTED_SECONDARY_MODELS="gemma2:2b,qwen2.5-coder:7b"
                 DOWNLOAD_DEFAULT_MODEL_NOW="true"
                 printf '%s\n' \
                     '#!/usr/bin/env bash' \
                     'set -euo pipefail' \
                     ': > .bootstrap-called' \
                     ': > .default-model-ready' \
+                    'printf "%s\\n" "${SECONDARY_MODELS:-}" > .secondary-models' \
                     > ./bootstrap_ollama_models.sh
                 chmod 0644 ./bootstrap_ollama_models.sh
                 docker_compose() {
@@ -209,6 +251,7 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
                 ensure_default_model_available
                 printf 'bootstrap_executable=%s\\n' "$(test -x ./bootstrap_ollama_models.sh && printf yes || printf no)"
                 printf 'bootstrap_called=%s\\n' "$(test -f .bootstrap-called && printf yes || printf no)"
+                printf 'secondary_models=%s\\n' "$(cat .secondary-models)"
                 printf 'model_status=%s\\n' "${MODEL_BOOTSTRAP_STATUS}"
                 printf 'model_present=%s\\n' "${MODEL_PRESENT_AFTER_BOOTSTRAP}"
                 printf 'chat_ready=%s\\n' "${CHAT_READY_IMMEDIATELY}"
@@ -218,6 +261,7 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("bootstrap_executable=no", result.stdout)
         self.assertIn("bootstrap_called=yes", result.stdout)
+        self.assertIn("secondary_models=gemma2:2b,qwen2.5-coder:7b", result.stdout)
         self.assertIn("model_status=done", result.stdout)
         self.assertIn("model_present=yes", result.stdout)
         self.assertIn("chat_ready=yes", result.stdout)

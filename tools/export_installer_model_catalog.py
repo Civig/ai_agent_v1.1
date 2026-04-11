@@ -9,6 +9,7 @@ from pathlib import Path
 
 REQUIRED_FIELDS = (
     "install_name",
+    "installer_installable",
     "installer_display_name",
     "installer_summary",
     "installer_cpu_guidance",
@@ -48,7 +49,11 @@ def load_registry(path: Path) -> dict:
 
 
 def installer_models(payload: dict) -> list[dict]:
-    models = [model for model in payload["models"] if model.get("enabled_in_installer") is True]
+    models = [
+        model
+        for model in payload["models"]
+        if model.get("enabled_in_installer") is True and model.get("installer_installable") is True
+    ]
     if not models:
         raise SystemExit("Installer model registry does not contain any enabled installer models")
     return sorted(
@@ -65,6 +70,8 @@ def validate_model(model: dict) -> None:
     missing = [field for field in REQUIRED_FIELDS if field not in model]
     if missing:
         raise SystemExit(f"Installer-enabled model '{model_key}' is missing required fields: {', '.join(missing)}")
+    if not isinstance(model.get("installer_installable"), bool):
+        raise SystemExit(f"Installer-enabled model '{model_key}' must declare installer_installable as a boolean")
 
 
 def emit_records(models: list[dict]) -> None:
