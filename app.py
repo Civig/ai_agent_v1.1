@@ -76,6 +76,7 @@ from local_admin_security import (
     LOCAL_ADMIN_STATE_REDIS_KEY,
     build_local_admin_password_hash,
     build_local_admin_state_revision,
+    normalize_local_admin_password_hash_transport,
     verify_local_admin_password,
 )
 import parser_stage
@@ -676,12 +677,13 @@ def local_admin_username() -> str:
 
 
 def local_admin_env_state() -> Dict[str, Any]:
+    normalized_password_hash = normalize_local_admin_password_hash_transport(settings.LOCAL_ADMIN_PASSWORD_HASH)
     base_env_revision = hashlib.sha256(
         json.dumps(
             {
                 "enabled": bool(settings.LOCAL_ADMIN_ENABLED),
                 "username": local_admin_username(),
-                "password_hash": str(settings.LOCAL_ADMIN_PASSWORD_HASH or ""),
+                "password_hash": normalized_password_hash,
                 "force_rotate": bool(settings.LOCAL_ADMIN_FORCE_ROTATE),
                 "bootstrap_required": bool(settings.LOCAL_ADMIN_BOOTSTRAP_REQUIRED),
             },
@@ -692,7 +694,7 @@ def local_admin_env_state() -> Dict[str, Any]:
     state = {
         "enabled": bool(settings.LOCAL_ADMIN_ENABLED),
         "username": local_admin_username(),
-        "password_hash": str(settings.LOCAL_ADMIN_PASSWORD_HASH or "").strip(),
+        "password_hash": normalized_password_hash,
         "force_rotate": bool(settings.LOCAL_ADMIN_FORCE_ROTATE),
         "bootstrap_required": bool(settings.LOCAL_ADMIN_BOOTSTRAP_REQUIRED),
         "runtime_override": False,
@@ -850,7 +852,9 @@ async def load_local_admin_state(request: Request) -> Dict[str, Any]:
         {
             "enabled": bool(payload.get("enabled", env_state["enabled"])),
             "username": normalize_username(str(payload.get("username") or env_state["username"])),
-            "password_hash": str(payload.get("password_hash") or env_state["password_hash"]).strip(),
+            "password_hash": normalize_local_admin_password_hash_transport(
+                str(payload.get("password_hash") or env_state["password_hash"])
+            ),
             "force_rotate": bool(payload.get("force_rotate", env_state["force_rotate"])),
             "bootstrap_required": bool(payload.get("bootstrap_required", env_state["bootstrap_required"])),
             "runtime_override": bool(payload.get("runtime_override", False)),
@@ -866,7 +870,7 @@ async def persist_local_admin_state(request: Request, state: Dict[str, Any]) -> 
     stored_state = {
         "enabled": bool(state.get("enabled", False)),
         "username": normalize_username(str(state.get("username") or "")),
-        "password_hash": str(state.get("password_hash") or "").strip(),
+        "password_hash": normalize_local_admin_password_hash_transport(str(state.get("password_hash") or "")),
         "force_rotate": bool(state.get("force_rotate", False)),
         "bootstrap_required": bool(state.get("bootstrap_required", False)),
         "runtime_override": bool(state.get("runtime_override", False)),

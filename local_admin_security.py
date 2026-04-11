@@ -13,6 +13,10 @@ LOCAL_ADMIN_HASH_SALT_BYTES = 16
 LOCAL_ADMIN_STATE_REDIS_KEY = "auth:local_admin:state:v1"
 
 
+def normalize_local_admin_password_hash_transport(stored_hash: str) -> str:
+    return str(stored_hash or "").strip().replace("$$", "$")
+
+
 def build_local_admin_password_hash(password: str) -> str:
     secret = str(password or "")
     if not secret:
@@ -32,7 +36,7 @@ def build_local_admin_password_hash(password: str) -> str:
 
 def verify_local_admin_password(password: str, stored_hash: str) -> bool:
     try:
-        scheme, raw_iterations, salt_b64, digest_b64 = str(stored_hash or "").split("$", 3)
+        scheme, raw_iterations, salt_b64, digest_b64 = normalize_local_admin_password_hash_transport(stored_hash).split("$", 3)
         if scheme != LOCAL_ADMIN_HASH_SCHEME:
             return False
         iterations = int(raw_iterations)
@@ -51,10 +55,9 @@ def build_local_admin_state_revision(state: Dict[str, Any]) -> str:
         "bootstrap_required": bool(state.get("bootstrap_required", False)),
         "enabled": bool(state.get("enabled", False)),
         "force_rotate": bool(state.get("force_rotate", False)),
-        "password_hash": str(state.get("password_hash") or ""),
+        "password_hash": normalize_local_admin_password_hash_transport(str(state.get("password_hash") or "")),
         "runtime_override": bool(state.get("runtime_override", False)),
         "username": str(state.get("username") or ""),
     }
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(serialized).hexdigest()
-

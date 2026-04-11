@@ -194,6 +194,7 @@ Read-only dashboard operator gate теперь задаётся через `ADMI
 
 - username по умолчанию задаётся через `LOCAL_ADMIN_USERNAME=admin_ai`
 - в `.env` хранится только `LOCAL_ADMIN_PASSWORD_HASH`; plaintext password или `admin:admin` baseline отсутствуют
+- installer-managed `.env` пишет `LOCAL_ADMIN_PASSWORD_HASH` в compose-safe виде с escaped `$$`, чтобы Docker Compose передавал runtime исходный logical hash с single `$`
 - если во время install пароль не введён явно, installer генерирует сильный one-time bootstrap secret
 - plaintext bootstrap secret показывается один раз и сохраняется только в root-only host file под installer-managed state directory
 - пока `LOCAL_ADMIN_FORCE_ROTATE=true` и `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, первый вход ведёт только на forced password rotation path

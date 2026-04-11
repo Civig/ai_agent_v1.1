@@ -144,6 +144,28 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(error.exception.status_code, 403)
 
+    async def test_compose_safe_bootstrap_hash_still_allows_rotation_login(self):
+        app_state = self.make_app_state()
+        bootstrap_secret = "bootstrap-secret-compose-safe-1234"
+        password_hash = build_local_admin_password_hash(bootstrap_secret).replace("$", "$$")
+        login_request = self.make_request(path=app_module.LOCAL_ADMIN_LOGIN_PATH, method="POST", app_state=app_state)
+
+        with patch.object(app_module.settings, "LOCAL_ADMIN_ENABLED", True), patch.object(
+            app_module.settings, "LOCAL_ADMIN_USERNAME", "admin_ai"
+        ), patch.object(app_module.settings, "LOCAL_ADMIN_PASSWORD_HASH", password_hash), patch.object(
+            app_module.settings, "LOCAL_ADMIN_FORCE_ROTATE", True
+        ), patch.object(
+            app_module.settings, "LOCAL_ADMIN_BOOTSTRAP_REQUIRED", True
+        ):
+            response = await app_module.local_admin_login(
+                login_request,
+                username="admin_ai",
+                password=bootstrap_secret,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], app_module.LOCAL_ADMIN_ROTATE_PATH)
+
     async def test_rotation_invalidates_bootstrap_secret_and_allows_dashboard_with_new_password(self):
         app_state = self.make_app_state()
         bootstrap_secret = "bootstrap-secret-for-local-admin-5678"

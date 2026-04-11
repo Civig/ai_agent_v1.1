@@ -156,6 +156,7 @@ Installer по умолчанию генерирует self-signed certificates.
 - local admin disabled by default через `LOCAL_ADMIN_ENABLED=false`
 - username по умолчанию: `LOCAL_ADMIN_USERNAME=admin_ai`
 - в `.env` хранится только `LOCAL_ADMIN_PASSWORD_HASH`; plaintext password не используется
+- installer-managed `.env` хранит `LOCAL_ADMIN_PASSWORD_HASH` в compose-safe escaped `$$` виде, чтобы Docker Compose не искажал hash на transport boundary
 - если installer не получает явный пароль, он генерирует one-time bootstrap secret и сохраняет его plaintext только в root-only host file с `0600`
 - пока `LOCAL_ADMIN_FORCE_ROTATE=true` и `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, первый вход local admin допускается только к forced password rotation flow
 - до завершения rotation local admin session не получает доступ к `/admin/dashboard` и `/api/admin/dashboard/*`

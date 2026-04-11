@@ -1059,8 +1059,13 @@ confirm_system_changes() {
 get_env_value() {
     local file="$1"
     local key="$2"
+    local value=""
     [[ -f "${file}" ]] || return 1
-    grep -E "^${key}=" "${file}" | tail -n 1 | cut -d'=' -f2- || true
+    value="$(grep -E "^${key}=" "${file}" | tail -n 1 | cut -d'=' -f2- || true)"
+    if [[ "${key}" == "LOCAL_ADMIN_PASSWORD_HASH" ]]; then
+        value="${value//\$\$/\$}"
+    fi
+    printf "%s" "${value}"
 }
 
 prompt_with_default() {
@@ -1145,6 +1150,9 @@ append_env_line() {
     local key="$2"
     local value="$3"
     validate_env_value "${key}" "${value}"
+    if [[ "${key}" == "LOCAL_ADMIN_PASSWORD_HASH" ]]; then
+        value="${value//\$/\$\$}"
+    fi
     printf '%s=%s\n' "${key}" "${value}" >>"${file}"
 }
 

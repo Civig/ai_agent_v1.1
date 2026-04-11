@@ -194,6 +194,7 @@ The practical local break-glass admin contract is:
 
 - the default username is configured through `LOCAL_ADMIN_USERNAME=admin_ai`
 - `.env` stores only `LOCAL_ADMIN_PASSWORD_HASH`; there is no plaintext password or `admin:admin` baseline
+- the installer-managed `.env` writes `LOCAL_ADMIN_PASSWORD_HASH` in compose-safe escaped `$$` form so Docker Compose still delivers the original logical single-`$` hash at runtime
 - if the installer operator does not enter a password explicitly, the installer generates a strong one-time bootstrap secret
 - the plaintext bootstrap secret is shown once and stored only in a root-only host file under the installer-managed state directory
 - while `LOCAL_ADMIN_FORCE_ROTATE=true` and `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, the first login can reach only the forced password rotation path

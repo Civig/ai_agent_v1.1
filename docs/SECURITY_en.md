@@ -156,6 +156,7 @@ For emergency operator recovery, the runtime now supports a separate local break
 - the local admin path is disabled by default with `LOCAL_ADMIN_ENABLED=false`
 - the default username is `LOCAL_ADMIN_USERNAME=admin_ai`
 - `.env` stores only `LOCAL_ADMIN_PASSWORD_HASH`; plaintext passwords are not used
+- the installer-managed `.env` stores `LOCAL_ADMIN_PASSWORD_HASH` in compose-safe escaped `$$` form so Docker Compose does not mangle the hash on the transport boundary
 - if the installer is not given an explicit password, it generates a one-time bootstrap secret and stores that plaintext only in a root-only `0600` host file
 - while `LOCAL_ADMIN_FORCE_ROTATE=true` and `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, the first local-admin login can reach only the forced password rotation flow
 - until rotation is completed, the local admin session cannot access `/admin/dashboard` or `/api/admin/dashboard/*`
