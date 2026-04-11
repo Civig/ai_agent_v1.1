@@ -2044,7 +2044,7 @@ ensure_default_model_available() {
     fi
 
     print_info "Running bounded bootstrap for selected default model ${DEFAULT_MODEL}"
-    if DEFAULT_MODEL="${DEFAULT_MODEL}" SECONDARY_MODEL="" "${ROOT_DIR}/bootstrap_ollama_models.sh"; then
+    if DEFAULT_MODEL="${DEFAULT_MODEL}" SECONDARY_MODEL="" bash "${ROOT_DIR}/bootstrap_ollama_models.sh"; then
         MODEL_BOOTSTRAP_STATUS="done"
     else
         MODEL_BOOTSTRAP_STATUS="failed"

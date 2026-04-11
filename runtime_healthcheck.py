@@ -83,11 +83,15 @@ def check_worker() -> None:
         raise RuntimeError("missing target heartbeat")
 
 
+def check_app() -> None:
+    assert_pid1_contains("start_app.py")
+    check_http("http://127.0.0.1:8000/health/live")
+
+
 def main() -> int:
     mode = (sys.argv[1] if len(sys.argv) > 1 else "").strip().lower()
     if mode == "app":
-        assert_pid1_contains("uvicorn")
-        check_http("http://127.0.0.1:8000/health/live")
+        check_app()
         return 0
     if mode == "scheduler":
         check_scheduler()

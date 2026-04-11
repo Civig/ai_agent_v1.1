@@ -180,7 +180,7 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertIn("status=0", result.stdout)
         self.assertIn("available after bounded online bootstrap", result.stdout)
 
-    def test_install_uses_bootstrap_script_contract(self):
+    def test_install_uses_bootstrap_script_contract_without_exec_bit_dependency(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_install_shell(
                 temp_dir,
@@ -193,7 +193,7 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
                     ': > .bootstrap-called' \
                     ': > .default-model-ready' \
                     > ./bootstrap_ollama_models.sh
-                chmod +x ./bootstrap_ollama_models.sh
+                chmod 0644 ./bootstrap_ollama_models.sh
                 docker_compose() {
                     if [[ "$1" == "exec" && "$2" == "-T" && "$3" == "ollama" && "$4" == "ollama" && "$5" == "list" ]]; then
                         if [[ -f .default-model-ready ]]; then
@@ -207,6 +207,7 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
                     return 0
                 }
                 ensure_default_model_available
+                printf 'bootstrap_executable=%s\\n' "$(test -x ./bootstrap_ollama_models.sh && printf yes || printf no)"
                 printf 'bootstrap_called=%s\\n' "$(test -f .bootstrap-called && printf yes || printf no)"
                 printf 'model_status=%s\\n' "${MODEL_BOOTSTRAP_STATUS}"
                 printf 'model_present=%s\\n' "${MODEL_PRESENT_AFTER_BOOTSTRAP}"
@@ -215,6 +216,7 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("bootstrap_executable=no", result.stdout)
         self.assertIn("bootstrap_called=yes", result.stdout)
         self.assertIn("model_status=done", result.stdout)
         self.assertIn("model_present=yes", result.stdout)
