@@ -1,21 +1,22 @@
-function getCsrfToken() {
-    const match = document.cookie.match(/(?:^|; )csrf_token=([^;]+)/);
+function getCookieValue(cookieName) {
+    const escapedName = String(cookieName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = document.cookie.match(new RegExp(`(?:^|; )${escapedName}=([^;]+)`));
     return match ? decodeURIComponent(match[1]) : "";
 }
 
-async function logout() {
+async function logout(logoutPath, csrfCookieName, redirectPath) {
     try {
-        await fetch("/logout", {
+        await fetch(logoutPath, {
             method: "POST",
             credentials: "same-origin",
             headers: {
-                "X-CSRF-Token": getCsrfToken(),
+                "X-CSRF-Token": getCookieValue(csrfCookieName),
             },
         });
     } catch (error) {
         console.warn("Logout failed:", error);
     } finally {
-        window.location.href = "/login";
+        window.location.href = redirectPath;
     }
 }
 
@@ -26,6 +27,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     logoutButton.addEventListener("click", () => {
-        logout();
+        logout(
+            logoutButton.dataset.logoutPath || "/logout",
+            logoutButton.dataset.csrfCookieName || "csrf_token",
+            logoutButton.dataset.logoutRedirect || "/login",
+        );
     });
 });

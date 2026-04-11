@@ -188,6 +188,19 @@ Compose stack реально включает:
 
 Read-only dashboard operator gate теперь задаётся через `ADMIN_DASHBOARD_USERS`. Это CSV-список usernames; значения trim'ятся и нормализуются той же логикой, что и login usernames. Пустое значение означает, что dashboard закрыт для всех. Runtime больше не использует fallback на тестового пользователя.
 
+Для emergency/break-glass operator access installer также поддерживает отдельный local-admin path только для dashboard surface. Этот path disabled by default через `LOCAL_ADMIN_ENABLED=false` и не заменяет штатный AD/Kerberos login flow для обычного чата.
+
+Практический контракт local break-glass admin такой:
+
+- username по умолчанию задаётся через `LOCAL_ADMIN_USERNAME=admin_ai`
+- в `.env` хранится только `LOCAL_ADMIN_PASSWORD_HASH`; plaintext password или `admin:admin` baseline отсутствуют
+- если во время install пароль не введён явно, installer генерирует сильный one-time bootstrap secret
+- plaintext bootstrap secret показывается один раз и сохраняется только в root-only host file под installer-managed state directory
+- пока `LOCAL_ADMIN_FORCE_ROTATE=true` и `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, первый вход ведёт только на forced password rotation path
+- до завершения password rotation dashboard UI и dashboard API для local admin остаются закрытыми
+- после успешной смены пароля bootstrap secret больше не действует, а дальнейший вход идёт только по новому паролю
+- local break-glass session даёт доступ только к `/admin/dashboard` и `/api/admin/dashboard/*`; обычный chat user flow остаётся на текущем AD/Kerberos path
+
 Тот же file-processing baseline также поддерживает дополнительные env/settings knobs для parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout. Шаблон `.env.example` сознательно не перечисляет каждый advanced parser limit по отдельности.
 
 Пример model-access mapping для пилотного AD-стенда может выглядеть так:

@@ -149,6 +149,20 @@ The installer generates self-signed certificates by default. This is acceptable 
 - dashboard payloads expose operational telemetry, history, and event context, so this surface should remain operator-only
 - if SSO is expected to cover dashboard access, that still requires separate real-infrastructure validation
 
+### Local break-glass admin
+
+For emergency operator recovery, the runtime now supports a separate local break-glass admin path, but only as a controlled fallback for the dashboard surface:
+
+- the local admin path is disabled by default with `LOCAL_ADMIN_ENABLED=false`
+- the default username is `LOCAL_ADMIN_USERNAME=admin_ai`
+- `.env` stores only `LOCAL_ADMIN_PASSWORD_HASH`; plaintext passwords are not used
+- if the installer is not given an explicit password, it generates a one-time bootstrap secret and stores that plaintext only in a root-only `0600` host file
+- while `LOCAL_ADMIN_FORCE_ROTATE=true` and `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, the first local-admin login can reach only the forced password rotation flow
+- until rotation is completed, the local admin session cannot access `/admin/dashboard` or `/api/admin/dashboard/*`
+- after a successful password change, the bootstrap secret is invalidated and the older session revision is rejected fail-closed
+- the local admin session uses separate cookies and a separate auth source, so it does not replace the ordinary chat/session flow
+- login attempts, logout, and password rotation are logged without disclosing plaintext password or bootstrap-secret material
+
 ## Upload and File Security Baseline
 
 ### What is implemented

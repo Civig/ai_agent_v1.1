@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Break-glass Admin Login{% endblock %}
+
+{% block extra_css %}
+<style>
+    .login-container {
+        max-width: 420px;
+        margin: 4rem auto;
+        background: var(--panel, #171717);
+        border: 1px solid var(--border, #2f2f2f);
+        border-radius: 16px;
+        padding: 2.5rem;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    .login-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+
+    .login-header h1 {
+        color: var(--text, #ececec);
+        font-size: 1.75rem;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+
+    .login-header p {
+        color: var(--muted, #a1a1aa);
+        font-size: 0.9rem;
+    }
+
+    .form-group {
+        margin-bottom: 1.25rem;
+    }
+
+    label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: var(--text, #ececec);
+        font-weight: 500;
+        font-size: 0.875rem;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+        width: 100%;
+        padding: 0.875rem 1rem;
+        background: var(--input, #2b2b2b);
+        border: 1px solid var(--border, #2f2f2f);
+        border-radius: 12px;
+        font-size: 0.95rem;
+        color: var(--text, #ececec);
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus {
+        outline: none;
+        border-color: #10a37f;
+        box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.2);
+    }
+
+    .primary-button,
+    .secondary-link {
+        width: 100%;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        padding: 0.875rem;
+        border-radius: 12px;
+        font-size: 1rem;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .primary-button {
+        background: #10a37f;
+        color: white;
+        border: none;
+    }
+
+    .primary-button:hover {
+        background: #0e8b6c;
+    }
+
+    .secondary-link {
+        margin-top: 0.875rem;
+        border: 1px solid #10a37f;
+        color: #6ee7b7;
+    }
+
+    .secondary-link:hover {
+        background: rgba(16, 163, 127, 0.12);
+    }
+
+    .error-message,
+    .info-message {
+        padding: 1rem;
+        border-radius: 12px;
+        margin-bottom: 1.25rem;
+        font-size: 0.875rem;
+    }
+
+    .error-message {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid #ef4444;
+        color: #fca5a5;
+    }
+
+    .info-message {
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid #f59e0b;
+        color: #fcd34d;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-header">
+        <h1>Break-glass Admin</h1>
+        <p>Локальный emergency access только для operator dashboard</p>
+    </div>
+
+    {% if error %}
+    <div class="error-message">{{ error }}</div>
+    {% endif %}
+
+    <div class="info-message">
+        Этот вход не заменяет доменный AD/Kerberos flow и не открывает обычный chat user path.
+    </div>
+
+    <form method="post" action="{{ local_admin_login_path }}">
+        <div class="form-group">
+            <label for="username">Имя пользователя</label>
+            <input type="text" id="username" name="username" value="{{ local_admin_username }}" autocomplete="username" required autofocus>
+        </div>
+
+        <div class="form-group">
+            <label for="password">Пароль или bootstrap secret</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" required>
+        </div>
+
+        <button class="primary-button" type="submit">Войти в dashboard</button>
+    </form>
+
+    <a class="secondary-link" href="/login">Вернуться к корпоративному входу</a>
+</div>
+{% endblock %}

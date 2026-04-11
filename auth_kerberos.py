@@ -23,6 +23,7 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 TOKEN_REVOKE_PREFIX = "auth:revoked"
 AUTH_SOURCE_PASSWORD = "password"
 AUTH_SOURCE_SSO = "sso"
+AUTH_SOURCE_LOCAL_ADMIN = "local_admin"
 IDENTITY_VERSION = 1
 MODEL_POLICY_FILENAME = "policy.json"
 MODEL_POLICY_CATEGORY_ORDER = {"general": 0, "coding": 1, "admin": 2}
@@ -311,7 +312,7 @@ def current_identity_timestamp() -> int:
 
 def normalize_auth_source(value: Optional[str]) -> str:
     normalized = (value or "").strip().lower()
-    if normalized in {AUTH_SOURCE_PASSWORD, AUTH_SOURCE_SSO}:
+    if normalized in {AUTH_SOURCE_PASSWORD, AUTH_SOURCE_SSO, AUTH_SOURCE_LOCAL_ADMIN}:
         return normalized
     return AUTH_SOURCE_PASSWORD
 

@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${ROOT_DIR}/.install"
 LOG_FILE="${LOG_DIR}/install-$(date +%Y%m%d-%H%M%S).log"
 STATE_FILE="${LOG_DIR}/install-state.env"
-HOST_STATE_DIR="/var/lib/corporate-ai-assistant"
+HOST_STATE_DIR="${INSTALL_HOST_STATE_DIR:-/var/lib/corporate-ai-assistant}"
 HOST_STATE_FILE="${HOST_STATE_DIR}/host-state.env"
 HOST_BACKUP_DIR="${HOST_STATE_DIR}/backups"
 HOST_DOCKER_REPO_BACKUP="${HOST_BACKUP_DIR}/docker.list.preinstall.bak"
@@ -27,6 +27,7 @@ readonly HOST_STATE_FILE
 readonly HOST_BACKUP_DIR
 readonly HOST_DOCKER_REPO_BACKUP
 readonly INSTALL_USER
+readonly LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE="${HOST_STATE_DIR}/local-admin-bootstrap.secret"
 
 MANAGED_OVERRIDE_MARKER="# Managed by Corporate AI Assistant install.sh"
 MANAGED_OVERRIDE_FILE="${ROOT_DIR}/docker-compose.override.yml"
@@ -61,6 +62,12 @@ MODEL_ACCESS_ADMIN_GROUPS=""
 SSO_ENABLED="false"
 SSO_SERVICE_PRINCIPAL=""
 SSO_KEYTAB_PATH="/etc/corporate-ai-sso/http.keytab"
+LOCAL_ADMIN_ENABLED="false"
+LOCAL_ADMIN_USERNAME="admin_ai"
+LOCAL_ADMIN_PASSWORD_HASH=""
+LOCAL_ADMIN_FORCE_ROTATE="false"
+LOCAL_ADMIN_BOOTSTRAP_REQUIRED="false"
+LOCAL_ADMIN_PLAINTEXT_SECRET=""
 REDIS_PASSWORD=""
 SECRET_KEY=""
 POSTGRES_DB="corporate_ai"
@@ -1149,6 +1156,147 @@ generate_base64_secret() {
     openssl rand -base64 48 | tr -d '\n'
 }
 
+generate_urlsafe_secret() {
+    openssl rand -base64 48 | tr -d '\n' | tr '+/' '-_' | tr -d '='
+}
+
+normalize_local_admin_username() {
+    local value="$1"
+    value="$(trim_whitespace "${value}")"
+    value="${value,,}"
+    if [[ -z "${value}" ]]; then
+        printf "admin_ai"
+        return
+    fi
+    [[ "${value}" =~ ^[a-z0-9._-]+$ ]] || die "Local admin username may contain only letters, digits, dot, underscore, and dash"
+    printf "%s" "${value}"
+}
+
+build_local_admin_password_hash() {
+    local password="$1"
+    [[ -n "${password}" ]] || die "Local admin password cannot be empty"
+    command_exists python3 || die "python3 is required to hash the local admin password"
+
+    python3 - "${password}" <<'PY'
+import base64
+import hashlib
+import secrets
+import sys
+
+password = sys.argv[1]
+salt = secrets.token_bytes(16)
+iterations = 600_000
+digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+print(
+    "pbkdf2_sha256${}${}${}".format(
+        iterations,
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(digest).decode("ascii"),
+    )
+)
+PY
+}
+
+print_sensitive_to_tty() {
+    local message="$1"
+    if [[ -w /dev/tty ]]; then
+        printf '%s\n' "${message}" >/dev/tty
+    fi
+}
+
+remove_local_admin_bootstrap_secret_file() {
+    as_root rm -f "${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}" >/dev/null 2>&1 || true
+}
+
+write_local_admin_bootstrap_secret_file() {
+    local secret_value="$1"
+    local temp_file
+
+    [[ -n "${secret_value}" ]] || return 0
+    temp_file="$(mktemp)"
+    chmod 600 "${temp_file}"
+    cat >"${temp_file}" <<EOF
+Corporate AI Assistant local break-glass admin bootstrap secret
+Username: ${LOCAL_ADMIN_USERNAME}
+Generated at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+Secret: ${secret_value}
+EOF
+    as_root install -m 0700 -d "${HOST_STATE_DIR}"
+    as_root cp "${temp_file}" "${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}"
+    as_root chmod 600 "${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}"
+    rm -f "${temp_file}"
+}
+
+configure_local_admin_break_glass() {
+    local existing_env="$1"
+    local default_enabled default_username existing_hash existing_force_rotate existing_bootstrap_required
+    local enable_local_admin password_input=""
+
+    default_enabled="$(get_env_value "${existing_env}" "LOCAL_ADMIN_ENABLED" || get_env_value "${ROOT_DIR}/.env.example" "LOCAL_ADMIN_ENABLED" || printf "false")"
+    default_username="$(get_env_value "${existing_env}" "LOCAL_ADMIN_USERNAME" || get_env_value "${ROOT_DIR}/.env.example" "LOCAL_ADMIN_USERNAME" || printf "admin_ai")"
+    existing_hash="$(get_env_value "${existing_env}" "LOCAL_ADMIN_PASSWORD_HASH" || true)"
+    existing_force_rotate="$(get_env_value "${existing_env}" "LOCAL_ADMIN_FORCE_ROTATE" || get_env_value "${ROOT_DIR}/.env.example" "LOCAL_ADMIN_FORCE_ROTATE" || printf "false")"
+    existing_bootstrap_required="$(get_env_value "${existing_env}" "LOCAL_ADMIN_BOOTSTRAP_REQUIRED" || get_env_value "${ROOT_DIR}/.env.example" "LOCAL_ADMIN_BOOTSTRAP_REQUIRED" || printf "false")"
+
+    if ! is_interactive_shell; then
+        LOCAL_ADMIN_ENABLED="$(normalize_boolean_input "${default_enabled}")"
+        LOCAL_ADMIN_USERNAME="$(normalize_local_admin_username "${default_username}")"
+        LOCAL_ADMIN_PASSWORD_HASH="${existing_hash}"
+        LOCAL_ADMIN_FORCE_ROTATE="$(normalize_boolean_input "${existing_force_rotate}")"
+        LOCAL_ADMIN_BOOTSTRAP_REQUIRED="$(normalize_boolean_input "${existing_bootstrap_required}")"
+        LOCAL_ADMIN_PLAINTEXT_SECRET=""
+        return
+    fi
+
+    enable_local_admin="$(prompt_boolean_with_default "Enable local break-glass admin for operator dashboard only / Включить локальный break-glass admin только для operator dashboard (example: n)" "${default_enabled}")"
+    LOCAL_ADMIN_ENABLED="${enable_local_admin}"
+    LOCAL_ADMIN_USERNAME="$(normalize_local_admin_username "$(prompt_with_default "Local break-glass admin username / Username локального break-glass admin (example: admin_ai)" "${default_username}")")"
+    LOCAL_ADMIN_PLAINTEXT_SECRET=""
+
+    if [[ "${LOCAL_ADMIN_ENABLED}" != "true" ]]; then
+        LOCAL_ADMIN_PASSWORD_HASH=""
+        LOCAL_ADMIN_FORCE_ROTATE="false"
+        LOCAL_ADMIN_BOOTSTRAP_REQUIRED="false"
+        remove_local_admin_bootstrap_secret_file
+        print_info "Local break-glass admin remains disabled"
+        return
+    fi
+
+    read -r -s -p "Local break-glass admin password / Пароль локального break-glass admin (leave blank to ${existing_hash:+keep existing or }generate one-time bootstrap secret): " password_input
+    printf "\n" >&2
+
+    if [[ -n "${password_input}" ]]; then
+        LOCAL_ADMIN_PASSWORD_HASH="$(build_local_admin_password_hash "${password_input}")"
+        LOCAL_ADMIN_FORCE_ROTATE="false"
+        LOCAL_ADMIN_BOOTSTRAP_REQUIRED="false"
+        LOCAL_ADMIN_PLAINTEXT_SECRET=""
+        remove_local_admin_bootstrap_secret_file
+        print_info "Local break-glass admin configured with an explicit operator-supplied password"
+        return
+    fi
+
+    if [[ -n "${existing_hash}" ]]; then
+        LOCAL_ADMIN_PASSWORD_HASH="${existing_hash}"
+        LOCAL_ADMIN_FORCE_ROTATE="$(normalize_boolean_input "${existing_force_rotate}")"
+        LOCAL_ADMIN_BOOTSTRAP_REQUIRED="$(normalize_boolean_input "${existing_bootstrap_required}")"
+        LOCAL_ADMIN_PLAINTEXT_SECRET=""
+        print_info "Keeping existing local break-glass admin credential state"
+        return
+    fi
+
+    LOCAL_ADMIN_PLAINTEXT_SECRET="$(generate_urlsafe_secret)"
+    LOCAL_ADMIN_PASSWORD_HASH="$(build_local_admin_password_hash "${LOCAL_ADMIN_PLAINTEXT_SECRET}")"
+    LOCAL_ADMIN_FORCE_ROTATE="true"
+    LOCAL_ADMIN_BOOTSTRAP_REQUIRED="true"
+    write_local_admin_bootstrap_secret_file "${LOCAL_ADMIN_PLAINTEXT_SECRET}"
+    print_info "A one-time local admin bootstrap secret was generated and stored at ${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}"
+    print_sensitive_to_tty ""
+    print_sensitive_to_tty "Local break-glass admin bootstrap secret (shown once, not logged):"
+    print_sensitive_to_tty "  username: ${LOCAL_ADMIN_USERNAME}"
+    print_sensitive_to_tty "  secret: ${LOCAL_ADMIN_PLAINTEXT_SECRET}"
+    print_sensitive_to_tty "Rotate it on first login before dashboard access."
+}
+
 derive_base_dn() {
     local domain="$1"
     local dn=""
@@ -1574,6 +1722,8 @@ collect_configuration() {
         SSO_KEYTAB_PATH="/etc/corporate-ai-sso/http.keytab"
     fi
 
+    configure_local_admin_break_glass "${existing_env}"
+
     REDIS_PASSWORD="$(prompt_secret_or_generate "Redis password / Пароль Redis (example: leave blank to generate)" "${existing_redis_password}" generate_hex_secret)"
     [[ -n "${REDIS_PASSWORD}" ]] || die "Redis password cannot be empty"
 
@@ -1612,6 +1762,10 @@ collect_configuration() {
     printf "  MODEL_ACCESS_CODING_GROUPS=%s\n" "${MODEL_ACCESS_CODING_GROUPS:-<none>}"
     printf "  MODEL_ACCESS_ADMIN_GROUPS=%s\n" "${MODEL_ACCESS_ADMIN_GROUPS:-<none>}"
     printf "  SSO_ENABLED=%s\n" "${SSO_ENABLED}"
+    printf "  LOCAL_ADMIN_ENABLED=%s\n" "${LOCAL_ADMIN_ENABLED}"
+    printf "  LOCAL_ADMIN_USERNAME=%s\n" "${LOCAL_ADMIN_USERNAME}"
+    printf "  LOCAL_ADMIN_FORCE_ROTATE=%s\n" "${LOCAL_ADMIN_FORCE_ROTATE}"
+    printf "  LOCAL_ADMIN_BOOTSTRAP_REQUIRED=%s\n" "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
     if [[ "${SSO_ENABLED}" == "true" ]]; then
         printf "  SSO_SERVICE_PRINCIPAL=%s\n" "${SSO_SERVICE_PRINCIPAL}"
         printf "  SSO_KEYTAB_PATH=%s\n" "${SSO_KEYTAB_PATH}"
@@ -1684,6 +1838,7 @@ write_env_file() {
         SECRET_KEY ALGORITHM ACCESS_TOKEN_EXPIRE_MINUTES REFRESH_TOKEN_EXPIRE_DAYS
         COOKIE_SECURE COOKIE_SAMESITE COOKIE_DOMAIN TRUSTED_AUTH_PROXY_ENABLED
         SSO_ENABLED FORWARDED_ALLOW_IPS TRUSTED_PROXY_SOURCE_CIDRS SSO_LOGIN_PATH SSO_SERVICE_PRINCIPAL SSO_KEYTAB_PATH
+        LOCAL_ADMIN_ENABLED LOCAL_ADMIN_USERNAME LOCAL_ADMIN_PASSWORD_HASH LOCAL_ADMIN_FORCE_ROTATE LOCAL_ADMIN_BOOTSTRAP_REQUIRED
         MODEL_POLICY_DIR MODEL_ACCESS_CODING_GROUPS MODEL_ACCESS_ADMIN_GROUPS ADMIN_DASHBOARD_USERS
         REDIS_IMAGE POSTGRES_IMAGE OLLAMA_IMAGE NGINX_IMAGE
         OLLAMA_URL DEFAULT_MODEL OLLAMA_PULL_TIMEOUT_SECONDS AUTO_START_OLLAMA GPU_ENABLED
@@ -1774,6 +1929,11 @@ write_env_file() {
     append_env_line "${temp_file}" "SSO_LOGIN_PATH" "/auth/sso/login"
     append_env_line "${temp_file}" "SSO_SERVICE_PRINCIPAL" "${SSO_SERVICE_PRINCIPAL}"
     append_env_line "${temp_file}" "SSO_KEYTAB_PATH" "${SSO_KEYTAB_PATH}"
+    append_env_line "${temp_file}" "LOCAL_ADMIN_ENABLED" "${LOCAL_ADMIN_ENABLED}"
+    append_env_line "${temp_file}" "LOCAL_ADMIN_USERNAME" "${LOCAL_ADMIN_USERNAME}"
+    append_env_line "${temp_file}" "LOCAL_ADMIN_PASSWORD_HASH" "${LOCAL_ADMIN_PASSWORD_HASH}"
+    append_env_line "${temp_file}" "LOCAL_ADMIN_FORCE_ROTATE" "${LOCAL_ADMIN_FORCE_ROTATE}"
+    append_env_line "${temp_file}" "LOCAL_ADMIN_BOOTSTRAP_REQUIRED" "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
     append_env_line "${temp_file}" "MODEL_POLICY_DIR" "model_policies"
     append_env_line "${temp_file}" "MODEL_ACCESS_CODING_GROUPS" "${MODEL_ACCESS_CODING_GROUPS}"
     append_env_line "${temp_file}" "MODEL_ACCESS_ADMIN_GROUPS" "${MODEL_ACCESS_ADMIN_GROUPS}"
@@ -2320,6 +2480,14 @@ print_final_summary() {
     print_info "Selected installer models=${SELECTED_INSTALLER_MODELS:-${DEFAULT_MODEL}}"
     print_info "DEFAULT_MODEL=${DEFAULT_MODEL}"
     print_info "Secondary selected models=${SELECTED_SECONDARY_MODELS:-<none>}"
+    print_info "Local break-glass admin enabled=${LOCAL_ADMIN_ENABLED}"
+    if [[ "${LOCAL_ADMIN_ENABLED}" == "true" ]]; then
+        print_info "Local break-glass admin username=${LOCAL_ADMIN_USERNAME}"
+        print_info "Local break-glass admin force rotate=${LOCAL_ADMIN_FORCE_ROTATE}"
+        if [[ "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}" == "true" ]]; then
+            print_info "Local break-glass bootstrap secret file=${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}"
+        fi
+    fi
     print_info "Model pre-pull: ${MODEL_BOOTSTRAP_STATUS}"
     print_info "Model present in runtime: ${MODEL_PRESENT_AFTER_BOOTSTRAP}"
     print_info "Chat ready immediately: ${CHAT_READY_IMMEDIATELY}"

@@ -188,6 +188,19 @@ Uvicorn proxy-header trust uses a separate runtime knob, `FORWARDED_ALLOW_IPS`. 
 
 The read-only dashboard operator gate is now configured through `ADMIN_DASHBOARD_USERS`. It is a CSV list of usernames; values are trimmed and normalized with the same logic used for login usernames. An empty value means the dashboard is closed for everyone. Runtime no longer falls back to a test user.
 
+For emergency operator recovery, the installer also supports a separate local-admin path for the dashboard surface only. This path is disabled by default with `LOCAL_ADMIN_ENABLED=false` and does not replace the normal AD/Kerberos login flow used for ordinary chat access.
+
+The practical local break-glass admin contract is:
+
+- the default username is configured through `LOCAL_ADMIN_USERNAME=admin_ai`
+- `.env` stores only `LOCAL_ADMIN_PASSWORD_HASH`; there is no plaintext password or `admin:admin` baseline
+- if the installer operator does not enter a password explicitly, the installer generates a strong one-time bootstrap secret
+- the plaintext bootstrap secret is shown once and stored only in a root-only host file under the installer-managed state directory
+- while `LOCAL_ADMIN_FORCE_ROTATE=true` and `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, the first login can reach only the forced password rotation path
+- until that password rotation is completed, the dashboard UI and dashboard APIs remain closed to the local admin session
+- after a successful password change, the bootstrap secret is no longer valid and future logins require the new password
+- the local break-glass session grants access only to `/admin/dashboard` and `/api/admin/dashboard/*`; the ordinary chat user flow remains on the existing AD/Kerberos path
+
 The same file-processing baseline also supports additional parser/file-chat limit knobs through env/settings overrides, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout. `.env.example` intentionally keeps the template compact and does not enumerate every advanced parser limit by default.
 
 Model access examples for a pilot AD deployment might look like:

@@ -1,4 +1,5 @@
 ﻿import asyncio
+import hashlib
 import ipaddress
 import json
 import logging
@@ -28,6 +29,7 @@ from prometheus_client import Counter
 from pydantic import BaseModel
 
 from auth_kerberos import (
+    AUTH_SOURCE_LOCAL_ADMIN,
     AUTH_SOURCE_PASSWORD,
     AUTH_SOURCE_SSO,
     create_access_token,
@@ -68,6 +70,13 @@ from llm_gateway import (
     apply_history_budget,
     approximate_token_count,
     elapsed_ms,
+)
+from local_admin_security import (
+    LOCAL_ADMIN_AUTH_SOURCE,
+    LOCAL_ADMIN_STATE_REDIS_KEY,
+    build_local_admin_password_hash,
+    build_local_admin_state_revision,
+    verify_local_admin_password,
 )
 import parser_stage
 from persistence import (
@@ -155,6 +164,15 @@ RESERVED_AUTH_PROXY_HEADERS = frozenset(
     }
 )
 ADMIN_DASHBOARD_REFRESH_INTERVAL_MS = 8000
+LOCAL_ADMIN_ACCESS_COOKIE_NAME = "local_admin_access_token"
+LOCAL_ADMIN_CSRF_COOKIE_NAME = "local_admin_csrf_token"
+LOCAL_ADMIN_ACCESS_TOKEN_TYPE = "local_admin_access"
+LOCAL_ADMIN_LOGIN_PATH = "/admin/local/login"
+LOCAL_ADMIN_ROTATE_PATH = "/admin/local/rotate-password"
+LOCAL_ADMIN_LOGOUT_PATH = "/admin/local/logout"
+LOCAL_ADMIN_ROTATION_REQUIRED_ERROR = "Для break-glass admin требуется обязательная смена пароля."
+LOCAL_ADMIN_NOT_CONFIGURED_ERROR = "Local break-glass admin is not configured."
+LOCAL_ADMIN_AUTH_ERROR = "Неверные учётные данные local admin."
 
 sanitize_upload_filename = parser_stage.sanitize_upload_filename
 detect_extension = parser_stage.detect_extension
@@ -649,6 +667,319 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie("csrf_token", path="/", domain=settings.COOKIE_DOMAIN)
 
 
+def local_admin_enabled() -> bool:
+    return bool(settings.LOCAL_ADMIN_ENABLED)
+
+
+def local_admin_username() -> str:
+    return normalize_username(settings.LOCAL_ADMIN_USERNAME or "admin_ai")
+
+
+def local_admin_env_state() -> Dict[str, Any]:
+    base_env_revision = hashlib.sha256(
+        json.dumps(
+            {
+                "enabled": bool(settings.LOCAL_ADMIN_ENABLED),
+                "username": local_admin_username(),
+                "password_hash": str(settings.LOCAL_ADMIN_PASSWORD_HASH or ""),
+                "force_rotate": bool(settings.LOCAL_ADMIN_FORCE_ROTATE),
+                "bootstrap_required": bool(settings.LOCAL_ADMIN_BOOTSTRAP_REQUIRED),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    state = {
+        "enabled": bool(settings.LOCAL_ADMIN_ENABLED),
+        "username": local_admin_username(),
+        "password_hash": str(settings.LOCAL_ADMIN_PASSWORD_HASH or "").strip(),
+        "force_rotate": bool(settings.LOCAL_ADMIN_FORCE_ROTATE),
+        "bootstrap_required": bool(settings.LOCAL_ADMIN_BOOTSTRAP_REQUIRED),
+        "runtime_override": False,
+        "base_env_revision": base_env_revision,
+    }
+    state["state_revision"] = build_local_admin_state_revision(state)
+    return state
+
+
+def local_admin_state_is_configured(state: Dict[str, Any]) -> bool:
+    return bool(state.get("enabled")) and bool(state.get("username")) and bool(state.get("password_hash"))
+
+
+def local_admin_rotation_required(state: Dict[str, Any]) -> bool:
+    return bool(state.get("force_rotate")) or bool(state.get("bootstrap_required"))
+
+
+def build_local_admin_identity(
+    state: Dict[str, Any],
+    *,
+    rotation_required: Optional[bool] = None,
+) -> Dict[str, Any]:
+    username = str(state.get("username") or local_admin_username() or "admin_ai")
+    requires_rotation = local_admin_rotation_required(state) if rotation_required is None else bool(rotation_required)
+    return {
+        "username": username,
+        "display_name": username,
+        "email": "break-glass admin",
+        "canonical_principal": f"local-admin:{username}",
+        "groups": ["local-break-glass-admin"],
+        "auth_source": AUTH_SOURCE_LOCAL_ADMIN,
+        "local_admin": True,
+        "dashboard_only": True,
+        "rotation_required": requires_rotation,
+        "state_revision": str(state.get("state_revision") or ""),
+    }
+
+
+def build_local_admin_login_rate_subject(request: Request, username: str) -> str:
+    return f"local-admin:{build_login_rate_subject(request, username)}"
+
+
+def set_local_admin_cookies(
+    response: Response,
+    access_token: str,
+    *,
+    csrf_token: Optional[str] = None,
+) -> None:
+    base_cookie_params = {
+        "httponly": True,
+        "secure": settings.COOKIE_SECURE,
+        "samesite": settings.COOKIE_SAMESITE,
+        "domain": settings.COOKIE_DOMAIN,
+        "path": "/admin",
+    }
+    response.set_cookie(
+        key=LOCAL_ADMIN_ACCESS_COOKIE_NAME,
+        value=f"Bearer {access_token}",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        **base_cookie_params,
+    )
+    if csrf_token:
+        response.set_cookie(
+            key=LOCAL_ADMIN_CSRF_COOKIE_NAME,
+            value=csrf_token,
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            httponly=False,
+            secure=settings.COOKIE_SECURE,
+            samesite=settings.COOKIE_SAMESITE,
+            domain=settings.COOKIE_DOMAIN,
+            path="/admin",
+        )
+
+
+def clear_local_admin_cookies(response: Response) -> None:
+    response.delete_cookie(LOCAL_ADMIN_ACCESS_COOKIE_NAME, path="/admin", domain=settings.COOKIE_DOMAIN)
+    response.delete_cookie(LOCAL_ADMIN_CSRF_COOKIE_NAME, path="/admin", domain=settings.COOKIE_DOMAIN)
+
+
+def get_or_create_local_admin_csrf_token(request: Request) -> str:
+    existing = request.cookies.get(LOCAL_ADMIN_CSRF_COOKIE_NAME)
+    if existing and len(existing) >= 32:
+        return existing
+    return generate_csrf_token()
+
+
+def enforce_local_admin_csrf(request: Request, *, form_token: Optional[str] = None) -> None:
+    host = request.headers.get("host")
+    if not host:
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+
+    expected_origin = f"{request.url.scheme}://{host}"
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    if origin and origin != expected_origin:
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+    if not origin and referer:
+        parsed = urlparse(referer)
+        referer_origin = f"{parsed.scheme}://{parsed.netloc}"
+        if referer_origin != expected_origin:
+            raise HTTPException(status_code=403, detail="CSRF validation failed")
+
+    csrf_cookie = request.cookies.get(LOCAL_ADMIN_CSRF_COOKIE_NAME)
+    csrf_candidate = form_token or request.headers.get("X-CSRF-Token")
+    if not csrf_cookie or not csrf_candidate or not secrets.compare_digest(csrf_cookie, csrf_candidate):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+
+
+def local_admin_page_context(**extra: Any) -> Dict[str, Any]:
+    return {
+        "local_admin_enabled": local_admin_enabled(),
+        "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
+        **extra,
+    }
+
+
+async def get_local_admin_redis_client(request: Request) -> Any:
+    gateway = getattr(request.app.state, "llm_gateway", None)
+    redis_client = getattr(gateway, "redis", None)
+    if redis_client is None:
+        raise HTTPException(status_code=503, detail=AUTH_BACKEND_UNAVAILABLE_ERROR)
+    return redis_client
+
+
+async def load_local_admin_state(request: Request) -> Dict[str, Any]:
+    env_state = local_admin_env_state()
+    if not local_admin_enabled():
+        return env_state
+    if not local_admin_state_is_configured(env_state):
+        return env_state
+
+    redis_client = await get_local_admin_redis_client(request)
+    raw_payload = await redis_client.get(LOCAL_ADMIN_STATE_REDIS_KEY)
+    if not raw_payload:
+        payload = dict(env_state)
+        await redis_client.set(LOCAL_ADMIN_STATE_REDIS_KEY, json.dumps(payload, sort_keys=True))
+        return payload
+
+    if isinstance(raw_payload, bytes):
+        raw_payload = raw_payload.decode("utf-8", errors="ignore")
+    try:
+        payload = json.loads(raw_payload)
+    except (TypeError, ValueError):
+        payload = {}
+
+    if not isinstance(payload, dict) or payload.get("base_env_revision") != env_state["base_env_revision"]:
+        payload = dict(env_state)
+        await redis_client.set(LOCAL_ADMIN_STATE_REDIS_KEY, json.dumps(payload, sort_keys=True))
+        return payload
+
+    merged_state = dict(env_state)
+    merged_state.update(
+        {
+            "enabled": bool(payload.get("enabled", env_state["enabled"])),
+            "username": normalize_username(str(payload.get("username") or env_state["username"])),
+            "password_hash": str(payload.get("password_hash") or env_state["password_hash"]).strip(),
+            "force_rotate": bool(payload.get("force_rotate", env_state["force_rotate"])),
+            "bootstrap_required": bool(payload.get("bootstrap_required", env_state["bootstrap_required"])),
+            "runtime_override": bool(payload.get("runtime_override", False)),
+            "base_env_revision": str(payload.get("base_env_revision") or env_state["base_env_revision"]),
+            "rotated_at": int(payload.get("rotated_at") or 0),
+        }
+    )
+    merged_state["state_revision"] = build_local_admin_state_revision(merged_state)
+    return merged_state
+
+
+async def persist_local_admin_state(request: Request, state: Dict[str, Any]) -> Dict[str, Any]:
+    stored_state = {
+        "enabled": bool(state.get("enabled", False)),
+        "username": normalize_username(str(state.get("username") or "")),
+        "password_hash": str(state.get("password_hash") or "").strip(),
+        "force_rotate": bool(state.get("force_rotate", False)),
+        "bootstrap_required": bool(state.get("bootstrap_required", False)),
+        "runtime_override": bool(state.get("runtime_override", False)),
+        "base_env_revision": str(state.get("base_env_revision") or ""),
+        "rotated_at": int(state.get("rotated_at") or 0),
+    }
+    stored_state["state_revision"] = build_local_admin_state_revision(stored_state)
+    redis_client = await get_local_admin_redis_client(request)
+    await redis_client.set(LOCAL_ADMIN_STATE_REDIS_KEY, json.dumps(stored_state, sort_keys=True))
+    return stored_state
+
+
+def build_local_admin_access_token_payload(state: Dict[str, Any]) -> Dict[str, Any]:
+    identity = build_local_admin_identity(state)
+    return {
+        "sub": identity["username"],
+        "canonical_principal": identity["canonical_principal"],
+        "display_name": identity["display_name"],
+        "email": identity["email"],
+        "groups": identity["groups"],
+        "auth_source": LOCAL_ADMIN_AUTH_SOURCE,
+        "local_admin": True,
+        "dashboard_only": True,
+        "state_revision": str(state.get("state_revision") or ""),
+        "rotation_required": local_admin_rotation_required(state),
+        "type": LOCAL_ADMIN_ACCESS_TOKEN_TYPE,
+    }
+
+
+async def issue_local_admin_session_response(
+    request: Request,
+    *,
+    state: Dict[str, Any],
+    redirect_url: str,
+) -> RedirectResponse:
+    access_token = create_access_token(
+        build_local_admin_access_token_payload(state),
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    response = RedirectResponse(url=redirect_url, status_code=303)
+    set_local_admin_cookies(response, access_token, csrf_token=get_or_create_local_admin_csrf_token(request))
+    return response
+
+
+async def revoke_local_admin_session_token(request: Request) -> None:
+    redis_client = await get_local_admin_redis_client(request)
+    raw_token = request.cookies.get(LOCAL_ADMIN_ACCESS_COOKIE_NAME)
+    if raw_token:
+        await revoke_token(redis_client, raw_token)
+
+
+async def get_current_local_admin_session(request: Request) -> Optional[Dict[str, Any]]:
+    raw_token = request.cookies.get(LOCAL_ADMIN_ACCESS_COOKIE_NAME)
+    token = extract_bearer_token(raw_token)
+    if not token:
+        return None
+
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except JWTError as exc:
+        logger.warning("Local admin JWT decode failed: %s", exc)
+        return None
+
+    if payload.get("type") != LOCAL_ADMIN_ACCESS_TOKEN_TYPE or not payload.get("local_admin"):
+        return None
+
+    try:
+        state = await load_local_admin_state(request)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            logger.error("Local admin auth backend unavailable while resolving dashboard session")
+            return None
+        raise
+
+    if not local_admin_state_is_configured(state):
+        return None
+
+    redis_client = await get_local_admin_redis_client(request)
+    if await is_token_revoked(redis_client, payload):
+        logger.warning("Rejected revoked local admin JWT for subject %s", payload.get("sub"))
+        return None
+
+    if payload.get("sub") != state["username"]:
+        return None
+    if payload.get("state_revision") != state["state_revision"]:
+        return None
+
+    return build_local_admin_identity(state)
+
+
+async def get_current_local_admin_session_required(
+    request: Request,
+    current_local_admin: Optional[Dict[str, Any]] = Depends(get_current_local_admin_session),
+) -> Dict[str, Any]:
+    if not local_admin_enabled():
+        raise HTTPException(status_code=404, detail=LOCAL_ADMIN_NOT_CONFIGURED_ERROR)
+    state = await load_local_admin_state(request)
+    if not local_admin_state_is_configured(state):
+        raise HTTPException(status_code=404, detail=LOCAL_ADMIN_NOT_CONFIGURED_ERROR)
+    if not current_local_admin:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return current_local_admin
+
+
+async def get_local_admin_rotation_session_required(
+    request: Request,
+    current_local_admin: Dict[str, Any] = Depends(get_current_local_admin_session_required),
+) -> Dict[str, Any]:
+    if not current_local_admin.get("rotation_required"):
+        raise HTTPException(status_code=403, detail="Password rotation is not required")
+    return current_local_admin
+
+
 @lru_cache(maxsize=16)
 def parse_trusted_proxy_source_cidrs(raw_value: str) -> tuple[ipaddress._BaseNetwork, ...]:
     cidrs: list[ipaddress._BaseNetwork] = []
@@ -728,6 +1059,36 @@ async def get_admin_dashboard_user_required(
     if not user_can_access_admin_dashboard(current_user):
         raise HTTPException(status_code=403, detail="Forbidden")
     return current_user
+
+
+async def get_admin_dashboard_identity_required(
+    request: Request,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
+    current_local_admin: Optional[Dict[str, Any]] = Depends(get_current_local_admin_session),
+) -> Dict[str, Any]:
+    if current_user and user_can_access_admin_dashboard(current_user):
+        identity = dict(current_user)
+        identity["dashboard_auth_mode"] = "ad"
+        identity["home_href"] = "/chat"
+        identity["logout_path"] = "/logout"
+        identity["csrf_cookie_name"] = "csrf_token"
+        identity["logout_redirect"] = "/login"
+        identity["session_status_label"] = "Активен • Корпоративный доступ"
+        return identity
+
+    if current_local_admin:
+        if current_local_admin.get("rotation_required"):
+            raise HTTPException(status_code=403, detail=LOCAL_ADMIN_ROTATION_REQUIRED_ERROR)
+        identity = dict(current_local_admin)
+        identity["dashboard_auth_mode"] = "local_admin"
+        identity["home_href"] = "/admin/dashboard"
+        identity["logout_path"] = LOCAL_ADMIN_LOGOUT_PATH
+        identity["csrf_cookie_name"] = LOCAL_ADMIN_CSRF_COOKIE_NAME
+        identity["logout_redirect"] = LOCAL_ADMIN_LOGIN_PATH
+        identity["session_status_label"] = "Активен • Break-glass admin"
+        return identity
+
+    raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def get_or_create_csrf_token(request: Request) -> str:
@@ -1565,6 +1926,8 @@ async def login_page(request: Request, current_user: Optional[Dict[str, Any]] = 
             "request": request,
             "sso_login_enabled": trusted_proxy_sso_enabled(),
             "sso_login_path": settings.SSO_LOGIN_PATH,
+            "local_admin_enabled": local_admin_enabled(),
+            "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
         },
     )
 
@@ -1631,6 +1994,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
                     "error": "Неверное имя пользователя или пароль",
                     "sso_login_enabled": trusted_proxy_sso_enabled(),
                     "sso_login_path": settings.SSO_LOGIN_PATH,
+                    "local_admin_enabled": local_admin_enabled(),
+                    "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
                 },
                 status_code=401,
             )
@@ -1673,6 +2038,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
                     "error": LOGIN_RATE_LIMIT_ERROR,
                     "sso_login_enabled": trusted_proxy_sso_enabled(),
                     "sso_login_path": settings.SSO_LOGIN_PATH,
+                    "local_admin_enabled": local_admin_enabled(),
+                    "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
                 },
                 status_code=429,
             )
@@ -1687,6 +2054,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
                 "error": GENERIC_AUTH_ERROR,
                 "sso_login_enabled": trusted_proxy_sso_enabled(),
                 "sso_login_path": settings.SSO_LOGIN_PATH,
+                "local_admin_enabled": local_admin_enabled(),
+                "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
             },
             status_code=500,
         )
@@ -1707,6 +2076,191 @@ async def logout(request: Request, current_user: Optional[Dict[str, Any]] = Depe
         await revoke_token(redis_client, refresh_token)
     response = JSONResponse({"ok": True, "redirect": "/login"})
     clear_auth_cookies(response)
+    return response
+
+
+@app.get(LOCAL_ADMIN_LOGIN_PATH, response_class=HTMLResponse)
+async def local_admin_login_page(
+    request: Request,
+    current_local_admin: Optional[Dict[str, Any]] = Depends(get_current_local_admin_session),
+):
+    if not local_admin_enabled():
+        raise HTTPException(status_code=404, detail=LOCAL_ADMIN_NOT_CONFIGURED_ERROR)
+    state = await load_local_admin_state(request)
+    if not local_admin_state_is_configured(state):
+        raise HTTPException(status_code=404, detail=LOCAL_ADMIN_NOT_CONFIGURED_ERROR)
+    if current_local_admin:
+        if current_local_admin.get("rotation_required"):
+            return RedirectResponse(url=LOCAL_ADMIN_ROTATE_PATH, status_code=303)
+        return RedirectResponse(url="/admin/dashboard", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "local_admin_login.html",
+        local_admin_page_context(
+            request=request,
+            local_admin_username=state["username"],
+        ),
+    )
+
+
+@app.post(LOCAL_ADMIN_LOGIN_PATH)
+async def local_admin_login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if not local_admin_enabled():
+        raise HTTPException(status_code=404, detail=LOCAL_ADMIN_NOT_CONFIGURED_ERROR)
+
+    state = await load_local_admin_state(request)
+    if not local_admin_state_is_configured(state):
+        raise HTTPException(status_code=404, detail=LOCAL_ADMIN_NOT_CONFIGURED_ERROR)
+
+    normalized_username = normalize_username(username)
+    try:
+        await request.app.state.login_rate_limiter.check(build_local_admin_login_rate_subject(request, normalized_username or username))
+    except HTTPException as exc:
+        if exc.status_code != 429:
+            raise
+        return templates.TemplateResponse(
+            request,
+            "local_admin_login.html",
+            local_admin_page_context(
+                request=request,
+                local_admin_username=state["username"],
+                error=LOGIN_RATE_LIMIT_ERROR,
+            ),
+            status_code=429,
+        )
+
+    if normalized_username != state["username"] or not verify_local_admin_password(password, state["password_hash"]):
+        logger.warning(
+            "Rejected local break-glass admin login for username=%s from client=%s",
+            normalized_username or "<invalid>",
+            get_request_client_host(request) or "unknown",
+        )
+        return templates.TemplateResponse(
+            request,
+            "local_admin_login.html",
+            local_admin_page_context(
+                request=request,
+                local_admin_username=state["username"],
+                error=LOCAL_ADMIN_AUTH_ERROR,
+            ),
+            status_code=401,
+        )
+
+    logger.info(
+        "Local break-glass admin login succeeded for %s from client=%s",
+        state["username"],
+        get_request_client_host(request) or "unknown",
+    )
+    redirect_target = LOCAL_ADMIN_ROTATE_PATH if local_admin_rotation_required(state) else "/admin/dashboard"
+    return await issue_local_admin_session_response(request, state=state, redirect_url=redirect_target)
+
+
+@app.get(LOCAL_ADMIN_ROTATE_PATH, response_class=HTMLResponse)
+async def local_admin_rotate_password_page(
+    request: Request,
+    current_local_admin: Dict[str, Any] = Depends(get_current_local_admin_session_required),
+):
+    if not current_local_admin.get("rotation_required"):
+        return RedirectResponse(url="/admin/dashboard", status_code=303)
+
+    csrf_token = get_or_create_local_admin_csrf_token(request)
+    response = templates.TemplateResponse(
+        request,
+        "local_admin_rotate_password.html",
+        {
+            "request": request,
+            "current_user": current_local_admin,
+            "is_authenticated": False,
+            "csrf_token": csrf_token,
+        },
+    )
+    if not request.cookies.get(LOCAL_ADMIN_CSRF_COOKIE_NAME):
+        response.set_cookie(
+            LOCAL_ADMIN_CSRF_COOKIE_NAME,
+            csrf_token,
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            httponly=False,
+            secure=settings.COOKIE_SECURE,
+            samesite=settings.COOKIE_SAMESITE,
+            domain=settings.COOKIE_DOMAIN,
+            path="/admin",
+        )
+    return response
+
+
+@app.post(LOCAL_ADMIN_ROTATE_PATH)
+async def local_admin_rotate_password(
+    request: Request,
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    csrf_token: str = Form(""),
+    current_local_admin: Dict[str, Any] = Depends(get_local_admin_rotation_session_required),
+):
+    enforce_local_admin_csrf(request, form_token=csrf_token)
+
+    if not new_password or len(new_password) < 16:
+        return templates.TemplateResponse(
+            request,
+            "local_admin_rotate_password.html",
+            {
+                "request": request,
+                "current_user": current_local_admin,
+                "is_authenticated": False,
+                "csrf_token": get_or_create_local_admin_csrf_token(request),
+                "error": "Новый пароль должен быть не короче 16 символов.",
+            },
+            status_code=400,
+        )
+    if new_password != confirm_password:
+        return templates.TemplateResponse(
+            request,
+            "local_admin_rotate_password.html",
+            {
+                "request": request,
+                "current_user": current_local_admin,
+                "is_authenticated": False,
+                "csrf_token": get_or_create_local_admin_csrf_token(request),
+                "error": "Подтверждение пароля не совпадает.",
+            },
+            status_code=400,
+        )
+
+    state = await load_local_admin_state(request)
+    if state["username"] != current_local_admin["username"] or not local_admin_rotation_required(state):
+        raise HTTPException(status_code=403, detail=LOCAL_ADMIN_ROTATION_REQUIRED_ERROR)
+
+    updated_state = dict(state)
+    updated_state["password_hash"] = build_local_admin_password_hash(new_password)
+    updated_state["force_rotate"] = False
+    updated_state["bootstrap_required"] = False
+    updated_state["runtime_override"] = True
+    updated_state["rotated_at"] = int(time.time())
+    updated_state = await persist_local_admin_state(request, updated_state)
+    await revoke_local_admin_session_token(request)
+    logger.info(
+        "Local break-glass admin password rotation completed for %s from client=%s",
+        updated_state["username"],
+        get_request_client_host(request) or "unknown",
+    )
+    return await issue_local_admin_session_response(request, state=updated_state, redirect_url="/admin/dashboard")
+
+
+@app.post(LOCAL_ADMIN_LOGOUT_PATH)
+async def local_admin_logout(
+    request: Request,
+    current_local_admin: Optional[Dict[str, Any]] = Depends(get_current_local_admin_session),
+):
+    if current_local_admin:
+        enforce_local_admin_csrf(request)
+        await revoke_local_admin_session_token(request)
+        logger.info(
+            "Local break-glass admin logout completed for %s from client=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+        )
+    response = JSONResponse({"ok": True, "redirect": LOCAL_ADMIN_LOGIN_PATH})
+    clear_local_admin_cookies(response)
     return response
 
 
@@ -1758,7 +2312,7 @@ async def chat_page(
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard_page(
     request: Request,
-    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_identity_required),
 ):
     return templates.TemplateResponse(
         request,
@@ -1767,6 +2321,11 @@ async def admin_dashboard_page(
             "request": request,
             "current_user": current_user,
             "is_authenticated": True,
+            "home_href": current_user.get("home_href", "/chat"),
+            "logout_path": current_user.get("logout_path", "/logout"),
+            "csrf_cookie_name": current_user.get("csrf_cookie_name", "csrf_token"),
+            "logout_redirect": current_user.get("logout_redirect", "/login"),
+            "session_status_label": current_user.get("session_status_label", "Активен • Корпоративный доступ"),
             "dashboard_api_url": "/api/admin/dashboard/summary",
             "dashboard_live_api_url": "/api/admin/dashboard/live",
             "dashboard_history_api_url": "/api/admin/dashboard/history",
@@ -1779,7 +2338,7 @@ async def admin_dashboard_page(
 @app.get("/api/admin/dashboard/summary")
 async def get_admin_dashboard_summary(
     request: Request,
-    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_identity_required),
 ):
     gateway: LLMGateway = request.app.state.llm_gateway
     payload = await build_admin_dashboard_summary(gateway)
@@ -1790,7 +2349,7 @@ async def get_admin_dashboard_summary(
 @app.get("/api/admin/dashboard/live")
 async def get_admin_dashboard_live(
     request: Request,
-    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_identity_required),
 ):
     gateway: LLMGateway = request.app.state.llm_gateway
     payload = await gateway.get_dashboard_live_sample()
@@ -1806,7 +2365,7 @@ async def get_admin_dashboard_live(
 async def get_admin_dashboard_history(
     request: Request,
     range: str = "24h",
-    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_identity_required),
 ):
     gateway: LLMGateway = request.app.state.llm_gateway
     normalized_range = normalize_history_range(range)
@@ -1821,7 +2380,7 @@ async def get_admin_dashboard_history(
 async def get_admin_dashboard_events(
     request: Request,
     limit: int = 50,
-    current_user: Dict[str, Any] = Depends(get_admin_dashboard_user_required),
+    current_user: Dict[str, Any] = Depends(get_admin_dashboard_identity_required),
 ):
     gateway: LLMGateway = request.app.state.llm_gateway
     payload = {

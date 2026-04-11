@@ -175,6 +175,9 @@
     {% if sso_login_enabled %}
     <a class="secondary-action" href="{{ sso_login_path }}">Войти через AD SSO</a>
     {% endif %}
+    {% if local_admin_enabled %}
+    <a class="secondary-action" href="{{ local_admin_login_path }}">Emergency admin dashboard access</a>
+    {% endif %}
 
     <div class="info-message">
         <strong>Корпоративная аутентификация Kerberos</strong><br>

@@ -28,6 +28,7 @@ INSECURE_PASSWORD_PLACEHOLDERS = {
 }
 LOCALHOST_NAMES = {"localhost", "127.0.0.1", "::1"}
 MIN_SECRET_KEY_LENGTH = 32
+LOCAL_ADMIN_USERNAME_ALLOWED_RE = r"^[A-Za-z0-9._-]+$"
 
 
 def parse_group_mapping(value: Optional[str]) -> tuple[str, ...]:
@@ -127,6 +128,11 @@ class Settings(BaseSettings):
     SSO_LOGIN_PATH: str = "/auth/sso/login"
     SSO_SERVICE_PRINCIPAL: str = ""
     SSO_KEYTAB_PATH: str = "/etc/corporate-ai-sso/http.keytab"
+    LOCAL_ADMIN_ENABLED: bool = False
+    LOCAL_ADMIN_USERNAME: str = "admin_ai"
+    LOCAL_ADMIN_PASSWORD_HASH: str = ""
+    LOCAL_ADMIN_FORCE_ROTATE: bool = False
+    LOCAL_ADMIN_BOOTSTRAP_REQUIRED: bool = False
     MODEL_POLICY_DIR: str = "model_policies"
     MODEL_REGISTRY_PATH: str = "models/catalog.json"
     MODEL_ACCESS_CODING_GROUPS: str = ""
@@ -259,6 +265,20 @@ class Settings(BaseSettings):
         if secret and secret_looks_like_placeholder(secret):
             raise ValueError("Password uses an insecure placeholder value and must be overridden")
         return secret
+
+    @field_validator("LOCAL_ADMIN_USERNAME")
+    @classmethod
+    def validate_local_admin_username(cls, value: str) -> str:
+        candidate = value.strip().lower()
+        if not candidate:
+            return "admin_ai"
+        if not Path(candidate).name == candidate:
+            raise ValueError("LOCAL_ADMIN_USERNAME must be a simple username without path separators")
+        import re
+
+        if not re.fullmatch(LOCAL_ADMIN_USERNAME_ALLOWED_RE, candidate):
+            raise ValueError("LOCAL_ADMIN_USERNAME contains unsupported characters")
+        return candidate
 
     @field_validator("TRUSTED_PROXY_SOURCE_CIDRS")
     @classmethod
