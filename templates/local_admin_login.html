@@ -97,6 +97,7 @@
     }
 
     .error-message,
+    .success-message,
     .info-message {
         padding: 1rem;
         border-radius: 12px;
@@ -108,6 +109,12 @@
         background: rgba(239, 68, 68, 0.1);
         border: 1px solid #ef4444;
         color: #fca5a5;
+    }
+
+    .success-message {
+        background: rgba(16, 163, 127, 0.12);
+        border: 1px solid #10a37f;
+        color: #86efac;
     }
 
     .info-message {
@@ -127,6 +134,10 @@
 
     {% if error %}
     <div class="error-message">{{ error }}</div>
+    {% endif %}
+
+    {% if success %}
+    <div class="success-message">{{ success }}</div>
     {% endif %}
 
     <div class="info-message">

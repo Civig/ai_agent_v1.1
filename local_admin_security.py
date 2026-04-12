@@ -3,13 +3,14 @@ import hashlib
 import hmac
 import json
 import secrets
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 LOCAL_ADMIN_AUTH_SOURCE = "local_admin"
 LOCAL_ADMIN_HASH_SCHEME = "pbkdf2_sha256"
 LOCAL_ADMIN_HASH_ITERATIONS = 600_000
 LOCAL_ADMIN_HASH_SALT_BYTES = 16
+LOCAL_ADMIN_MIN_PASSWORD_LENGTH = 16
 LOCAL_ADMIN_STATE_REDIS_KEY = "auth:local_admin:state:v1"
 
 
@@ -47,6 +48,15 @@ def verify_local_admin_password(password: str, stored_hash: str) -> bool:
 
     candidate_digest = hashlib.pbkdf2_hmac("sha256", str(password or "").encode("utf-8"), salt, iterations)
     return hmac.compare_digest(candidate_digest, expected_digest)
+
+
+def validate_local_admin_password_policy(password: str) -> Optional[str]:
+    candidate = str(password or "")
+    if not candidate or candidate.isspace():
+        return "Новый пароль не должен быть пустым."
+    if len(candidate) < LOCAL_ADMIN_MIN_PASSWORD_LENGTH:
+        return f"Новый пароль должен быть не короче {LOCAL_ADMIN_MIN_PASSWORD_LENGTH} символов."
+    return None
 
 
 def build_local_admin_state_revision(state: Dict[str, Any]) -> str:

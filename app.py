@@ -77,6 +77,7 @@ from local_admin_security import (
     build_local_admin_password_hash,
     build_local_admin_state_revision,
     normalize_local_admin_password_hash_transport,
+    validate_local_admin_password_policy,
     verify_local_admin_password,
 )
 import parser_stage
@@ -172,10 +173,12 @@ LOCAL_ADMIN_COOKIE_PATH = "/"
 LOCAL_ADMIN_LEGACY_COOKIE_PATH = "/admin"
 LOCAL_ADMIN_LOGIN_PATH = "/admin/local/login"
 LOCAL_ADMIN_ROTATE_PATH = "/admin/local/rotate-password"
+LOCAL_ADMIN_CHANGE_PASSWORD_PATH = "/admin/local/change-password"
 LOCAL_ADMIN_LOGOUT_PATH = "/admin/local/logout"
 LOCAL_ADMIN_ROTATION_REQUIRED_ERROR = "Для break-glass admin требуется обязательная смена пароля."
 LOCAL_ADMIN_NOT_CONFIGURED_ERROR = "Local break-glass admin is not configured."
 LOCAL_ADMIN_AUTH_ERROR = "Неверные учётные данные local admin."
+LOCAL_ADMIN_PASSWORD_CHANGED_MESSAGE = "Пароль local admin обновлён. Войдите снова с новым паролем."
 
 sanitize_upload_filename = parser_stage.sanitize_upload_filename
 detect_extension = parser_stage.detect_extension
@@ -739,6 +742,10 @@ def build_local_admin_login_rate_subject(request: Request, username: str) -> str
     return f"local-admin:{build_login_rate_subject(request, username)}"
 
 
+def build_local_admin_password_change_rate_subject(request: Request, username: str) -> str:
+    return f"local-admin-password-change:{build_login_rate_subject(request, username)}"
+
+
 def set_local_admin_cookies(
     response: Response,
     access_token: str,
@@ -834,6 +841,66 @@ def local_admin_page_context(**extra: Any) -> Dict[str, Any]:
         "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
         **extra,
     }
+
+
+def build_local_admin_dashboard_identity(current_local_admin: Dict[str, Any]) -> Dict[str, Any]:
+    identity = dict(current_local_admin)
+    identity["dashboard_auth_mode"] = "local_admin"
+    identity["home_href"] = "/admin/dashboard"
+    identity["logout_path"] = LOCAL_ADMIN_LOGOUT_PATH
+    identity["csrf_cookie_name"] = LOCAL_ADMIN_CSRF_COOKIE_NAME
+    identity["logout_redirect"] = LOCAL_ADMIN_LOGIN_PATH
+    identity["session_status_label"] = "Активен • Break-glass admin"
+    identity["change_password_path"] = LOCAL_ADMIN_CHANGE_PASSWORD_PATH
+    return identity
+
+
+def ensure_local_admin_csrf_cookie(request: Request, response: Response, csrf_token: str) -> None:
+    if request.cookies.get(LOCAL_ADMIN_CSRF_COOKIE_NAME):
+        return
+    response.set_cookie(
+        LOCAL_ADMIN_CSRF_COOKIE_NAME,
+        csrf_token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=False,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN,
+        path=LOCAL_ADMIN_COOKIE_PATH,
+    )
+
+
+def build_local_admin_password_change_response(
+    request: Request,
+    current_local_admin: Dict[str, Any],
+    *,
+    csrf_token: Optional[str] = None,
+    error: Optional[str] = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    resolved_csrf_token = csrf_token or get_or_create_local_admin_csrf_token(request)
+    current_user = build_local_admin_dashboard_identity(current_local_admin)
+    response = templates.TemplateResponse(
+        request,
+        "local_admin_change_password.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "is_authenticated": True,
+            "home_href": current_user["home_href"],
+            "logout_path": current_user["logout_path"],
+            "csrf_cookie_name": current_user["csrf_cookie_name"],
+            "logout_redirect": current_user["logout_redirect"],
+            "session_status_label": current_user["session_status_label"],
+            "change_password_path": current_user["change_password_path"],
+            "csrf_token": resolved_csrf_token,
+            "error": error,
+        },
+        status_code=status_code,
+    )
+    ensure_local_admin_csrf_cookie(request, response, resolved_csrf_token)
+    return response
 
 
 async def get_local_admin_redis_client(request: Request) -> Any:
@@ -1106,14 +1173,7 @@ async def get_admin_dashboard_identity_required(
     if current_local_admin:
         if current_local_admin.get("rotation_required"):
             raise HTTPException(status_code=403, detail=LOCAL_ADMIN_ROTATION_REQUIRED_ERROR)
-        identity = dict(current_local_admin)
-        identity["dashboard_auth_mode"] = "local_admin"
-        identity["home_href"] = "/admin/dashboard"
-        identity["logout_path"] = LOCAL_ADMIN_LOGOUT_PATH
-        identity["csrf_cookie_name"] = LOCAL_ADMIN_CSRF_COOKIE_NAME
-        identity["logout_redirect"] = LOCAL_ADMIN_LOGIN_PATH
-        identity["session_status_label"] = "Активен • Break-glass admin"
-        return identity
+        return build_local_admin_dashboard_identity(current_local_admin)
 
     raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -2120,12 +2180,16 @@ async def local_admin_login_page(
         if current_local_admin.get("rotation_required"):
             return RedirectResponse(url=LOCAL_ADMIN_ROTATE_PATH, status_code=303)
         return RedirectResponse(url="/admin/dashboard", status_code=303)
+    success = None
+    if request.query_params.get("password_changed") == "1":
+        success = LOCAL_ADMIN_PASSWORD_CHANGED_MESSAGE
     return templates.TemplateResponse(
         request,
         "local_admin_login.html",
         local_admin_page_context(
             request=request,
             local_admin_username=state["username"],
+            success=success,
         ),
     )
 
@@ -2201,18 +2265,7 @@ async def local_admin_rotate_password_page(
             "csrf_token": csrf_token,
         },
     )
-    if not request.cookies.get(LOCAL_ADMIN_CSRF_COOKIE_NAME):
-        response.set_cookie(
-            LOCAL_ADMIN_CSRF_COOKIE_NAME,
-            csrf_token,
-            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            expires=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            httponly=False,
-            secure=settings.COOKIE_SECURE,
-            samesite=settings.COOKIE_SAMESITE,
-            domain=settings.COOKIE_DOMAIN,
-            path=LOCAL_ADMIN_COOKIE_PATH,
-        )
+    ensure_local_admin_csrf_cookie(request, response, csrf_token)
     return response
 
 
@@ -2226,7 +2279,8 @@ async def local_admin_rotate_password(
 ):
     enforce_local_admin_csrf(request, form_token=csrf_token)
 
-    if not new_password or len(new_password) < 16:
+    password_policy_error = validate_local_admin_password_policy(new_password)
+    if password_policy_error:
         return templates.TemplateResponse(
             request,
             "local_admin_rotate_password.html",
@@ -2235,7 +2289,7 @@ async def local_admin_rotate_password(
                 "current_user": current_local_admin,
                 "is_authenticated": False,
                 "csrf_token": get_or_create_local_admin_csrf_token(request),
-                "error": "Новый пароль должен быть не короче 16 символов.",
+                "error": password_policy_error,
             },
             status_code=400,
         )
@@ -2271,6 +2325,141 @@ async def local_admin_rotate_password(
         get_request_client_host(request) or "unknown",
     )
     return await issue_local_admin_session_response(request, state=updated_state, redirect_url="/admin/dashboard")
+
+
+@app.get(LOCAL_ADMIN_CHANGE_PASSWORD_PATH, response_class=HTMLResponse)
+async def local_admin_change_password_page(
+    request: Request,
+    current_local_admin: Dict[str, Any] = Depends(get_current_local_admin_session_required),
+):
+    if current_local_admin.get("rotation_required"):
+        return RedirectResponse(url=LOCAL_ADMIN_ROTATE_PATH, status_code=303)
+    return build_local_admin_password_change_response(request, current_local_admin)
+
+
+@app.post(LOCAL_ADMIN_CHANGE_PASSWORD_PATH)
+async def local_admin_change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_new_password: str = Form(...),
+    csrf_token: str = Form(""),
+    current_local_admin: Dict[str, Any] = Depends(get_current_local_admin_session_required),
+):
+    enforce_local_admin_csrf(request, form_token=csrf_token)
+
+    if current_local_admin.get("rotation_required"):
+        logger.warning(
+            "Rejected local break-glass admin password change for %s from client=%s reason=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+            "rotation_required",
+        )
+        raise HTTPException(status_code=403, detail=LOCAL_ADMIN_ROTATION_REQUIRED_ERROR)
+
+    try:
+        await request.app.state.login_rate_limiter.check(
+            build_local_admin_password_change_rate_subject(request, current_local_admin["username"])
+        )
+    except HTTPException as exc:
+        if exc.status_code != 429:
+            raise
+        logger.warning(
+            "Rejected local break-glass admin password change for %s from client=%s reason=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+            "rate_limited",
+        )
+        return build_local_admin_password_change_response(
+            request,
+            current_local_admin,
+            error=LOGIN_RATE_LIMIT_ERROR,
+            status_code=429,
+        )
+
+    state = await load_local_admin_state(request)
+    if state["username"] != current_local_admin["username"] or local_admin_rotation_required(state):
+        logger.warning(
+            "Rejected local break-glass admin password change for %s from client=%s reason=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+            "rotation_required",
+        )
+        raise HTTPException(status_code=403, detail=LOCAL_ADMIN_ROTATION_REQUIRED_ERROR)
+
+    if not verify_local_admin_password(current_password, state["password_hash"]):
+        logger.warning(
+            "Rejected local break-glass admin password change for %s from client=%s reason=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+            "current_password_mismatch",
+        )
+        return build_local_admin_password_change_response(
+            request,
+            current_local_admin,
+            error="Текущий пароль указан неверно.",
+            status_code=400,
+        )
+
+    if new_password != confirm_new_password:
+        logger.warning(
+            "Rejected local break-glass admin password change for %s from client=%s reason=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+            "confirm_mismatch",
+        )
+        return build_local_admin_password_change_response(
+            request,
+            current_local_admin,
+            error="Подтверждение нового пароля не совпадает.",
+            status_code=400,
+        )
+
+    if verify_local_admin_password(new_password, state["password_hash"]):
+        logger.warning(
+            "Rejected local break-glass admin password change for %s from client=%s reason=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+            "same_as_current",
+        )
+        return build_local_admin_password_change_response(
+            request,
+            current_local_admin,
+            error="Новый пароль должен отличаться от текущего.",
+            status_code=400,
+        )
+
+    password_policy_error = validate_local_admin_password_policy(new_password)
+    if password_policy_error:
+        logger.warning(
+            "Rejected local break-glass admin password change for %s from client=%s reason=%s",
+            current_local_admin["username"],
+            get_request_client_host(request) or "unknown",
+            "password_policy",
+        )
+        return build_local_admin_password_change_response(
+            request,
+            current_local_admin,
+            error=password_policy_error,
+            status_code=400,
+        )
+
+    updated_state = dict(state)
+    updated_state["password_hash"] = build_local_admin_password_hash(new_password)
+    updated_state["force_rotate"] = False
+    updated_state["bootstrap_required"] = False
+    updated_state["runtime_override"] = True
+    updated_state["rotated_at"] = int(time.time())
+    await persist_local_admin_state(request, updated_state)
+    await revoke_local_admin_session_token(request)
+    logger.info(
+        "Local break-glass admin password change succeeded for %s from client=%s",
+        current_local_admin["username"],
+        get_request_client_host(request) or "unknown",
+    )
+    response = RedirectResponse(url=f"{LOCAL_ADMIN_LOGIN_PATH}?password_changed=1", status_code=303)
+    clear_local_admin_cookies(response)
+    return response
 
 
 @app.post(LOCAL_ADMIN_LOGOUT_PATH)
