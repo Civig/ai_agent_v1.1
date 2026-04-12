@@ -6,7 +6,7 @@
 
 ## Границы валидации
 
-- exact current HEAD `3396058` остаётся pilot baseline candidate и требует отдельной fresh install re-validation перед pilot freeze
+- более ранний pilot package был зафиксирован на `3396058`; это историческая pilot reference, а не текущий release-candidate baseline `v1.2.0`
 - GPU path не считается доказанным без отдельного прохождения [GPU validation playbook](GPU_VALIDATION_PLAYBOOK_ru.md)
 - trusted reverse-proxy SSO не считается доказанным без отдельной validation на реальном FQDN/SPN/keytab path
 

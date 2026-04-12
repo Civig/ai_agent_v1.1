@@ -160,9 +160,12 @@ For emergency operator recovery, the runtime now supports a separate local break
 - if the installer is not given an explicit password, it generates a one-time bootstrap secret and stores that plaintext only in a root-only `0600` host file
 - while `LOCAL_ADMIN_FORCE_ROTATE=true` and `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, the first local-admin login can reach only the forced password rotation flow
 - until rotation is completed, the local admin session cannot access `/admin/dashboard` or `/api/admin/dashboard/*`
-- after a successful password change, the bootstrap secret is invalidated and the older session revision is rejected fail-closed
+- after forced rotation, the authenticated local-admin session can use the normal `GET/POST /admin/local/change-password` flow
+- the normal change-password flow is available only to a valid local-admin session without pending rotation; anonymous requests and ordinary AD sessions are denied
+- after a successful password change, the bootstrap secret is invalidated, the current local-admin session is logged out, and the older session revision is rejected fail-closed
 - the local admin session uses separate cookies and a separate auth source, so it does not replace the ordinary chat/session flow
-- login attempts, logout, and password rotation are logged without disclosing plaintext password or bootstrap-secret material
+- login attempts, logout, forced rotation, and normal password change are logged without disclosing plaintext password or bootstrap-secret material
+- `ADMIN_DASHBOARD_USERS` remains a separate ordinary-operator gate and is not replaced by the local-admin fallback path
 
 ## Upload and File Security Baseline
 

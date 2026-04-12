@@ -6,7 +6,7 @@ This document fixes the limitations that must be stated honestly before the pilo
 
 ## Validation boundaries
 
-- the exact current HEAD `3396058` remains a pilot baseline candidate and still requires separate fresh install re-validation before a pilot freeze
+- the earlier pilot package was pinned to `3396058`; it remains a historical pilot reference and not the current `v1.2.0` release-candidate baseline
 - the GPU path is not proven without separately completing the [GPU validation playbook](GPU_VALIDATION_PLAYBOOK_en.md)
 - trusted reverse-proxy SSO is not proven without separate validation on the real FQDN/SPN/keytab path
 

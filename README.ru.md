@@ -4,7 +4,7 @@
 
 Corporate AI Assistant `ai_agent_v1.1` — локальный корпоративный AI-ассистент для русскоязычной enterprise-среды. Продукт ориентирован на развёртывание внутри организации, где важны контролируемый Linux VM deployment, аутентификация через Active Directory и локальный inference без внешнего SaaS.
 
-Этот репозиторий содержит релизную основу `v1.1.0` и последующие hardening/documentation updates, уже внесённые в текущую ветку. Для v1.1 supported deployment baseline сформулирован однозначно: Linux VM + Docker Compose + `install.sh`.
+Этот репозиторий содержит более раннюю релизную основу `v1.1.0` и текущую release-candidate линию для `v1.2.0` в `main`. Поддерживаемый deployment baseline остаётся тем же: Linux VM + Docker Compose + `install.sh`. Финальный tag `v1.2.0` создаётся только после финального TEST VM validation pass.
 
 Legacy helper files могут оставаться в репозитории для совместимости и справки, но они не являются основным поддерживаемым путём.
 
@@ -26,7 +26,7 @@ Legacy helper files могут оставаться в репозитории д
 - 4 vCPU / 8 GB RAM minimum
 - 8 vCPU / 16 GB RAM recommended
 - Active Directory / Kerberos / LDAP доступны с хоста и из контейнеров
-- поддерживаемый путь для v1.1: Linux VM + Docker Compose + `install.sh`
+- поддерживаемый путь для текущей release-candidate линии: Linux VM + Docker Compose + `install.sh`
 - baseline path — CPU-first deployment
 - GPU profile остаётся optional и требует отдельно подготовленного хоста
 
@@ -36,12 +36,13 @@ Legacy helper files могут оставаться в репозитории д
 - GPU profile требует отдельной runtime validation на целевом GPU host
 - trusted reverse-proxy SSO требует отдельной infra/runtime validation на реальном FQDN/SPN/keytab path
 
-## Краткая сводка по baseline пилота
+## Краткая сводка по release-candidate линии
 
-- pilot baseline candidate: `33960581772787b162a0885bc2181f650f22a168` (`3396058`) на `main`
-- baseline уже включает supported Linux VM + Docker Compose + `install.sh`, password login, normal chat, file-chat, read-only operator dashboard и uninstall/factory-reset flow
-- отдельно ещё не доказаны: fresh install re-validation exact current HEAD, GPU host validation и real-infra SSO validation
-- цель пилота: доказать CPU-first baseline, operator handoff и честные ограничения, а не обещать HA, enterprise SSO или GPU readiness по умолчанию
+- текущая ветка `main` является release-candidate линией для `v1.2.0`; финальный tag откладывается до завершения fresh TEST VM validation
+- `v1.1.0` остаётся более ранним baseline, а текущая release-candidate линия уже включает последующий hardening: reproducible build pinning, bounded model bootstrap, hardening dashboard allowlist, local break-glass admin, выравнивание cookie scope для dashboard/API и authenticated local-admin password-change flow
+- более ранний pilot package опирался на `3396058`; эти pilot-документы сохранены как историческая reference-линия и не должны читаться как текущий baseline `v1.2.0`
+- отдельно ещё не доказаны: fresh install re-validation exact current release-candidate HEAD, GPU host validation и real-infra SSO validation
+- цель pilot/release линии: доказать CPU-first baseline, operator handoff и честные ограничения, а не обещать HA, enterprise SSO или GPU readiness по умолчанию
 - pilot package: [docs/PILOT_BASELINE_ru.md](docs/PILOT_BASELINE_ru.md), [docs/PILOT_SCOPE_ru.md](docs/PILOT_SCOPE_ru.md), [docs/PILOT_LIMITATIONS_ru.md](docs/PILOT_LIMITATIONS_ru.md), [docs/PILOT_ACCEPTANCE_CHECKLIST_ru.md](docs/PILOT_ACCEPTANCE_CHECKLIST_ru.md), [docs/GPU_VALIDATION_PLAYBOOK_ru.md](docs/GPU_VALIDATION_PLAYBOOK_ru.md), [docs/PILOT_RUNBOOK_ru.md](docs/PILOT_RUNBOOK_ru.md)
 
 ## Порядок чтения

@@ -9,7 +9,7 @@ This guide documents the currently supported installation path for Corporate AI 
 - Active Directory / Kerberos / LDAP integration
 - Ollama as the local inference runtime
 
-The preferred path is `./install.sh`. For v1.1, this is the primary/supported deployment path and the reference baseline for the current release family. The exact current HEAD should still be re-validated through a fresh install before a pilot freeze. Manual deployment is possible, but it is a secondary path and requires more operator care.
+The preferred path is `./install.sh`. For the current release-candidate line for `v1.2.0`, this remains the primary/supported deployment path and the reference baseline for the release candidate. `v1.1.0` is the earlier baseline, and the final `v1.2.0` tag is created only after fresh TEST VM validation. Manual deployment is possible, but it is a secondary path and requires more operator care.
 
 Legacy deployment paths that may still appear in the repository:
 
@@ -199,8 +199,11 @@ The practical local break-glass admin contract is:
 - the plaintext bootstrap secret is shown once and stored only in a root-only host file under the installer-managed state directory
 - while `LOCAL_ADMIN_FORCE_ROTATE=true` and `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, the first login can reach only the forced password rotation path
 - until that password rotation is completed, the dashboard UI and dashboard APIs remain closed to the local admin session
-- after a successful password change, the bootstrap secret is no longer valid and future logins require the new password
+- after the forced rotation is completed, the same local-admin identity can use the normal authenticated password-change path at `GET/POST /admin/local/change-password`
+- that normal password-change path is available only to a valid local-admin session without pending rotation; anonymous requests and ordinary AD sessions are denied
+- after a successful password change, the bootstrap secret is no longer valid, the current local-admin session is invalidated, and future logins require the new password
 - the local break-glass session grants access only to `/admin/dashboard` and `/api/admin/dashboard/*`; the ordinary chat user flow remains on the existing AD/Kerberos path
+- `ADMIN_DASHBOARD_USERS` and the local break-glass admin are separate access models; enabling one does not replace or widen the other
 
 The same file-processing baseline also supports additional parser/file-chat limit knobs through env/settings overrides, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout. `.env.example` intentionally keeps the template compact and does not enumerate every advanced parser limit by default.
 
@@ -461,6 +464,8 @@ The installer now shows only installable models from the installer view and acce
 - `1,2,5` for multiple models
 - the first selected model becomes `DEFAULT_MODEL`
 - the remaining selected models become the automatic secondary pre-pull set
+
+Container startup and container health checks are aligned in the current baseline: the application starts through `start_app.py`, and Compose health checks use `runtime_healthcheck.py` against the live endpoint.
 
 The installer already tries to perform bounded bootstrap for the selected `DEFAULT_MODEL` and the selected secondary models. Manual operators can run:
 

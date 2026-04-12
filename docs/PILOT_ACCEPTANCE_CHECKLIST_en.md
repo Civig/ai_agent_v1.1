@@ -6,7 +6,7 @@ The pilot is successful only when every applicable item below is closed as `yes`
 
 ## Checklist
 
-- [ ] The exact baseline SHA `33960581772787b162a0885bc2181f650f22a168` is deployed
+- [ ] The agreed exact baseline SHA for the current validation cycle is deployed
 - [ ] The supported install path was used: Linux VM + Docker Compose + `install.sh`
 - [ ] Installation completed without a critical install blocker
 - [ ] `.env` contains no placeholder secrets and no unagreed manual drift overrides

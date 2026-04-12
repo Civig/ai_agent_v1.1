@@ -38,10 +38,12 @@ If any item fails, the verdict is immediately `blocked_by_environment`.
 
 ## 2. Repo pin and clean tree
 
+The commands below preserve the earlier pilot-package GPU validation reference and are not the current `v1.2.0` release-candidate pin by themselves.
+
 ```bash
 cd /home/admin_ai/ai_agent_v1.1
-git rev-parse --verify 33960581772787b162a0885bc2181f650f22a168^{commit} >/dev/null 2>&1 || git fetch --all --tags
-git checkout 33960581772787b162a0885bc2181f650f22a168
+git rev-parse --verify <historical-pilot-sha-or-current-validated-sha>^{commit} >/dev/null 2>&1 || git fetch --all --tags
+git checkout <historical-pilot-sha-or-current-validated-sha>
 git status --short --branch
 git rev-parse HEAD
 ```
@@ -50,7 +52,7 @@ If the baseline SHA is already available locally and no update is needed, `git f
 
 Expected result:
 
-- `git rev-parse HEAD` matches the baseline SHA
+- `git rev-parse HEAD` matches the SHA agreed for this validation run
 - `detached HEAD` is acceptable after `git checkout <SHA>`
 - the branch name does not have to match after checking out the exact SHA
 - the working tree is clean or contains only pre-agreed doc-local changes

@@ -2,7 +2,8 @@
 
 This guide is the shortest path to a first working Corporate AI Assistant deployment on a fresh Ubuntu or Debian VM.
 
-For v1.1, this is the primary and supported first-launch path: Linux VM + Docker Compose + `install.sh`.
+For the current release-candidate line for `v1.2.0`, this remains the primary and supported first-launch path: Linux VM + Docker Compose + `install.sh`.
+`v1.1.0` is the earlier baseline; the final `v1.2.0` tag is created only after the final TEST VM validation pass.
 Use this document for the shortest path only. For full prerequisites, installer behavior, manual installation, and production-specific guidance, continue to the install and production documents linked below.
 
 ## Brief Prerequisites

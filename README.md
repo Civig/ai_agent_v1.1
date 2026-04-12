@@ -4,7 +4,7 @@
 
 Corporate AI Assistant `ai_agent_v1.1` is an internal/on-prem AI assistant for Linux VM deployment in Active Directory environments.
 
-This repository contains the `v1.1.0` release baseline plus later hardening and documentation updates already present in the current branch. The supported deployment baseline remains Linux VM + Docker Compose + `install.sh`. Legacy helper files may remain in the repository for reference, but they are not the primary supported path.
+This repository contains the earlier `v1.1.0` baseline plus the current release-candidate line for `v1.2.0` on `main`. The supported deployment baseline remains Linux VM + Docker Compose + `install.sh`. The final `v1.2.0` tag is created only after the final TEST VM validation pass. Legacy helper files may remain in the repository for reference, but they are not the primary supported path.
 
 ## Current State Summary
 
@@ -47,12 +47,13 @@ This repository contains the `v1.1.0` release baseline plus later hardening and 
 - GPU deployment requires separate target-host validation
 - trusted reverse-proxy SSO requires separate infrastructure/runtime validation on the final FQDN/SPN/keytab path
 
-## Pilot Baseline Summary
+## Release Candidate Summary
 
-- pilot baseline candidate: `33960581772787b162a0885bc2181f650f22a168` (`3396058`) on `main`
-- the baseline already includes supported Linux VM + Docker Compose + `install.sh`, password login, normal chat, file-chat, the read-only operator dashboard, and the uninstall/factory-reset flow
-- still not separately proven: fresh install re-validation of the exact current HEAD, GPU host validation, and real-infrastructure SSO validation
-- the pilot is meant to prove the CPU-first baseline, operator handoff readiness, and honest limitations, not to promise HA, enterprise SSO, or GPU readiness by default
+- the current `main` branch is the release-candidate line for `v1.2.0`; the final tag is deferred until fresh TEST VM validation is complete
+- `v1.1.0` remains the earlier baseline, while the current release-candidate line already includes later hardening such as reproducible build pinning, bounded model bootstrap, dashboard allowlist hardening, local break-glass admin, dashboard/API cookie-scope alignment, and the authenticated local-admin password-change flow
+- the earlier pilot package centered on `3396058`; those pilot documents remain as historical pilot references and must not be read as the current `v1.2.0` baseline
+- still not separately proven: fresh install re-validation of the exact current release-candidate HEAD, GPU host validation, and real-infrastructure SSO validation
+- the pilot/release work is meant to prove the CPU-first baseline, operator handoff readiness, and honest limitations, not to promise HA, enterprise SSO, or GPU readiness by default
 - pilot package: [docs/PILOT_BASELINE_en.md](docs/PILOT_BASELINE_en.md), [docs/PILOT_SCOPE_en.md](docs/PILOT_SCOPE_en.md), [docs/PILOT_LIMITATIONS_en.md](docs/PILOT_LIMITATIONS_en.md), [docs/PILOT_ACCEPTANCE_CHECKLIST_en.md](docs/PILOT_ACCEPTANCE_CHECKLIST_en.md), [docs/GPU_VALIDATION_PLAYBOOK_en.md](docs/GPU_VALIDATION_PLAYBOOK_en.md), [docs/PILOT_RUNBOOK_en.md](docs/PILOT_RUNBOOK_en.md)
 
 ## Documentation

@@ -2,14 +2,14 @@
 
 ## Purpose
 
-This document fixes the current pilot baseline candidate for Corporate AI Assistant as the source-of-truth reference point for the pilot.
+This document preserves an earlier pilot baseline package reference for Corporate AI Assistant. It is kept for historical pilot traceability and must not be read as the current `v1.2.0` release-candidate baseline.
 
 ## Exact baseline
 
 - branch: `main`
-- exact baseline SHA: `33960581772787b162a0885bc2181f650f22a168`
-- short SHA: `3396058`
-- baseline type: documentation/package baseline candidate for pilot review
+- exact historical baseline SHA: `33960581772787b162a0885bc2181f650f22a168`
+- historical short SHA: `3396058`
+- baseline type: historical documentation/package baseline for the earlier pilot package
 
 ## What is already implemented in this baseline
 
@@ -60,13 +60,13 @@ According to the current source of truth:
 
 - `docs/SUPPORTED_OS.md` records a clean installer validation point on Ubuntu 24.04 for revision `eba7ea9` within the current release family
 - the supported installer targets remain `Ubuntu 20.04+` and `Debian 11+`
-- the exact current HEAD `3396058` is not newly claimed as freshly validated through a separate TEST VM install in this pilot package step
+- the exact historical pilot HEAD `3396058` is not the current `v1.2.0` release-candidate baseline
 
 In other words:
 
 - recorded validation evidence exists for the release family
-- the current HEAD is treated as the baseline candidate
-- fresh install re-validation of the exact current HEAD before a pilot freeze is still a separate step
+- this SHA remains only as a historical pilot package reference
+- fresh install re-validation of the exact current release-candidate HEAD before the final `v1.2.0` tag remains a separate step
 
 ## What still requires separate validation
 

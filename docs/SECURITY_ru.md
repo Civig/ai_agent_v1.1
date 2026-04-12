@@ -160,9 +160,12 @@ Installer по умолчанию генерирует self-signed certificates.
 - если installer не получает явный пароль, он генерирует one-time bootstrap secret и сохраняет его plaintext только в root-only host file с `0600`
 - пока `LOCAL_ADMIN_FORCE_ROTATE=true` и `LOCAL_ADMIN_BOOTSTRAP_REQUIRED=true`, первый вход local admin допускается только к forced password rotation flow
 - до завершения rotation local admin session не получает доступ к `/admin/dashboard` и `/api/admin/dashboard/*`
-- после успешной смены пароля bootstrap secret инвалидируется, а старая session revision отклоняется fail-closed
+- после forced rotation аутентифицированная local-admin session может использовать обычный `GET/POST /admin/local/change-password`
+- normal change-password flow доступен только для валидной local-admin session без pending rotation; anonymous requests и обычные AD sessions получают deny
+- после успешной смены пароля bootstrap secret инвалидируется, текущая local-admin session разлогинивается, а старая session revision отклоняется fail-closed
 - local admin session использует отдельные cookies и отдельный auth source, поэтому не подменяет обычный chat/session flow
-- login attempts, logout и password rotation логируются без утечки plaintext secret или password material
+- login attempts, logout, forced rotation и обычная смена пароля логируются без утечки plaintext secret или password material
+- `ADMIN_DASHBOARD_USERS` остаётся отдельным ordinary-operator gate и не заменяется local-admin fallback path
 
 ## Upload и file security baseline
 

@@ -6,7 +6,7 @@
 
 ## Чек-лист
 
-- [ ] Развёрнут exact baseline SHA `33960581772787b162a0885bc2181f650f22a168`
+- [ ] Развёрнут agreed exact baseline SHA для текущего validation cycle
 - [ ] Использован supported install path: Linux VM + Docker Compose + `install.sh`
 - [ ] Установка завершилась без critical install blocker
 - [ ] В `.env` нет placeholder secrets и нет несогласованных manual drift overrides

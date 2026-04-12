@@ -2,14 +2,14 @@
 
 ## Назначение
 
-Этот документ фиксирует текущий pilot baseline candidate для Corporate AI Assistant как source-of-truth reference point для пилота.
+Этот документ сохраняет reference на более ранний pilot baseline package для Corporate AI Assistant. Он нужен для исторической traceability пилота и не должен читаться как текущий release-candidate baseline `v1.2.0`.
 
 ## Точная фиксация baseline
 
 - branch: `main`
-- exact baseline SHA: `33960581772787b162a0885bc2181f650f22a168`
-- short SHA: `3396058`
-- baseline type: documentation/package baseline candidate for pilot review
+- exact historical baseline SHA: `33960581772787b162a0885bc2181f650f22a168`
+- historical short SHA: `3396058`
+- baseline type: historical documentation/package baseline для более раннего pilot package
 
 ## Что уже реализовано в текущем baseline
 
@@ -60,13 +60,13 @@
 
 - `docs/SUPPORTED_OS.md` фиксирует recorded clean installer validation point на Ubuntu 24.04 для revision `eba7ea9` внутри текущего release family
 - supported installer targets остаются `Ubuntu 20.04+` и `Debian 11+`
-- exact current HEAD `3396058` в текущем pilot package не объявляется заново validated через fresh install на отдельной TEST VM
+- exact historical pilot HEAD `3396058` не является текущим release-candidate baseline `v1.2.0`
 
 Иными словами:
 
 - есть recorded validation evidence для release family
-- current HEAD считается baseline candidate
-- fresh install re-validation exact current HEAD перед pilot freeze всё ещё остаётся отдельным шагом
+- этот SHA остаётся только историческим reference для pilot package
+- fresh install re-validation exact current release-candidate HEAD перед финальным tag `v1.2.0` всё ещё остаётся отдельным шагом
 
 ## Что ещё требует отдельной валидации
 

@@ -38,10 +38,12 @@ docker run --rm --gpus all nvidia/cuda:12.3.2-base-ubuntu22.04 nvidia-smi
 
 ## 2. Фиксация репозитория и чистое состояние дерева
 
+Команды ниже сохраняют reference на более ранний pilot-package GPU validation и сами по себе не являются current pin для release-candidate линии `v1.2.0`.
+
 ```bash
 cd /home/admin_ai/ai_agent_v1.1
-git rev-parse --verify 33960581772787b162a0885bc2181f650f22a168^{commit} >/dev/null 2>&1 || git fetch --all --tags
-git checkout 33960581772787b162a0885bc2181f650f22a168
+git rev-parse --verify <historical-pilot-sha-or-current-validated-sha>^{commit} >/dev/null 2>&1 || git fetch --all --tags
+git checkout <historical-pilot-sha-or-current-validated-sha>
 git status --short --branch
 git rev-parse HEAD
 ```
@@ -50,7 +52,7 @@ git rev-parse HEAD
 
 Ожидаемый результат:
 
-- `git rev-parse HEAD` совпадает с baseline SHA
+- `git rev-parse HEAD` совпадает с SHA, согласованным для текущего validation run
 - после `git checkout <SHA>` допустим `detached HEAD`
 - имя branch после точного `checkout` SHA совпадать не обязано
 - working tree clean или содержит только заранее согласованные doc-local changes

@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+This section tracks the current release-candidate line for `v1.2.0`. The final release tag is created only after the final TEST VM validation pass.
+
+### Added
+
+- local break-glass admin path for operator recovery on `/admin/dashboard` and `/api/admin/dashboard/*`
+- authenticated local-admin password-change flow on `GET/POST /admin/local/change-password`
+
+### Changed
+
+- Docker build and deploy reproducibility baseline now relies on pinned image digests plus `requirements.lock`
+- installer model selection now uses a numeric multi-select flow and shows only installable models from the installer view
+- model bootstrap now reports selected/successful/failed models more explicitly and keeps the bounded online-first contract
+- release-facing documentation now treats `v1.1.0` as the earlier baseline and `main` as the current `v1.2.0` release-candidate line
+
+### Fixed
+
+- model bootstrap now uses a bounded timeout budget and clearer failure handling for online pull vs local fallback
+- runtime model access and installer model catalog alignment now use the unified registry/catalog contract
+- forwarded proxy trust no longer relies on a wildcard trust baseline
+- dashboard access no longer falls back to a hardcoded operator user
+- installer bootstrap invocation is aligned with the repository bootstrap script contract
+- runtime health checks are aligned with the `start_app.py` startup path
+- local-admin password hash transport is now compose-safe
+- local-admin dashboard cookies now cover both the dashboard route and dashboard API surfaces
+
 ## [1.1.0] - 2026-03-28
 
 ### Changed

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document fixes exactly what is in and out of scope for the current pilot on baseline `3396058`.
+This document preserves the scope boundaries of the earlier pilot package on baseline `3396058`. It is historical pilot scope reference, not the current `v1.2.0` release-candidate scope marker.
 
 ## Pilot scope matrix
 
