@@ -168,6 +168,8 @@ ADMIN_DASHBOARD_REFRESH_INTERVAL_MS = 8000
 LOCAL_ADMIN_ACCESS_COOKIE_NAME = "local_admin_access_token"
 LOCAL_ADMIN_CSRF_COOKIE_NAME = "local_admin_csrf_token"
 LOCAL_ADMIN_ACCESS_TOKEN_TYPE = "local_admin_access"
+LOCAL_ADMIN_COOKIE_PATH = "/"
+LOCAL_ADMIN_LEGACY_COOKIE_PATH = "/admin"
 LOCAL_ADMIN_LOGIN_PATH = "/admin/local/login"
 LOCAL_ADMIN_ROTATE_PATH = "/admin/local/rotate-password"
 LOCAL_ADMIN_LOGOUT_PATH = "/admin/local/logout"
@@ -743,12 +745,23 @@ def set_local_admin_cookies(
     *,
     csrf_token: Optional[str] = None,
 ) -> None:
+    # Clear the legacy admin-scoped cookies before issuing the broader dashboard/API scope.
+    response.delete_cookie(
+        LOCAL_ADMIN_ACCESS_COOKIE_NAME,
+        path=LOCAL_ADMIN_LEGACY_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
+    )
+    response.delete_cookie(
+        LOCAL_ADMIN_CSRF_COOKIE_NAME,
+        path=LOCAL_ADMIN_LEGACY_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
+    )
     base_cookie_params = {
         "httponly": True,
         "secure": settings.COOKIE_SECURE,
         "samesite": settings.COOKIE_SAMESITE,
         "domain": settings.COOKIE_DOMAIN,
-        "path": "/admin",
+        "path": LOCAL_ADMIN_COOKIE_PATH,
     }
     response.set_cookie(
         key=LOCAL_ADMIN_ACCESS_COOKIE_NAME,
@@ -767,13 +780,23 @@ def set_local_admin_cookies(
             secure=settings.COOKIE_SECURE,
             samesite=settings.COOKIE_SAMESITE,
             domain=settings.COOKIE_DOMAIN,
-            path="/admin",
+            path=LOCAL_ADMIN_COOKIE_PATH,
         )
 
 
 def clear_local_admin_cookies(response: Response) -> None:
-    response.delete_cookie(LOCAL_ADMIN_ACCESS_COOKIE_NAME, path="/admin", domain=settings.COOKIE_DOMAIN)
-    response.delete_cookie(LOCAL_ADMIN_CSRF_COOKIE_NAME, path="/admin", domain=settings.COOKIE_DOMAIN)
+    response.delete_cookie(LOCAL_ADMIN_ACCESS_COOKIE_NAME, path=LOCAL_ADMIN_COOKIE_PATH, domain=settings.COOKIE_DOMAIN)
+    response.delete_cookie(LOCAL_ADMIN_CSRF_COOKIE_NAME, path=LOCAL_ADMIN_COOKIE_PATH, domain=settings.COOKIE_DOMAIN)
+    response.delete_cookie(
+        LOCAL_ADMIN_ACCESS_COOKIE_NAME,
+        path=LOCAL_ADMIN_LEGACY_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
+    )
+    response.delete_cookie(
+        LOCAL_ADMIN_CSRF_COOKIE_NAME,
+        path=LOCAL_ADMIN_LEGACY_COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
+    )
 
 
 def get_or_create_local_admin_csrf_token(request: Request) -> str:
@@ -2188,7 +2211,7 @@ async def local_admin_rotate_password_page(
             secure=settings.COOKIE_SECURE,
             samesite=settings.COOKIE_SAMESITE,
             domain=settings.COOKIE_DOMAIN,
-            path="/admin",
+            path=LOCAL_ADMIN_COOKIE_PATH,
         )
     return response
 

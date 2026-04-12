@@ -3,6 +3,7 @@ import os
 import re
 import types
 import unittest
+from http.cookies import SimpleCookie
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -34,6 +35,38 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
         async def check(self, subject):
             return None
 
+    class FakeGateway:
+        def __init__(self):
+            self.redis = LocalAdminBreakGlassTests.FakeRedis()
+
+        async def get_scheduler_status(self):
+            return None
+
+        async def list_active_workers(self):
+            return []
+
+        async def list_working_workers(self, _workload_class=None):
+            return []
+
+        async def can_accept_workload(self, _workload_class=None):
+            return True
+
+        async def get_runtime_state(self):
+            return {"pending": {}, "active_jobs": 0, "targets": 0, "workers": 0}
+
+        async def get_basic_metrics(self):
+            return {
+                "queue_depth": 0,
+                "active_jobs": 0,
+                "failed_jobs": 0,
+                "rejected_jobs": 0,
+                "job_latency_total_ms": 0,
+                "job_latency_count": 0,
+            }
+
+        async def list_active_targets(self):
+            return []
+
     @staticmethod
     def make_request(*, path, method="GET", cookies=None, headers=None, app_state=None):
         raw_headers = [(b"host", b"testserver")]
@@ -58,19 +91,48 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def extract_cookie_value(response, cookie_name):
-        pattern = re.compile(rf"{cookie_name}=([^;]+)")
+        cookie_jar = LocalAdminBreakGlassTests.build_cookie_jar(response)
+        matches = [(path, value) for (name, path), value in cookie_jar.items() if name == cookie_name]
+        if not matches:
+            return None
+        matches.sort(key=lambda item: len(item[0]), reverse=True)
+        return matches[0][1]
+
+    @staticmethod
+    def build_cookie_jar(response):
+        jar = {}
         for header, value in response.raw_headers:
             if header.lower() != b"set-cookie":
                 continue
-            decoded = value.decode("utf-8", errors="ignore")
-            match = pattern.search(decoded)
-            if match:
-                return match.group(1).strip('"')
-        return None
+            parsed = SimpleCookie()
+            parsed.load(value.decode("utf-8", errors="ignore"))
+            for morsel in parsed.values():
+                cookie_path = morsel["path"] or "/"
+                max_age = (morsel["max-age"] or "").strip()
+                expires = (morsel["expires"] or "").strip().lower()
+                is_deleted = max_age == "0" or expires.startswith("thu, 01 jan 1970")
+                key = (morsel.key, cookie_path)
+                if is_deleted:
+                    jar.pop(key, None)
+                    continue
+                jar[key] = morsel.value
+        return jar
+
+    @staticmethod
+    def cookies_for_path(cookie_jar, path):
+        selected = {}
+        for (name, cookie_path), value in cookie_jar.items():
+            normalized_cookie_path = cookie_path or "/"
+            if normalized_cookie_path != "/" and not path.startswith(normalized_cookie_path):
+                continue
+            current = selected.get(name)
+            if current is None or len(normalized_cookie_path) >= len(current[0]):
+                selected[name] = (normalized_cookie_path, value)
+        return {name: value for name, (_, value) in selected.items()}
 
     def make_app_state(self):
         return types.SimpleNamespace(
-            llm_gateway=types.SimpleNamespace(redis=self.FakeRedis()),
+            llm_gateway=self.FakeGateway(),
             login_rate_limiter=self.FakeLimiter(),
         )
 
@@ -206,9 +268,14 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
                 csrf_token=csrf_cookie,
                 current_local_admin=current_local_admin,
             )
+            rotated_cookie_jar = self.build_cookie_jar(rotate_response)
+            dashboard_cookies = self.cookies_for_path(rotated_cookie_jar, "/admin/dashboard")
+            api_cookies = self.cookies_for_path(rotated_cookie_jar, "/api/admin/dashboard/summary")
 
             self.assertEqual(rotate_response.status_code, 303)
             self.assertEqual(rotate_response.headers["location"], "/admin/dashboard")
+            self.assertIn(app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME, dashboard_cookies)
+            self.assertIn(app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME, api_cookies)
 
             stored_state = json.loads(app_state.llm_gateway.redis.storage[app_module.LOCAL_ADMIN_STATE_REDIS_KEY])
             self.assertFalse(stored_state["force_rotate"])
@@ -221,6 +288,33 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
                 app_state=app_state,
             )
             self.assertIsNone(await app_module.get_current_local_admin_session(old_session_request))
+
+            dashboard_request = self.make_request(
+                path="/admin/dashboard",
+                cookies=dashboard_cookies,
+                app_state=app_state,
+            )
+            dashboard_local_admin = await app_module.get_current_local_admin_session(dashboard_request)
+            dashboard_identity = await app_module.get_admin_dashboard_identity_required(
+                dashboard_request,
+                current_user=None,
+                current_local_admin=dashboard_local_admin,
+            )
+
+            api_request = self.make_request(
+                path="/api/admin/dashboard/summary",
+                cookies=api_cookies,
+                app_state=app_state,
+            )
+            api_local_admin = await app_module.get_current_local_admin_session(api_request)
+            api_response = await app_module.get_admin_dashboard_summary(
+                api_request,
+                current_user=await app_module.get_admin_dashboard_identity_required(
+                    api_request,
+                    current_user=None,
+                    current_local_admin=api_local_admin,
+                ),
+            )
 
             failed_login = await app_module.local_admin_login(
                 login_request,
@@ -238,18 +332,22 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(success_login.headers["location"], "/admin/dashboard")
 
             new_access_cookie = self.extract_cookie_value(success_login, app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME)
-            dashboard_request = self.make_request(
+            second_dashboard_request = self.make_request(
                 path="/admin/dashboard",
                 cookies={app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME: new_access_cookie},
                 app_state=app_state,
             )
-            current_local_admin = await app_module.get_current_local_admin_session(dashboard_request)
+            current_local_admin = await app_module.get_current_local_admin_session(second_dashboard_request)
             identity = await app_module.get_admin_dashboard_identity_required(
-                dashboard_request,
+                second_dashboard_request,
                 current_user=None,
                 current_local_admin=current_local_admin,
             )
 
+        api_payload = json.loads(api_response.body)
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(api_payload["current_user"], "admin_ai")
+        self.assertEqual(dashboard_identity["dashboard_auth_mode"], "local_admin")
         self.assertEqual(identity["dashboard_auth_mode"], "local_admin")
         self.assertEqual(identity["logout_path"], app_module.LOCAL_ADMIN_LOGOUT_PATH)
 
@@ -291,10 +389,11 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
                 username="admin_ai",
                 password=local_admin_password,
             )
-            access_cookie = self.extract_cookie_value(response, app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME)
+            browser_cookies = self.cookies_for_path(self.build_cookie_jar(response), "/api/user")
+            self.assertIn(app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME, browser_cookies)
             request = self.make_request(
                 path="/api/user",
-                cookies={app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME: access_cookie},
+                cookies=browser_cookies,
                 app_state=app_state,
             )
             current_user = await auth_module.get_current_user(request, credentials=None)
@@ -319,22 +418,38 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
                 username="admin_ai",
                 password=local_admin_password,
             )
-            access_cookie = self.extract_cookie_value(login_response, app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME)
-            csrf_cookie = self.extract_cookie_value(login_response, app_module.LOCAL_ADMIN_CSRF_COOKIE_NAME)
+            login_cookie_jar = self.build_cookie_jar(login_response)
+            logout_cookies = self.cookies_for_path(login_cookie_jar, app_module.LOCAL_ADMIN_LOGOUT_PATH)
+            dashboard_cookies = self.cookies_for_path(login_cookie_jar, "/admin/dashboard")
+            api_cookies = self.cookies_for_path(login_cookie_jar, "/api/admin/dashboard/summary")
+            csrf_cookie = logout_cookies[app_module.LOCAL_ADMIN_CSRF_COOKIE_NAME]
             logout_request = self.make_request(
                 path=app_module.LOCAL_ADMIN_LOGOUT_PATH,
                 method="POST",
-                cookies={
-                    app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME: access_cookie,
-                    app_module.LOCAL_ADMIN_CSRF_COOKIE_NAME: csrf_cookie,
-                },
+                cookies=logout_cookies,
                 headers={"x-csrf-token": csrf_cookie, "origin": "https://testserver"},
                 app_state=app_state,
             )
             current_local_admin = await app_module.get_current_local_admin_session(logout_request)
             response = await app_module.local_admin_logout(logout_request, current_local_admin=current_local_admin)
 
+            route_after_logout = self.make_request(
+                path="/admin/dashboard",
+                cookies=dashboard_cookies,
+                app_state=app_state,
+            )
+            route_local_admin = await app_module.get_current_local_admin_session(route_after_logout)
+
+            api_after_logout = self.make_request(
+                path="/api/admin/dashboard/summary",
+                cookies=api_cookies,
+                app_state=app_state,
+            )
+            api_local_admin = await app_module.get_current_local_admin_session(api_after_logout)
+
         self.assertEqual(response.status_code, 200)
+        self.assertIsNone(route_local_admin)
+        self.assertIsNone(api_local_admin)
         deleted_cookie_headers = [
             value.decode("utf-8", errors="ignore")
             for header, value in response.raw_headers
@@ -342,6 +457,22 @@ class LocalAdminBreakGlassTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(any(header.startswith(f"{app_module.LOCAL_ADMIN_ACCESS_COOKIE_NAME}=") for header in deleted_cookie_headers))
         self.assertTrue(any(header.startswith(f"{app_module.LOCAL_ADMIN_CSRF_COOKIE_NAME}=") for header in deleted_cookie_headers))
+        self.assertTrue(any("Path=/" in header for header in deleted_cookie_headers))
+        self.assertTrue(any("Path=/admin" in header for header in deleted_cookie_headers))
+        with self.assertRaises(HTTPException) as route_error:
+            await app_module.get_admin_dashboard_identity_required(
+                route_after_logout,
+                current_user=None,
+                current_local_admin=route_local_admin,
+            )
+        with self.assertRaises(HTTPException) as api_error:
+            await app_module.get_admin_dashboard_identity_required(
+                api_after_logout,
+                current_user=None,
+                current_local_admin=api_local_admin,
+            )
+        self.assertEqual(route_error.exception.status_code, 403)
+        self.assertEqual(api_error.exception.status_code, 403)
 
 
 if __name__ == "__main__":
