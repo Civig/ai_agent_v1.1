@@ -142,6 +142,7 @@ Important notes:
 - live/history/events are intended for operator monitoring, not broad user access
 - the current access model remains a narrow temporary operator gate rather than production-ready RBAC
 - the ordinary operator gate (`ADMIN_DASHBOARD_USERS`) and the local break-glass admin are separate access paths
+- in `AUTH_MODE=lab_open`, the dashboard may open through a synthetic lab identity, but the UI shows an explicit warning and that path does not replace the enterprise operator gate
 - after the initial forced rotation, a valid local-admin session can open `GET /admin/local/change-password`; a successful `POST /admin/local/change-password` logs that local-admin session out and requires a fresh login with the new password
 
 ## Model Operations

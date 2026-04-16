@@ -117,6 +117,18 @@
         backdrop-filter: blur(8px);
     }
 
+    .warning-message {
+        background: rgba(242, 193, 95, 0.12);
+        border: 1px solid rgba(242, 193, 95, 0.65);
+        color: #f6d28b;
+        padding: 1rem;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+        font-size: 0.875rem;
+        line-height: 1.5;
+        backdrop-filter: blur(8px);
+    }
+
     .info-message {
         background: rgba(16, 163, 127, 0.1);
         border: 1px solid #10a37f;
@@ -149,13 +161,32 @@
 <div class="login-container">
     <div class="login-header">
         <h1>Corporate AI Assistant</h1>
+        {% if lab_open_auth_enabled %}
+        <p>Standalone GPU Lab mode без AD / Kerberos / LDAP</p>
+        {% else %}
         <p>Корпоративный вход через доменную учётную запись</p>
+        {% endif %}
     </div>
+
+    {% if lab_open_auth_enabled %}
+    <div class="warning-message">
+        <strong>Небезопасный lab profile</strong><br>
+        {{ lab_open_warning }}<br>
+        Не публикуйте этот режим в production или в открытый Интернет без жёсткой сетевой изоляции.
+    </div>
+    {% endif %}
 
     {% if error %}
     <div class="error-message">❌ {{ error }}</div>
     {% endif %}
 
+    {% if lab_open_auth_enabled %}
+    <form method="post" action="/login">
+        <input type="hidden" name="username" value="{{ lab_user_username }}">
+        <input type="hidden" name="password" value="lab-open">
+        <button type="submit">Открыть LAB</button>
+    </form>
+    {% else %}
     <form method="post" action="/login">
         <div class="form-group">
             <label for="username">Имя пользователя</label>
@@ -171,6 +202,7 @@
 
         <button type="submit">Войти в систему</button>
     </form>
+    {% endif %}
 
     {% if sso_login_enabled %}
     <a class="secondary-action" href="{{ sso_login_path }}">Войти через AD SSO</a>
@@ -180,9 +212,15 @@
     {% endif %}
 
     <div class="info-message">
+        {% if lab_open_auth_enabled %}
+        <strong>Лабораторная synthetic identity</strong><br>
+        Обычный AD/Kerberos login отключён; runtime использует synthetic user <code>{{ lab_user_username }}</code><br>
+        После входа откроются chat, file-chat, threads и operator dashboard в пределах isolated GPU lab.
+        {% else %}
         <strong>Корпоративная аутентификация Kerberos</strong><br>
         Вход выполняется через доменную учетную запись<br>
         Формат: <code>username</code> или <code>username@your-domain.example</code>
+        {% endif %}
     </div>
 
     <div class="login-footer">

@@ -108,6 +108,12 @@ The repository ships [.env.example](../.env.example) as a template. The real dep
 
 Key environment groups include:
 
+- install / auth profile:
+  - `INSTALL_PROFILE`
+  - `AUTH_MODE`
+  - `LAB_OPEN_AUTH_ACK`
+  - `LAB_USER_USERNAME`
+  - `LAB_USER_CANONICAL_PRINCIPAL`
 - AD / LDAP:
   - `LDAP_SERVER`
   - `LDAP_DOMAIN`
@@ -205,6 +211,14 @@ The practical local break-glass admin contract is:
 - the local break-glass session grants access only to `/admin/dashboard` and `/api/admin/dashboard/*`; the ordinary chat user flow remains on the existing AD/Kerberos path
 - `ADMIN_DASHBOARD_USERS` and the local break-glass admin are separate access models; enabling one does not replace or widen the other
 
+The repository also supports an explicit isolated GPU validation profile:
+
+- the default baseline remains `INSTALL_PROFILE=enterprise` with `AUTH_MODE=ad`
+- the lab path is enabled only through `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open`, and `LAB_OPEN_AUTH_ACK=true`
+- in `standalone_gpu_lab`, the installer does not require an AD domain, LDAP server, or Kerberos KDC and skips the Kerberos/LDAP auth smoke test
+- the runtime uses a synthetic lab user (`LAB_USER_USERNAME`, `LAB_USER_CANONICAL_PRINCIPAL`) for chat/API/dashboard validation
+- `lab_open` is for isolated validation only and must not be used as a production exposure
+
 The same file-processing baseline also supports additional parser/file-chat limit knobs through env/settings overrides, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout. `.env.example` intentionally keeps the template compact and does not enumerate every advanced parser limit by default.
 
 Model access examples for a pilot AD deployment might look like:
@@ -232,6 +246,21 @@ Optional explicit mode selection:
 ```bash
 INSTALL_MODE=cpu ./install.sh
 INSTALL_MODE=gpu ./install.sh
+```
+
+The installer also offers an installation profile:
+
+- `enterprise`: the current validated enterprise baseline
+- `standalone_gpu_lab`: a separate GPU lab profile without mandatory AD/Kerberos/LDAP prompts
+
+For `standalone_gpu_lab`, the installer writes this `.env` contract:
+
+```dotenv
+INSTALL_PROFILE=standalone_gpu_lab
+AUTH_MODE=lab_open
+LAB_OPEN_AUTH_ACK=true
+LAB_USER_USERNAME=lab_user
+LAB_USER_CANONICAL_PRINCIPAL=lab_user@LOCAL.LAB
 ```
 
 ### What the installer actually does

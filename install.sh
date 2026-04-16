@@ -53,6 +53,11 @@ BASE_DN=""
 NETBIOS_DOMAIN=""
 KERBEROS_REALM=""
 KERBEROS_KDC=""
+INSTALL_PROFILE="${INSTALL_PROFILE:-enterprise}"
+AUTH_MODE="ad"
+LAB_OPEN_AUTH_ACK="${LAB_OPEN_AUTH_ACK:-false}"
+LAB_USER_USERNAME="lab_user"
+LAB_USER_CANONICAL_PRINCIPAL="lab_user@LOCAL.LAB"
 DEFAULT_MODEL="phi3:mini"
 DOWNLOAD_DEFAULT_MODEL_NOW="true"
 SELECTED_INSTALLER_MODELS=""
@@ -138,6 +143,7 @@ declare -a APT_PACKAGES_INSTALLED_BY_INSTALLER=()
 declare -a INSTALLER_MODEL_RECORDS=()
 
 readonly SUPPORTED_INSTALL_MODES="auto cpu gpu"
+readonly SUPPORTED_INSTALL_PROFILES="enterprise standalone_gpu_lab"
 readonly MIN_RECOMMENDED_CPU_CORES=4
 readonly MIN_RECOMMENDED_RAM_GB=8
 readonly MIN_RECOMMENDED_DISK_GB=40
@@ -625,6 +631,82 @@ normalize_install_mode() {
             return 1
             ;;
     esac
+}
+
+normalize_install_profile() {
+    local profile="${1,,}"
+    case "${profile}" in
+        enterprise|standalone_gpu_lab)
+            printf "%s" "${profile}"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+auth_mode_for_install_profile() {
+    local profile="$1"
+    case "${profile}" in
+        enterprise)
+            printf "ad"
+            ;;
+        standalone_gpu_lab)
+            printf "lab_open"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+install_profile_requires_directory_services() {
+    [[ "${1:-${INSTALL_PROFILE}}" == "enterprise" ]]
+}
+
+select_install_profile() {
+    local requested_profile="${INSTALL_PROFILE:-enterprise}"
+    local normalized_profile=""
+    local input=""
+    local default_choice="1"
+
+    normalized_profile="$(normalize_install_profile "${requested_profile}")" || die "Unsupported INSTALL_PROFILE='${requested_profile}'. Supported values: ${SUPPORTED_INSTALL_PROFILES}"
+
+    if [[ "${normalized_profile}" == "standalone_gpu_lab" ]]; then
+        default_choice="2"
+    fi
+
+    if ! is_interactive_shell; then
+        INSTALL_PROFILE="${normalized_profile}"
+    else
+        print_header "Installation Profile"
+        print_info "1. Enterprise install: validated AD / Kerberos / LDAP baseline"
+        print_warning "2. Standalone GPU Lab install: disables ordinary auth for isolated validation only"
+        read -r -p "Installation profile / Профиль установки [default: ${default_choice}] (examples: 1 or 2): " input
+        input="$(trim_whitespace "${input}")"
+        case "${input:-${default_choice}}" in
+            1|enterprise)
+                INSTALL_PROFILE="enterprise"
+                ;;
+            2|standalone_gpu_lab|lab)
+                INSTALL_PROFILE="standalone_gpu_lab"
+                ;;
+            *)
+                die "Unsupported installation profile selection"
+                ;;
+        esac
+    fi
+
+    AUTH_MODE="$(auth_mode_for_install_profile "${INSTALL_PROFILE}")" || die "Unsupported installation profile contract"
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        LAB_OPEN_AUTH_ACK="true"
+        print_warning "Selected standalone_gpu_lab: ordinary authentication will be disabled for isolated GPU validation only"
+    else
+        LAB_OPEN_AUTH_ACK="false"
+    fi
+
+    print_info "Selected installation profile: ${INSTALL_PROFILE}"
+    print_info "Selected auth mode: ${AUTH_MODE}"
 }
 
 select_install_mode() {
@@ -1640,6 +1722,7 @@ collect_configuration() {
     local example_env="${ROOT_DIR}/.env.example"
     local default_domain default_ldap_host default_kdc_host default_base_dn default_admin_user default_ip_override
     local default_coding_groups default_admin_groups default_sso_enabled default_sso_principal default_sso_keytab
+    local default_lab_user_username
     local existing_redis_password existing_secret_key existing_default_model
     local existing_postgres_db existing_postgres_user existing_postgres_password existing_ldap_gssapi_host
 
@@ -1669,6 +1752,68 @@ collect_configuration() {
     existing_postgres_user="$(get_env_value "${existing_env}" "POSTGRES_USER" || get_env_value "${example_env}" "POSTGRES_USER" || true)"
     existing_postgres_password="$(get_env_value "${existing_env}" "POSTGRES_PASSWORD" || true)"
     existing_ldap_gssapi_host="$(get_env_value "${existing_env}" "LDAP_GSSAPI_SERVICE_HOST" || true)"
+    default_lab_user_username="$(get_env_value "${existing_env}" "LAB_USER_USERNAME" || get_env_value "${example_env}" "LAB_USER_USERNAME" || true)"
+    default_lab_user_username="$(normalize_local_admin_username "${default_lab_user_username:-lab_user}")"
+
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        DOMAIN="local.lab"
+        LDAP_SERVER_HOST="local.lab"
+        LDAP_SERVER_URL="ldap://local.lab"
+        LDAP_GSSAPI_SERVICE_HOST=""
+        BASE_DN="dc=local,dc=lab"
+        NETBIOS_DOMAIN="LOCAL"
+        KERBEROS_REALM="LOCAL.LAB"
+        KERBEROS_KDC="local.lab"
+        TEST_ADMIN_USER=""
+        TEST_ADMIN_PASSWORD=""
+        AD_SERVER_IP_OVERRIDE=""
+        MODEL_ACCESS_CODING_GROUPS=""
+        MODEL_ACCESS_ADMIN_GROUPS=""
+        SSO_ENABLED="false"
+        SSO_SERVICE_PRINCIPAL=""
+        SSO_KEYTAB_PATH="/etc/corporate-ai-sso/http.keytab"
+        LAB_OPEN_AUTH_ACK="true"
+        LAB_USER_USERNAME="${default_lab_user_username}"
+        LAB_USER_CANONICAL_PRINCIPAL="${LAB_USER_USERNAME}@LOCAL.LAB"
+
+        configure_local_admin_break_glass "${existing_env}"
+
+        REDIS_PASSWORD="$(prompt_secret_or_generate "Redis password / Пароль Redis (example: leave blank to generate)" "${existing_redis_password}" generate_hex_secret)"
+        [[ -n "${REDIS_PASSWORD}" ]] || die "Redis password cannot be empty"
+
+        POSTGRES_DB="${existing_postgres_db:-corporate_ai}"
+        POSTGRES_USER="${existing_postgres_user:-corporate_ai}"
+        POSTGRES_PASSWORD="$(prompt_secret_or_generate "PostgreSQL password / Пароль PostgreSQL (example: leave blank to generate)" "${existing_postgres_password}" generate_hex_secret)"
+        [[ -n "${POSTGRES_DB}" ]] || die "PostgreSQL database name cannot be empty"
+        [[ -n "${POSTGRES_USER}" ]] || die "PostgreSQL username cannot be empty"
+        [[ -n "${POSTGRES_PASSWORD}" ]] || die "PostgreSQL password cannot be empty"
+
+        SECRET_KEY="$(prompt_secret_or_generate "JWT secret key / JWT secret: ключ подписи (example: leave blank to generate)" "${existing_secret_key}" generate_base64_secret)"
+        [[ ${#SECRET_KEY} -ge 32 ]] || die "JWT secret key must be at least 32 characters long"
+
+        prompt_default_model_selection "${existing_default_model}"
+
+        print_info "Configuration summary"
+        printf "  INSTALL_PROFILE=%s\n" "${INSTALL_PROFILE}"
+        printf "  AUTH_MODE=%s\n" "${AUTH_MODE}"
+        printf "  LAB_OPEN_AUTH_ACK=%s\n" "${LAB_OPEN_AUTH_ACK}"
+        printf "  LAB_USER_USERNAME=%s\n" "${LAB_USER_USERNAME}"
+        printf "  LAB_USER_CANONICAL_PRINCIPAL=%s\n" "${LAB_USER_CANONICAL_PRINCIPAL}"
+        printf "  SELECTED_INSTALLER_MODELS=%s\n" "${SELECTED_INSTALLER_MODELS:-${DEFAULT_MODEL}}"
+        printf "  DEFAULT_MODEL=%s\n" "${DEFAULT_MODEL}"
+        printf "  SECONDARY_SELECTED_MODELS=%s\n" "${SELECTED_SECONDARY_MODELS:-<none>}"
+        printf "  DOWNLOAD_DEFAULT_MODEL_NOW=%s\n" "${DOWNLOAD_DEFAULT_MODEL_NOW}"
+        printf "  POSTGRES_DB=%s\n" "${POSTGRES_DB}"
+        printf "  POSTGRES_USER=%s\n" "${POSTGRES_USER}"
+        printf "  SSO_ENABLED=%s\n" "${SSO_ENABLED}"
+        printf "  LOCAL_ADMIN_ENABLED=%s\n" "${LOCAL_ADMIN_ENABLED}"
+        printf "  LOCAL_ADMIN_USERNAME=%s\n" "${LOCAL_ADMIN_USERNAME}"
+        printf "  LOCAL_ADMIN_FORCE_ROTATE=%s\n" "${LOCAL_ADMIN_FORCE_ROTATE}"
+        printf "  LOCAL_ADMIN_BOOTSTRAP_REQUIRED=%s\n" "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
+        printf "  AUTH_SMOKE_TEST=skipped\n"
+        print_warning "Authentication disabled for lab validation only"
+        return
+    fi
 
     DOMAIN="$(prompt_with_default "AD domain / Домен AD (example: corp.local)" "${default_domain}")"
     DOMAIN="${DOMAIN,,}"
@@ -1752,6 +1897,8 @@ collect_configuration() {
     validate_smoke_test_model_contract
 
     print_info "Configuration summary"
+    printf "  INSTALL_PROFILE=%s\n" "${INSTALL_PROFILE}"
+    printf "  AUTH_MODE=%s\n" "${AUTH_MODE}"
     printf "  DOMAIN=%s\n" "${DOMAIN}"
     printf "  LDAP_SERVER=%s\n" "${LDAP_SERVER_URL}"
     if [[ -n "${LDAP_GSSAPI_SERVICE_HOST}" ]]; then
@@ -1832,6 +1979,7 @@ write_env_file() {
     local backup_file=""
     local temp_file preserved_file regex
     local gpu_enabled_value redis_url_value parser_stage_value parser_public_cutover_value
+    local install_profile_value auth_mode_value lab_open_auth_ack_value lab_user_username_value lab_user_canonical_principal_value
     local persistent_db_url_value trusted_proxy_source_cidrs_value forwarded_allow_ips_value admin_dashboard_users_value
     local ollama_pull_timeout_value
     local redis_image_value postgres_image_value ollama_image_value nginx_image_value
@@ -1841,6 +1989,7 @@ write_env_file() {
     local persistent_db_echo_value persistent_db_pool_pre_ping_value
     local is_existing_env=0
     local managed_keys=(
+        INSTALL_PROFILE AUTH_MODE LAB_OPEN_AUTH_ACK LAB_USER_USERNAME LAB_USER_CANONICAL_PRINCIPAL
         LDAP_SERVER LDAP_GSSAPI_SERVICE_HOST LDAP_DOMAIN LDAP_BASE_DN LDAP_NETBIOS_DOMAIN
         KERBEROS_REALM KERBEROS_KDC
         SECRET_KEY ALGORITHM ACCESS_TOKEN_EXPIRE_MINUTES REFRESH_TOKEN_EXPIRE_DAYS
@@ -1864,6 +2013,11 @@ write_env_file() {
     temp_file="$(mktemp)"
     preserved_file="$(mktemp)"
     gpu_enabled_value="$( [[ "${SELECTED_INSTALL_MODE:-cpu}" == "gpu" ]] && printf "true" || printf "false" )"
+    install_profile_value="${INSTALL_PROFILE}"
+    auth_mode_value="${AUTH_MODE}"
+    lab_open_auth_ack_value="$(normalize_boolean_input "${LAB_OPEN_AUTH_ACK:-false}")"
+    lab_user_username_value="${LAB_USER_USERNAME}"
+    lab_user_canonical_principal_value="${LAB_USER_CANONICAL_PRINCIPAL}"
     redis_url_value="redis://:${REDIS_PASSWORD}@redis:6379/0"
     parser_stage_value="$(get_env_value "${env_file}" "ENABLE_PARSER_STAGE" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_STAGE" || true)"
     parser_public_cutover_value="$(get_env_value "${env_file}" "ENABLE_PARSER_PUBLIC_CUTOVER" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_PUBLIC_CUTOVER" || true)"
@@ -1915,6 +2069,12 @@ write_env_file() {
     fi
 
     : >"${temp_file}"
+    append_env_line "${temp_file}" "INSTALL_PROFILE" "${install_profile_value}"
+    append_env_line "${temp_file}" "AUTH_MODE" "${auth_mode_value}"
+    append_env_line "${temp_file}" "LAB_OPEN_AUTH_ACK" "${lab_open_auth_ack_value}"
+    append_env_line "${temp_file}" "LAB_USER_USERNAME" "${lab_user_username_value}"
+    append_env_line "${temp_file}" "LAB_USER_CANONICAL_PRINCIPAL" "${lab_user_canonical_principal_value}"
+    printf '\n' >>"${temp_file}"
     append_env_line "${temp_file}" "LDAP_SERVER" "${LDAP_SERVER_URL}"
     append_env_line "${temp_file}" "LDAP_GSSAPI_SERVICE_HOST" "${LDAP_GSSAPI_SERVICE_HOST}"
     append_env_line "${temp_file}" "LDAP_DOMAIN" "${DOMAIN}"
@@ -2482,9 +2642,19 @@ build_and_start_stack() {
 
 print_final_summary() {
     local host_ip
+    local parser_enabled="unknown"
     host_ip="$(detect_primary_ip)"
+    if [[ -f "${ROOT_DIR}/.env" ]]; then
+        parser_enabled="$(get_env_value "${ROOT_DIR}/.env" "ENABLE_PARSER_STAGE" || printf "unknown")"
+    fi
     print_header "Deployment Complete"
     print_success "System is ready: https://${host_ip:-localhost}"
+    print_info "Install profile=${INSTALL_PROFILE}"
+    print_info "Auth mode=${AUTH_MODE}"
+    if [[ "${AUTH_MODE}" == "lab_open" ]]; then
+        print_warning "Authentication disabled for lab validation only"
+        print_info "Synthetic lab user=${LAB_USER_USERNAME}"
+    fi
     print_info "Selected installer models=${SELECTED_INSTALLER_MODELS:-${DEFAULT_MODEL}}"
     print_info "DEFAULT_MODEL=${DEFAULT_MODEL}"
     print_info "Secondary selected models=${SELECTED_SECONDARY_MODELS:-<none>}"
@@ -2499,6 +2669,7 @@ print_final_summary() {
     print_info "Model pre-pull: ${MODEL_BOOTSTRAP_STATUS}"
     print_info "Model present in runtime: ${MODEL_PRESENT_AFTER_BOOTSTRAP}"
     print_info "Chat ready immediately: ${CHAT_READY_IMMEDIATELY}"
+    print_info "File-chat / parser enabled=${parser_enabled}"
     if [[ -n "${BOOTSTRAP_SUCCESSFUL_MODELS}" ]]; then
         print_info "Bootstrap successful models=${BOOTSTRAP_SUCCESSFUL_MODELS}"
     fi
@@ -2515,6 +2686,7 @@ main() {
     collect_system_audit
     print_system_audit_summary
     print_preflight_warnings
+    select_install_profile
     select_install_mode
     confirm_system_changes
     network_check
@@ -2523,7 +2695,11 @@ main() {
     ensure_ollama_cli
     validate_install_mode
     collect_configuration
-    validate_directory_service_resolution
+    if install_profile_requires_directory_services; then
+        validate_directory_service_resolution
+    else
+        print_info "Skipping AD / LDAP / Kerberos host resolution checks for standalone_gpu_lab"
+    fi
     validate_sso_keytab_material
     write_env_file
     write_krb5_conf

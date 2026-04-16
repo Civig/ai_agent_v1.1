@@ -1,5 +1,6 @@
 ﻿import ipaddress
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional
@@ -29,6 +30,11 @@ INSECURE_PASSWORD_PLACEHOLDERS = {
 LOCALHOST_NAMES = {"localhost", "127.0.0.1", "::1"}
 MIN_SECRET_KEY_LENGTH = 32
 LOCAL_ADMIN_USERNAME_ALLOWED_RE = r"^[A-Za-z0-9._-]+$"
+LAB_USER_CANONICAL_PRINCIPAL_RE = r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+$"
+INSTALL_PROFILE_ENTERPRISE = "enterprise"
+INSTALL_PROFILE_STANDALONE_GPU_LAB = "standalone_gpu_lab"
+AUTH_MODE_AD = "ad"
+AUTH_MODE_LAB_OPEN = "lab_open"
 
 
 def parse_group_mapping(value: Optional[str]) -> tuple[str, ...]:
@@ -82,6 +88,17 @@ def is_non_local_service(url: Optional[str]) -> bool:
     return bool(hostname) and hostname not in LOCALHOST_NAMES
 
 
+def normalize_simple_username(value: str, *, default: str, field_name: str) -> str:
+    candidate = value.strip().lower()
+    if not candidate:
+        return default
+    if not Path(candidate).name == candidate:
+        raise ValueError(f"{field_name} must be a simple username without path separators")
+    if not re.fullmatch(LOCAL_ADMIN_USERNAME_ALLOWED_RE, candidate):
+        raise ValueError(f"{field_name} contains unsupported characters")
+    return candidate
+
+
 def _load_environment_file() -> None:
     env_path = Path('.env')
     if not env_path.exists():
@@ -105,6 +122,12 @@ _load_environment_file()
 
 
 class Settings(BaseSettings):
+    INSTALL_PROFILE: str = INSTALL_PROFILE_ENTERPRISE
+    AUTH_MODE: str = AUTH_MODE_AD
+    LAB_OPEN_AUTH_ACK: bool = False
+    LAB_USER_USERNAME: str = "lab_user"
+    LAB_USER_CANONICAL_PRINCIPAL: str = "lab_user@LOCAL.LAB"
+
     LDAP_SERVER: str = "ldap://your-dc-server.local"
     LDAP_GSSAPI_SERVICE_HOST: str = ""
     LDAP_DOMAIN: str = "your-domain.local"
@@ -266,18 +289,40 @@ class Settings(BaseSettings):
             raise ValueError("Password uses an insecure placeholder value and must be overridden")
         return secret
 
+    @field_validator("INSTALL_PROFILE")
+    @classmethod
+    def validate_install_profile(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {INSTALL_PROFILE_ENTERPRISE, INSTALL_PROFILE_STANDALONE_GPU_LAB}:
+            raise ValueError("INSTALL_PROFILE must be one of: enterprise, standalone_gpu_lab")
+        return normalized
+
+    @field_validator("AUTH_MODE")
+    @classmethod
+    def validate_auth_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {AUTH_MODE_AD, AUTH_MODE_LAB_OPEN}:
+            raise ValueError("AUTH_MODE must be one of: ad, lab_open")
+        return normalized
+
     @field_validator("LOCAL_ADMIN_USERNAME")
     @classmethod
     def validate_local_admin_username(cls, value: str) -> str:
-        candidate = value.strip().lower()
-        if not candidate:
-            return "admin_ai"
-        if not Path(candidate).name == candidate:
-            raise ValueError("LOCAL_ADMIN_USERNAME must be a simple username without path separators")
-        import re
+        return normalize_simple_username(value, default="admin_ai", field_name="LOCAL_ADMIN_USERNAME")
 
-        if not re.fullmatch(LOCAL_ADMIN_USERNAME_ALLOWED_RE, candidate):
-            raise ValueError("LOCAL_ADMIN_USERNAME contains unsupported characters")
+    @field_validator("LAB_USER_USERNAME")
+    @classmethod
+    def validate_lab_user_username(cls, value: str) -> str:
+        return normalize_simple_username(value, default="lab_user", field_name="LAB_USER_USERNAME")
+
+    @field_validator("LAB_USER_CANONICAL_PRINCIPAL")
+    @classmethod
+    def validate_lab_user_canonical_principal(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            return "lab_user@LOCAL.LAB"
+        if not re.fullmatch(LAB_USER_CANONICAL_PRINCIPAL_RE, candidate):
+            raise ValueError("LAB_USER_CANONICAL_PRINCIPAL must look like username@REALM")
         return candidate
 
     @field_validator("TRUSTED_PROXY_SOURCE_CIDRS")
@@ -303,6 +348,25 @@ class Settings(BaseSettings):
             raise ValueError("POSTGRES_PASSWORD must be set for non-local PostgreSQL deployments")
         if self.SSO_ENABLED and self.TRUSTED_AUTH_PROXY_ENABLED and not self.TRUSTED_PROXY_SOURCE_CIDRS.strip():
             raise ValueError("TRUSTED_PROXY_SOURCE_CIDRS must be set when trusted proxy SSO is enabled")
+        return self
+
+    @model_validator(mode="after")
+    def validate_auth_profile_contract(self) -> "Settings":
+        if self.INSTALL_PROFILE == INSTALL_PROFILE_ENTERPRISE and self.AUTH_MODE != AUTH_MODE_AD:
+            raise ValueError("INSTALL_PROFILE=enterprise requires AUTH_MODE=ad")
+        if self.INSTALL_PROFILE == INSTALL_PROFILE_STANDALONE_GPU_LAB and self.AUTH_MODE != AUTH_MODE_LAB_OPEN:
+            raise ValueError("INSTALL_PROFILE=standalone_gpu_lab requires AUTH_MODE=lab_open")
+        if self.AUTH_MODE == AUTH_MODE_LAB_OPEN and not self.LAB_OPEN_AUTH_ACK:
+            raise ValueError("AUTH_MODE=lab_open requires LAB_OPEN_AUTH_ACK=true")
+
+        canonical_local_part = self.LAB_USER_CANONICAL_PRINCIPAL.split("@", 1)[0]
+        normalized_local_part = normalize_simple_username(
+            canonical_local_part,
+            default=self.LAB_USER_USERNAME,
+            field_name="LAB_USER_CANONICAL_PRINCIPAL",
+        )
+        if normalized_local_part != self.LAB_USER_USERNAME:
+            raise ValueError("LAB_USER_CANONICAL_PRINCIPAL must match LAB_USER_USERNAME")
         return self
 
     @field_validator("WORKER_POOL")
@@ -389,6 +453,10 @@ class Settings(BaseSettings):
     @property
     def model_access_admin_groups(self) -> tuple[str, ...]:
         return parse_group_mapping(self.MODEL_ACCESS_ADMIN_GROUPS)
+
+    @property
+    def lab_open_auth_enabled(self) -> bool:
+        return self.AUTH_MODE == AUTH_MODE_LAB_OPEN and bool(self.LAB_OPEN_AUTH_ACK)
 
     def _build_model_catalog(self, payload: Dict[str, object]) -> Dict[str, Dict[str, str]]:
         available_models: Dict[str, Dict[str, str]] = {}

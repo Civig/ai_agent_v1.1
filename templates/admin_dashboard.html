@@ -169,6 +169,25 @@
         border: 1px solid rgba(255, 255, 255, 0.06);
     }
 
+    .lab-warning-banner {
+        margin-bottom: 1rem;
+        padding: 1rem 1.1rem;
+        border-radius: 18px;
+        border: 1px solid rgba(242, 193, 95, 0.34);
+        background:
+            linear-gradient(135deg, rgba(87, 57, 4, 0.86), rgba(48, 34, 5, 0.9)),
+            rgba(242, 193, 95, 0.14);
+        color: #ffe3a3;
+        box-shadow: 0 18px 40px rgba(33, 19, 0, 0.22);
+    }
+
+    .lab-warning-banner strong {
+        display: block;
+        margin-bottom: 0.25rem;
+        color: #fff2cd;
+        letter-spacing: 0.02em;
+    }
+
     .sidebar-user-label {
         color: var(--dash-muted);
         font-size: 0.78rem;
@@ -979,6 +998,12 @@
 
 {% block content %}
 <div class="admin-dashboard" id="adminDashboardRoot">
+    {% if current_user.dashboard_auth_mode == "lab_open" %}
+    <div class="lab-warning-banner">
+        <strong>WARNING: standalone GPU lab mode</strong>
+        Authentication is disabled for isolated validation only. Do not expose this dashboard to production users or the public Internet.
+    </div>
+    {% endif %}
     <div class="dashboard-shell">
         <aside class="panel dashboard-sidebar">
             <div class="sidebar-brand">
@@ -1013,7 +1038,11 @@
                 <div class="sidebar-user-label">Оператор</div>
                 <div class="sidebar-user-name">{{ current_user.username }}</div>
                 <div class="sidebar-user-meta">
+                    {% if current_user.dashboard_auth_mode == "lab_open" %}
+                    Dashboard открыт через synthetic lab identity. Этот режим предназначен только для isolated GPU validation и не является production-safe access model.
+                    {% else %}
                     Панель остаётся read-only и доступна только через разрешённый operator path: штатный AD operator access или отдельный break-glass admin flow.
+                    {% endif %}
                 </div>
                 {% if current_user.dashboard_auth_mode == "local_admin" and current_user.change_password_path %}
                 <div class="sidebar-user-actions">

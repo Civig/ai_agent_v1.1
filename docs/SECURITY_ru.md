@@ -167,6 +167,17 @@ Installer по умолчанию генерирует self-signed certificates.
 - login attempts, logout, forced rotation и обычная смена пароля логируются без утечки plaintext secret или password material
 - `ADMIN_DASHBOARD_USERS` остаётся отдельным ordinary-operator gate и не заменяется local-admin fallback path
 
+### Standalone GPU Lab mode
+
+Для isolated GPU validation runtime также поддерживает explicit lab profile, но только как небезопасный инженерный режим:
+
+- baseline по умолчанию остаётся enterprise: `INSTALL_PROFILE=enterprise`, `AUTH_MODE=ad`
+- lab mode требует явного набора `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open`, `LAB_OPEN_AUTH_ACK=true`
+- если `AUTH_MODE=lab_open`, но подтверждение отсутствует, startup завершается fail-fast
+- ordinary authentication в этом режиме отключена, а runtime использует synthetic lab identity
+- dashboard в `lab_open` показывает явное warning-сообщение о том, что auth disabled
+- этот режим нельзя публиковать в production или в открытый Интернет без жёсткой сетевой изоляции
+
 ## Upload и file security baseline
 
 ### Что реализовано

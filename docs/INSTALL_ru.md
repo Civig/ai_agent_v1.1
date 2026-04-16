@@ -108,6 +108,12 @@ Compose stack реально включает:
 
 Ключевые группы параметров:
 
+- install / auth profile:
+  - `INSTALL_PROFILE`
+  - `AUTH_MODE`
+  - `LAB_OPEN_AUTH_ACK`
+  - `LAB_USER_USERNAME`
+  - `LAB_USER_CANONICAL_PRINCIPAL`
 - AD / LDAP:
   - `LDAP_SERVER`
   - `LDAP_DOMAIN`
@@ -205,6 +211,14 @@ Read-only dashboard operator gate теперь задаётся через `ADMI
 - local break-glass session даёт доступ только к `/admin/dashboard` и `/api/admin/dashboard/*`; обычный chat user flow остаётся на текущем AD/Kerberos path
 - `ADMIN_DASHBOARD_USERS` и local break-glass admin — это две разные модели доступа; включение одной не заменяет и не расширяет другую
 
+Отдельно поддерживается explicit lab profile для isolated GPU validation:
+
+- baseline по умолчанию остаётся `INSTALL_PROFILE=enterprise` и `AUTH_MODE=ad`
+- lab path включается только через `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open` и `LAB_OPEN_AUTH_ACK=true`
+- в `standalone_gpu_lab` installer не требует AD domain, LDAP server, Kerberos KDC и не запускает Kerberos/LDAP auth smoke
+- runtime использует synthetic user (`LAB_USER_USERNAME`, `LAB_USER_CANONICAL_PRINCIPAL`) для chat/API/dashboard validation
+- `lab_open` предназначен только для isolated validation и не должен использоваться как production exposure
+
 Тот же file-processing baseline также поддерживает дополнительные env/settings knobs для parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout. Шаблон `.env.example` сознательно не перечисляет каждый advanced parser limit по отдельности.
 
 Пример model-access mapping для пилотного AD-стенда может выглядеть так:
@@ -232,6 +246,21 @@ chmod +x install.sh
 ```bash
 INSTALL_MODE=cpu ./install.sh
 INSTALL_MODE=gpu ./install.sh
+```
+
+Installer также предлагает профиль установки:
+
+- `enterprise`: текущий validated enterprise baseline без изменений
+- `standalone_gpu_lab`: отдельный GPU lab profile без обязательных AD/Kerberos/LDAP prompts
+
+Для `standalone_gpu_lab` installer пишет в `.env`:
+
+```dotenv
+INSTALL_PROFILE=standalone_gpu_lab
+AUTH_MODE=lab_open
+LAB_OPEN_AUTH_ACK=true
+LAB_USER_USERNAME=lab_user
+LAB_USER_CANONICAL_PRINCIPAL=lab_user@LOCAL.LAB
 ```
 
 ### Что реально делает установщик

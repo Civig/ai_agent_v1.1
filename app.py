@@ -29,6 +29,7 @@ from prometheus_client import Counter
 from pydantic import BaseModel
 
 from auth_kerberos import (
+    AUTH_SOURCE_LAB_OPEN,
     AUTH_SOURCE_LOCAL_ADMIN,
     AUTH_SOURCE_PASSWORD,
     AUTH_SOURCE_SSO,
@@ -38,7 +39,9 @@ from auth_kerberos import (
     get_allowed_models_for_user,
     get_current_user,
     get_current_user_required,
+    get_lab_user_identity,
     is_token_revoked,
+    is_lab_open_auth_enabled,
     kerberos_auth,
     normalize_username,
     revoke_token,
@@ -179,6 +182,9 @@ LOCAL_ADMIN_ROTATION_REQUIRED_ERROR = "Для break-glass admin требуетс
 LOCAL_ADMIN_NOT_CONFIGURED_ERROR = "Local break-glass admin is not configured."
 LOCAL_ADMIN_AUTH_ERROR = "Неверные учётные данные local admin."
 LOCAL_ADMIN_PASSWORD_CHANGED_MESSAGE = "Пароль local admin обновлён. Войдите снова с новым паролем."
+LAB_OPEN_AUTH_WARNING = (
+    "AUTH_MODE=lab_open отключает обычную аутентификацию и разрешён только для isolated GPU lab validation."
+)
 
 sanitize_upload_filename = parser_stage.sanitize_upload_filename
 detect_extension = parser_stage.detect_extension
@@ -1147,9 +1153,54 @@ def user_can_access_admin_dashboard(user_info: Dict[str, Any]) -> bool:
     return bool(username) and username in allowed_users
 
 
+def build_session_status_label(user_info: Dict[str, Any]) -> str:
+    existing_label = str(user_info.get("session_status_label") or "").strip()
+    if existing_label:
+        return existing_label
+    if (user_info.get("auth_source") or "").strip().lower() == AUTH_SOURCE_LAB_OPEN:
+        return "Активен • LAB open auth"
+    return "Активен • Корпоративный доступ"
+
+
+def build_login_template_context(request: Request, **extra: Any) -> Dict[str, Any]:
+    return {
+        "request": request,
+        "auth_mode": settings.AUTH_MODE,
+        "install_profile": settings.INSTALL_PROFILE,
+        "lab_open_auth_enabled": is_lab_open_auth_enabled(),
+        "lab_open_warning": LAB_OPEN_AUTH_WARNING,
+        "lab_user_username": settings.LAB_USER_USERNAME,
+        "sso_login_enabled": trusted_proxy_sso_enabled(),
+        "sso_login_path": settings.SSO_LOGIN_PATH,
+        "local_admin_enabled": local_admin_enabled(),
+        "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
+        **extra,
+    }
+
+
+def build_lab_open_dashboard_identity(current_user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    identity = enrich_identity_session_fields(
+        {
+            **dict(current_user or get_lab_user_identity()),
+            "auth_source": AUTH_SOURCE_LAB_OPEN,
+        },
+        auth_source=AUTH_SOURCE_LAB_OPEN,
+    )
+    identity["dashboard_auth_mode"] = "lab_open"
+    identity["home_href"] = "/chat"
+    identity["logout_path"] = "/logout"
+    identity["csrf_cookie_name"] = "csrf_token"
+    identity["logout_redirect"] = "/login"
+    identity["session_status_label"] = "Активен • LAB open auth"
+    identity["dashboard_warning"] = LAB_OPEN_AUTH_WARNING
+    return identity
+
+
 async def get_admin_dashboard_user_required(
     current_user: Dict[str, Any] = Depends(get_current_user_required),
 ) -> Dict[str, Any]:
+    if is_lab_open_auth_enabled():
+        return current_user
     if not user_can_access_admin_dashboard(current_user):
         raise HTTPException(status_code=403, detail="Forbidden")
     return current_user
@@ -1160,6 +1211,13 @@ async def get_admin_dashboard_identity_required(
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
     current_local_admin: Optional[Dict[str, Any]] = Depends(get_current_local_admin_session),
 ) -> Dict[str, Any]:
+    if is_lab_open_auth_enabled():
+        if current_local_admin:
+            if current_local_admin.get("rotation_required"):
+                raise HTTPException(status_code=403, detail=LOCAL_ADMIN_ROTATION_REQUIRED_ERROR)
+            return build_local_admin_dashboard_identity(current_local_admin)
+        return build_lab_open_dashboard_identity(current_user)
+
     if current_user and user_can_access_admin_dashboard(current_user):
         identity = dict(current_user)
         identity["dashboard_auth_mode"] = "ad"
@@ -1216,7 +1274,49 @@ def get_reserved_auth_proxy_headers(request: Request) -> list[str]:
 
 
 def trusted_proxy_sso_enabled() -> bool:
-    return settings.SSO_ENABLED and settings.TRUSTED_AUTH_PROXY_ENABLED
+    return not is_lab_open_auth_enabled() and settings.SSO_ENABLED and settings.TRUSTED_AUTH_PROXY_ENABLED
+
+
+async def build_lab_open_session_user(request: Request) -> Dict[str, Any]:
+    user_info = get_lab_user_identity()
+    available_models = await request.app.state.llm_gateway.get_model_catalog()
+    try:
+        model_info = await resolve_runtime_model(
+            user_info,
+            available_models,
+            request.app.state.llm_gateway,
+            allow_user_fallback=True,
+        )
+    except LookupError:
+        logger.error("No LLM models available while preparing lab_open session for user %s", user_info["username"])
+        model_info = get_placeholder_model_info()
+    return {
+        **user_info,
+        "model": model_info["name"],
+        "model_description": model_info["description"],
+        "model_key": model_info["key"],
+        "session_status_label": "Активен • LAB open auth",
+    }
+
+
+def maybe_issue_lab_auth_session(response: Any, request: Request, user_info: Dict[str, Any]) -> Any:
+    if not is_lab_open_auth_enabled():
+        return response
+    if request.cookies.get("access_token"):
+        return response
+    if not hasattr(response, "set_cookie"):
+        return response
+
+    access_token = create_access_token(
+        build_token_payload(user_info, "access"),
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    refresh_token = create_access_token(
+        build_token_payload(user_info, "refresh"),
+        expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+    set_auth_cookies(response, access_token, refresh_token, csrf_token=get_or_create_csrf_token(request))
+    return response
 
 
 def request_allows_trusted_proxy_headers(request: Request) -> bool:
@@ -1577,6 +1677,8 @@ def resolve_model(
     *,
     allow_fallback: bool = False,
 ) -> Dict[str, str]:
+    if is_lab_open_auth_enabled():
+        allow_fallback = True
     allowed_models = get_allowed_models_for_user(current_user, available_models)
     if not allowed_models:
         raise LookupError(NO_LLM_MODELS_AVAILABLE_ERROR)
@@ -1605,6 +1707,8 @@ def resolve_requested_model(
     *,
     allow_user_fallback: bool = False,
 ) -> Dict[str, str]:
+    if is_lab_open_auth_enabled():
+        allow_user_fallback = True
     allowed_models = get_allowed_models_for_user(current_user, available_models)
     if not allowed_models:
         raise LookupError(NO_LLM_MODELS_AVAILABLE_ERROR)
@@ -1918,6 +2022,13 @@ async def lifespan(app: FastAPI):
     await app.state.rate_limiter.connect()
     await app.state.login_rate_limiter.connect()
     await app.state.llm_gateway.connect()
+    logger.info(
+        "Application auth profile: install_profile=%s auth_mode=%s",
+        settings.INSTALL_PROFILE,
+        settings.AUTH_MODE,
+    )
+    if is_lab_open_auth_enabled():
+        logger.warning("%s", LAB_OPEN_AUTH_WARNING)
     startup_models = await asyncio.to_thread(settings.get_available_models)
     if startup_models:
         logger.info("Startup Ollama model catalog: %s", list(startup_models.keys()))
@@ -1999,24 +2110,16 @@ async def health(request: Request) -> Response:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
-    return RedirectResponse(url="/chat" if current_user else "/login", status_code=303)
+    if current_user or is_lab_open_auth_enabled():
+        return RedirectResponse(url="/chat", status_code=303)
+    return RedirectResponse(url="/login", status_code=303)
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
     if current_user:
         return RedirectResponse(url="/chat", status_code=303)
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {
-            "request": request,
-            "sso_login_enabled": trusted_proxy_sso_enabled(),
-            "sso_login_path": settings.SSO_LOGIN_PATH,
-            "local_admin_enabled": local_admin_enabled(),
-            "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
-        },
-    )
+    return templates.TemplateResponse(request, "login.html", build_login_template_context(request))
 
 
 async def sso_login_entry(request: Request, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
@@ -2069,6 +2172,12 @@ app.add_api_route(settings.SSO_LOGIN_PATH, sso_login_entry, methods=["GET"])
 
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if is_lab_open_auth_enabled():
+        lab_user = await build_lab_open_session_user(request)
+        logger.warning("Issuing synthetic lab_open session for %s", lab_user["username"])
+        response = RedirectResponse(url="/chat", status_code=303)
+        return maybe_issue_lab_auth_session(response, request, lab_user)
+
     try:
         await request.app.state.login_rate_limiter.check(build_login_rate_subject(request, username))
         user_info = await asyncio.to_thread(kerberos_auth.authenticate, username, password)
@@ -2076,14 +2185,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
             return templates.TemplateResponse(
                 request,
                 "login.html",
-                {
-                    "request": request,
-                    "error": "Неверное имя пользователя или пароль",
-                    "sso_login_enabled": trusted_proxy_sso_enabled(),
-                    "sso_login_path": settings.SSO_LOGIN_PATH,
-                    "local_admin_enabled": local_admin_enabled(),
-                    "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
-                },
+                build_login_template_context(request, error="Неверное имя пользователя или пароль"),
                 status_code=401,
             )
 
@@ -2120,14 +2222,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
             return templates.TemplateResponse(
                 request,
                 "login.html",
-                {
-                    "request": request,
-                    "error": LOGIN_RATE_LIMIT_ERROR,
-                    "sso_login_enabled": trusted_proxy_sso_enabled(),
-                    "sso_login_path": settings.SSO_LOGIN_PATH,
-                    "local_admin_enabled": local_admin_enabled(),
-                    "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
-                },
+                build_login_template_context(request, error=LOGIN_RATE_LIMIT_ERROR),
                 status_code=429,
             )
         raise
@@ -2136,14 +2231,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         return templates.TemplateResponse(
             request,
             "login.html",
-            {
-                "request": request,
-                "error": GENERIC_AUTH_ERROR,
-                "sso_login_enabled": trusted_proxy_sso_enabled(),
-                "sso_login_path": settings.SSO_LOGIN_PATH,
-                "local_admin_enabled": local_admin_enabled(),
-                "local_admin_login_path": LOCAL_ADMIN_LOGIN_PATH,
-            },
+            build_login_template_context(request, error=GENERIC_AUTH_ERROR),
             status_code=500,
         )
 
@@ -2497,6 +2585,7 @@ async def chat_page(
         "model": model_info["name"],
         "model_key": model_info["key"],
         "model_description": model_info["description"],
+        "session_status_label": build_session_status_label(current_user),
     }
     chat_store = request.app.state.chat_store
     conversation_writer = build_conversation_writer(request.app.state)
@@ -2508,7 +2597,7 @@ async def chat_page(
     resolved_thread_id = resolve_active_thread_id(thread_id, threads)
     history = await request.app.state.chat_store.get_history(current_user["username"], thread_id=resolved_thread_id)
     messages = prepare_messages(history)
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "chat.html",
         {
@@ -2518,11 +2607,13 @@ async def chat_page(
             "model_key": model_info["key"],
             "model_description": model_info["description"],
             "current_user": current_user,
+            "session_status_label": current_user["session_status_label"],
             "is_authenticated": True,
             "thread_id": resolved_thread_id,
             "threads": threads,
         },
     )
+    return maybe_issue_lab_auth_session(response, request, current_user)
 
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)
@@ -2839,7 +2930,7 @@ async def refresh_access_token(request: Request):
                 "directory_checked_at": payload.get("directory_checked_at"),
                 "identity_version": payload.get("identity_version"),
             },
-            auth_source=AUTH_SOURCE_PASSWORD,
+            auth_source=payload.get("auth_source") or AUTH_SOURCE_PASSWORD,
         )
         if not current_user["username"]:
             return JSONResponse({"error": "Invalid refresh token"}, status_code=401)

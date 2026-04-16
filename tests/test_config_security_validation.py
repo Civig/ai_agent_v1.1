@@ -10,6 +10,75 @@ import config as config_module
 
 
 class ConfigSecurityValidationTests(unittest.TestCase):
+    def test_default_settings_keep_enterprise_ad_contract(self):
+        settings = config_module.Settings(
+            SECRET_KEY="x" * 40,
+            COOKIE_SECURE=False,
+        )
+
+        self.assertEqual(settings.INSTALL_PROFILE, "enterprise")
+        self.assertEqual(settings.AUTH_MODE, "ad")
+        self.assertFalse(settings.LAB_OPEN_AUTH_ACK)
+
+    def test_unknown_install_profile_is_rejected(self):
+        with self.assertRaises(ValidationError) as error:
+            config_module.Settings(
+                SECRET_KEY="x" * 40,
+                COOKIE_SECURE=False,
+                INSTALL_PROFILE="unknown-profile",
+            )
+
+        self.assertIn("INSTALL_PROFILE must be one of", str(error.exception))
+
+    def test_unknown_auth_mode_is_rejected(self):
+        with self.assertRaises(ValidationError) as error:
+            config_module.Settings(
+                SECRET_KEY="x" * 40,
+                COOKIE_SECURE=False,
+                AUTH_MODE="open",
+            )
+
+        self.assertIn("AUTH_MODE must be one of", str(error.exception))
+
+    def test_lab_open_requires_explicit_ack(self):
+        with self.assertRaises(ValidationError) as error:
+            config_module.Settings(
+                SECRET_KEY="x" * 40,
+                COOKIE_SECURE=False,
+                INSTALL_PROFILE="standalone_gpu_lab",
+                AUTH_MODE="lab_open",
+                LAB_OPEN_AUTH_ACK=False,
+            )
+
+        self.assertIn("AUTH_MODE=lab_open requires LAB_OPEN_AUTH_ACK=true", str(error.exception))
+
+    def test_enterprise_profile_rejects_non_ad_auth_mode(self):
+        with self.assertRaises(ValidationError) as error:
+            config_module.Settings(
+                SECRET_KEY="x" * 40,
+                COOKIE_SECURE=False,
+                INSTALL_PROFILE="enterprise",
+                AUTH_MODE="lab_open",
+                LAB_OPEN_AUTH_ACK=True,
+            )
+
+        self.assertIn("INSTALL_PROFILE=enterprise requires AUTH_MODE=ad", str(error.exception))
+
+    def test_standalone_gpu_lab_profile_accepts_explicit_lab_open_contract(self):
+        settings = config_module.Settings(
+            SECRET_KEY="x" * 40,
+            COOKIE_SECURE=False,
+            INSTALL_PROFILE="standalone_gpu_lab",
+            AUTH_MODE="lab_open",
+            LAB_OPEN_AUTH_ACK=True,
+            LAB_USER_USERNAME="lab_user",
+            LAB_USER_CANONICAL_PRINCIPAL="lab_user@LOCAL.LAB",
+        )
+
+        self.assertEqual(settings.INSTALL_PROFILE, "standalone_gpu_lab")
+        self.assertEqual(settings.AUTH_MODE, "lab_open")
+        self.assertTrue(settings.lab_open_auth_enabled)
+
     def test_remote_redis_password_placeholder_is_rejected(self):
         with self.assertRaises(ValidationError) as error:
             config_module.Settings(

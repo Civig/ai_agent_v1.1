@@ -24,6 +24,7 @@ TOKEN_REVOKE_PREFIX = "auth:revoked"
 AUTH_SOURCE_PASSWORD = "password"
 AUTH_SOURCE_SSO = "sso"
 AUTH_SOURCE_LOCAL_ADMIN = "local_admin"
+AUTH_SOURCE_LAB_OPEN = "lab_open"
 IDENTITY_VERSION = 1
 MODEL_POLICY_FILENAME = "policy.json"
 MODEL_POLICY_CATEGORY_ORDER = {"general": 0, "coding": 1, "admin": 2}
@@ -310,9 +311,13 @@ def current_identity_timestamp() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
 
+def is_lab_open_auth_enabled() -> bool:
+    return bool(getattr(settings, "lab_open_auth_enabled", False))
+
+
 def normalize_auth_source(value: Optional[str]) -> str:
     normalized = (value or "").strip().lower()
-    if normalized in {AUTH_SOURCE_PASSWORD, AUTH_SOURCE_SSO, AUTH_SOURCE_LOCAL_ADMIN}:
+    if normalized in {AUTH_SOURCE_PASSWORD, AUTH_SOURCE_SSO, AUTH_SOURCE_LOCAL_ADMIN, AUTH_SOURCE_LAB_OPEN}:
         return normalized
     return AUTH_SOURCE_PASSWORD
 
@@ -354,13 +359,17 @@ def build_identity_contract(
     normalized = normalize_username(username)
     now = current_identity_timestamp()
     effective_auth_time = _coerce_identity_timestamp(auth_time, now)
+    normalized_auth_source = normalize_auth_source(auth_source)
+    normalized_groups = normalize_groups(groups)
+    if normalized_auth_source == AUTH_SOURCE_LAB_OPEN and not list(groups or []):
+        normalized_groups = []
     return {
         "username": normalized,
         "canonical_principal": (canonical_principal or canonical_principal_for_username(normalized)).strip(),
         "display_name": (display_name or normalized.capitalize()).strip() if normalized else "",
         "email": (email or f"{normalized}@{settings.LDAP_DOMAIN}").strip() if normalized else "",
-        "groups": normalize_groups(groups),
-        "auth_source": normalize_auth_source(auth_source),
+        "groups": normalized_groups,
+        "auth_source": normalized_auth_source,
         "auth_time": effective_auth_time,
         "directory_checked_at": _coerce_identity_timestamp(directory_checked_at, effective_auth_time),
         "identity_version": _coerce_identity_timestamp(identity_version, IDENTITY_VERSION),
@@ -369,6 +378,29 @@ def build_identity_contract(
 
 def _groups_lower(user_info: Dict[str, Any]) -> list[str]:
     return [group.lower() for group in user_info.get("groups", [])]
+
+
+def get_lab_user_identity() -> Dict[str, Any]:
+    username = normalize_username(settings.LAB_USER_USERNAME or "lab_user")
+    canonical_principal = (settings.LAB_USER_CANONICAL_PRINCIPAL or f"{username}@LOCAL.LAB").strip()
+    _, _, principal_domain = canonical_principal.partition("@")
+    email_domain = principal_domain.lower() or "local.lab"
+    display_name = " ".join(part.capitalize() for part in re.split(r"[_-]+", username) if part) or "Lab User"
+    default_model = (settings.DEFAULT_MODEL or "").strip() or "phi3:mini"
+    return enrich_identity_session_fields(
+        {
+            "username": username,
+            "canonical_principal": canonical_principal,
+            "display_name": display_name,
+            "email": f"{username}@{email_domain}",
+            "groups": [],
+            "auth_source": AUTH_SOURCE_LAB_OPEN,
+            "model": default_model,
+            "model_key": default_model,
+            "model_description": "Standalone GPU Lab default model",
+        },
+        auth_source=AUTH_SOURCE_LAB_OPEN,
+    )
 
 
 def _normalize_policy_category_name(value: Any) -> str:
@@ -567,6 +599,9 @@ def get_allowed_model_categories_for_user(
     catalog = policy_catalog or load_model_policy_catalog()
     if not catalog:
         return []
+
+    if is_lab_open_auth_enabled():
+        return list(catalog.keys())
 
     if is_validation_user(user_info):
         registry = registry_catalog if registry_catalog is not None else load_model_registry_catalog()
@@ -855,10 +890,12 @@ async def get_current_user(
 async def get_current_user_required(
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return current_user
+    if current_user:
+        return current_user
+    if is_lab_open_auth_enabled():
+        return get_lab_user_identity()
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )

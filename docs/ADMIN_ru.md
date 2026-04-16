@@ -142,6 +142,7 @@ Compose health checks используют `runtime_healthcheck.py` для `app`
 - live/history/events предназначены для operator monitoring, а не для массового пользовательского доступа
 - текущая модель доступа остаётся временным узким operator gate и не является production-ready RBAC
 - ordinary operator gate (`ADMIN_DASHBOARD_USERS`) и local break-glass admin — это разные access path'ы
+- в `AUTH_MODE=lab_open` dashboard может открываться через synthetic lab identity, но UI показывает явное warning и этот path не заменяет enterprise operator gate
 - после первичной forced rotation валидная local-admin session может открыть `GET /admin/local/change-password`; успешный `POST /admin/local/change-password` разлогинивает эту local-admin session и требует fresh login с новым паролем
 
 ## Работа с моделями

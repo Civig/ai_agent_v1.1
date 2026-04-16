@@ -167,6 +167,17 @@ For emergency operator recovery, the runtime now supports a separate local break
 - login attempts, logout, forced rotation, and normal password change are logged without disclosing plaintext password or bootstrap-secret material
 - `ADMIN_DASHBOARD_USERS` remains a separate ordinary-operator gate and is not replaced by the local-admin fallback path
 
+### Standalone GPU Lab mode
+
+For isolated GPU validation, the runtime also supports an explicit lab profile, but only as an intentionally insecure engineering mode:
+
+- the default baseline remains enterprise: `INSTALL_PROFILE=enterprise`, `AUTH_MODE=ad`
+- lab mode requires the explicit combination `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open`, and `LAB_OPEN_AUTH_ACK=true`
+- if `AUTH_MODE=lab_open` is configured without that acknowledgment, startup fails fast
+- ordinary authentication is disabled in that mode and the runtime uses a synthetic lab identity
+- the dashboard shows an explicit warning whenever `lab_open` is active
+- this mode must not be exposed to production users or the public Internet without strict network isolation
+
 ## Upload and File Security Baseline
 
 ### What is implemented
