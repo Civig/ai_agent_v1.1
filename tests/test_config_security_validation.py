@@ -103,11 +103,13 @@ class ConfigSecurityValidationTests(unittest.TestCase):
             STANDALONE_CHAT_AUTH_ENABLED=True,
             STANDALONE_CHAT_USERNAME="Demo_AI",
             STANDALONE_CHAT_PASSWORD_HASH=password_hash,
+            INSTALL_TEST_USER="Demo_AI",
         )
 
         self.assertTrue(settings.STANDALONE_CHAT_AUTH_ENABLED)
         self.assertEqual(settings.STANDALONE_CHAT_USERNAME, "demo_ai")
         self.assertEqual(settings.STANDALONE_CHAT_PASSWORD_HASH, password_hash)
+        self.assertEqual(settings.INSTALL_TEST_USER, "demo_ai")
         self.assertFalse(settings.lab_open_auth_enabled)
 
     def test_legacy_lab_open_contract_remains_valid_when_acknowledged(self):

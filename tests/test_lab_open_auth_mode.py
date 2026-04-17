@@ -1,4 +1,5 @@
 import os
+import sys
 import types
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -10,7 +11,30 @@ from starlette.requests import Request
 os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
 os.environ.setdefault("COOKIE_SECURE", "false")
 
+
+def _install_app_import_stubs() -> None:
+    persistence = types.ModuleType("persistence")
+    persistence.close_conversation_persistence_runtime = lambda *args, **kwargs: None
+    persistence.open_conversation_persistence_runtime = lambda *args, **kwargs: None
+    sys.modules.setdefault("persistence", persistence)
+
+    parity = types.ModuleType("persistence.conversation_parity")
+    parity.PARITY_EMPTY_THREAD = "empty"
+    parity.PARITY_MATCHED = "matched"
+    parity.compare_history_snapshot_to_messages = lambda *args, **kwargs: None
+    parity.compare_history_snapshot_to_store = lambda *args, **kwargs: None
+    sys.modules.setdefault("persistence.conversation_parity", parity)
+
+    coordinator = types.ModuleType("persistence.conversation_write_coordinator")
+    coordinator.RedisConversationWriteCoordinator = object
+    coordinator.create_conversation_write_coordinator = lambda *args, **kwargs: None
+    sys.modules.setdefault("persistence.conversation_write_coordinator", coordinator)
+
+
+_install_app_import_stubs()
+
 import app as app_module
+import auth_kerberos as auth_module
 from local_admin_security import build_local_admin_password_hash
 
 
@@ -74,14 +98,17 @@ class StandaloneChatAuthModeTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(app_module.settings, "STANDALONE_CHAT_AUTH_ENABLED", True), patch.object(
             app_module.settings, "STANDALONE_CHAT_USERNAME", "demo_ai"
+        ), patch.object(app_module.settings, "LOCAL_ADMIN_ENABLED", True), patch.object(
+            app_module, "LOCAL_ADMIN_LOGIN_PATH", "/admin/local/login"
         ), patch.object(app_module.settings, "STANDALONE_CHAT_PASSWORD_HASH", password_hash):
             response = await app_module.login_page(request, current_user=None)
 
         html = response.body.decode("utf-8")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Включён demo/test chat login", html)
+        self.assertIn("Включён installer-created GPU-lab demo/test login", html)
         self.assertIn("demo_ai", html)
-        self.assertNotIn("Открыть LAB", html)
+        self.assertIn("Dashboard admin доступен отдельно", html)
+        self.assertNotIn("synthetic", html.lower())
 
     async def test_standalone_chat_login_redirects_without_calling_kerberos(self):
         request = self.build_request("/login", method="POST")
@@ -183,6 +210,53 @@ class StandaloneChatAuthModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/chat")
         authenticate_mock.assert_called_once_with("alice", "AlicePassword-123")
+
+    def test_installer_test_user_gets_only_live_default_model_without_ad_groups(self):
+        available_models = {
+            "phi3:mini": {
+                "name": "phi3:mini",
+                "description": "Mini model",
+                "size": "1",
+                "status": "active",
+            },
+            "mistral:latest": {
+                "name": "mistral:latest",
+                "description": "Other model",
+                "size": "2",
+                "status": "active",
+            },
+        }
+
+        with patch.object(auth_module.settings, "INSTALL_TEST_USER", "demo_ai"), patch.object(
+            auth_module.settings, "DEFAULT_MODEL", "phi3:mini"
+        ):
+            allowed_models = auth_module.get_allowed_models_for_user(
+                {"username": "demo_ai", "groups": [], "auth_source": "password"},
+                available_models,
+            )
+
+        self.assertEqual(list(allowed_models.keys()), ["phi3:mini"])
+        self.assertEqual(allowed_models["phi3:mini"]["name"], "phi3:mini")
+
+    def test_installer_test_user_returns_empty_when_default_model_is_not_live(self):
+        available_models = {
+            "mistral:latest": {
+                "name": "mistral:latest",
+                "description": "Other model",
+                "size": "2",
+                "status": "active",
+            }
+        }
+
+        with patch.object(auth_module.settings, "INSTALL_TEST_USER", "demo_ai"), patch.object(
+            auth_module.settings, "DEFAULT_MODEL", "phi3:mini"
+        ):
+            allowed_models = auth_module.get_allowed_models_for_user(
+                {"username": "demo_ai", "groups": [], "auth_source": "password"},
+                available_models,
+            )
+
+        self.assertEqual(allowed_models, {})
 
 
 if __name__ == "__main__":

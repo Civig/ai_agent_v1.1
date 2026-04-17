@@ -162,7 +162,7 @@
     <div class="login-header">
         <h1>Corporate AI Assistant</h1>
         {% if standalone_chat_auth_enabled %}
-        <p>Корпоративный вход и demo/test login для изолированной проверки</p>
+        <p>Обычный login path и installer-created GPU-lab demo/test login</p>
         {% else %}
         <p>Корпоративный вход через доменную учётную запись</p>
         {% endif %}
@@ -170,8 +170,8 @@
 
     {% if standalone_chat_auth_enabled %}
     <div class="warning-message">
-        <strong>Включён demo/test chat login</strong><br>
-        Этот режим предназначен только для demo и standalone validation, не заменяет production AD/Kerberos auth.<br>
+        <strong>Включён installer-created GPU-lab demo/test login</strong><br>
+        Frontend test user создан installer'ом для isolated GPU-lab validation и не заменяет production AD/Kerberos auth.<br>
         Используйте обычную форму входа с username <code>{{ standalone_chat_username }}</code>.
     </div>
     {% endif %}
@@ -207,9 +207,12 @@
         {% if standalone_chat_auth_enabled %}
         <strong>Обычный login path сохранён</strong><br>
         AD/Kerberos login продолжает работать как обычно.<br>
-        Если введён username <code>{{ standalone_chat_username }}</code>, runtime использует локальную hash-only проверку demo/test пользователя.
+        Если введён username <code>{{ standalone_chat_username }}</code>, runtime использует локальную hash-only проверку installer-created frontend test user.
         {% if standalone_chat_bootstrap_required %}
         <br>Для первого входа используйте one-time bootstrap secret, если installer сгенерировал его автоматически.
+        {% endif %}
+        {% if local_admin_enabled %}
+        <br>Dashboard admin доступен отдельно через <code>{{ local_admin_login_path }}</code> и не смешивается с frontend test user.
         {% endif %}
         {% else %}
         <strong>Корпоративная аутентификация Kerberos</strong><br>

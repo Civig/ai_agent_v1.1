@@ -29,7 +29,11 @@ class InstallProfileLabModeTests(unittest.TestCase):
             set -Eeuo pipefail
             cd "$1"
             export INSTALL_SH_SOURCE_ONLY=1
+            export INSTALL_HOST_STATE_DIR="$1/host-state"
             source ./install.sh
+            as_root() {{
+                "$@"
+            }}
             {shell_body}
             """
         )
@@ -76,17 +80,19 @@ class InstallProfileLabModeTests(unittest.TestCase):
         self.assertIn("lab_auth=ad", result.stdout)
         self.assertIn("lab_directory=no", result.stdout)
 
-    def test_select_install_profile_noninteractive_keeps_ad_flow_and_disabled_lab_ack(self):
+    def test_select_install_profile_and_mode_force_gpu_lab_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_install_shell(
                 temp_dir,
                 """
-                INSTALL_PROFILE="standalone_gpu_lab"
+                INSTALL_PROFILE="enterprise"
                 INSTALL_NONINTERACTIVE="1"
                 select_install_profile
+                select_install_mode
                 printf 'profile=%s\\n' "${INSTALL_PROFILE}"
                 printf 'auth=%s\\n' "${AUTH_MODE}"
                 printf 'ack=%s\\n' "${LAB_OPEN_AUTH_ACK}"
+                printf 'mode=%s\\n' "${SELECTED_INSTALL_MODE}"
                 """,
             )
 
@@ -94,15 +100,54 @@ class InstallProfileLabModeTests(unittest.TestCase):
         self.assertIn("profile=standalone_gpu_lab", result.stdout)
         self.assertIn("auth=ad", result.stdout)
         self.assertIn("ack=false", result.stdout)
+        self.assertIn("mode=gpu", result.stdout)
+
+    def test_gpu_lab_auto_configures_bootstrap_dashboard_admin_and_frontend_user(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_install_shell(
+                temp_dir,
+                """
+                INSTALL_PROFILE="standalone_gpu_lab"
+                configure_local_admin_break_glass "./.env.missing"
+                configure_standalone_chat_auth "./.env.missing"
+                printf 'local_admin_enabled=%s\\n' "${LOCAL_ADMIN_ENABLED}"
+                printf 'local_admin_username=%s\\n' "${LOCAL_ADMIN_USERNAME}"
+                printf 'local_admin_hash_present=%s\\n' "$(test -n "${LOCAL_ADMIN_PASSWORD_HASH}" && printf yes || printf no)"
+                printf 'local_admin_force_rotate=%s\\n' "${LOCAL_ADMIN_FORCE_ROTATE}"
+                printf 'local_admin_bootstrap_required=%s\\n' "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
+                printf 'local_admin_secret_file=%s\\n' "$(test -f "${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}" && printf yes || printf no)"
+                printf 'standalone_enabled=%s\\n' "${STANDALONE_CHAT_AUTH_ENABLED}"
+                printf 'standalone_username=%s\\n' "${STANDALONE_CHAT_USERNAME}"
+                printf 'standalone_hash_present=%s\\n' "$(test -n "${STANDALONE_CHAT_PASSWORD_HASH}" && printf yes || printf no)"
+                printf 'standalone_force_rotate=%s\\n' "${STANDALONE_CHAT_FORCE_ROTATE}"
+                printf 'standalone_bootstrap_required=%s\\n' "${STANDALONE_CHAT_BOOTSTRAP_REQUIRED}"
+                printf 'standalone_secret_file=%s\\n' "$(test -f "${STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE}" && printf yes || printf no)"
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("local_admin_enabled=true", result.stdout)
+        self.assertIn("local_admin_username=admin_ai", result.stdout)
+        self.assertIn("local_admin_hash_present=yes", result.stdout)
+        self.assertIn("local_admin_force_rotate=true", result.stdout)
+        self.assertIn("local_admin_bootstrap_required=true", result.stdout)
+        self.assertIn("local_admin_secret_file=yes", result.stdout)
+        self.assertIn("standalone_enabled=true", result.stdout)
+        self.assertIn("standalone_username=demo_ai", result.stdout)
+        self.assertIn("standalone_hash_present=yes", result.stdout)
+        self.assertIn("standalone_force_rotate=true", result.stdout)
+        self.assertIn("standalone_bootstrap_required=true", result.stdout)
+        self.assertIn("standalone_secret_file=yes", result.stdout)
 
     def test_write_env_file_writes_standalone_gpu_lab_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_install_shell(
                 temp_dir,
                 """
-                INSTALL_PROFILE="standalone_gpu_lab"
-                AUTH_MODE="$(auth_mode_for_install_profile "${INSTALL_PROFILE}")"
-                LAB_OPEN_AUTH_ACK="false"
+                INSTALL_PROFILE="enterprise"
+                INSTALL_NONINTERACTIVE="1"
+                select_install_profile
+                select_install_mode
                 DOMAIN="local.lab"
                 LDAP_SERVER_URL="ldap://local.lab"
                 LDAP_GSSAPI_SERVICE_HOST=""
@@ -110,30 +155,24 @@ class InstallProfileLabModeTests(unittest.TestCase):
                 NETBIOS_DOMAIN="LOCAL"
                 KERBEROS_REALM="LOCAL.LAB"
                 KERBEROS_KDC="local.lab"
-                SECRET_KEY="test-secret-key-1234567890-test-abcdef"
                 SSO_ENABLED="false"
                 SSO_SERVICE_PRINCIPAL=""
                 SSO_KEYTAB_PATH="/etc/corporate-ai-sso/http.keytab"
-                LOCAL_ADMIN_ENABLED="false"
-                LOCAL_ADMIN_USERNAME="admin_ai"
-                LOCAL_ADMIN_PASSWORD_HASH=""
-                LOCAL_ADMIN_FORCE_ROTATE="false"
-                LOCAL_ADMIN_BOOTSTRAP_REQUIRED="false"
-                STANDALONE_CHAT_AUTH_ENABLED="false"
-                STANDALONE_CHAT_USERNAME="demo_ai"
-                STANDALONE_CHAT_PASSWORD_HASH=""
-                STANDALONE_CHAT_FORCE_ROTATE="false"
-                STANDALONE_CHAT_BOOTSTRAP_REQUIRED="false"
+                configure_local_admin_break_glass "./.env.missing"
+                configure_standalone_chat_auth "./.env.missing"
+                TEST_ADMIN_USER="${STANDALONE_CHAT_USERNAME}"
+                TEST_ADMIN_PASSWORD="${STANDALONE_CHAT_PLAINTEXT_SECRET}"
                 MODEL_ACCESS_CODING_GROUPS=""
                 MODEL_ACCESS_ADMIN_GROUPS=""
-                DEFAULT_MODEL="phi3:mini"
-                REDIS_PASSWORD="redis-secret"
+                REDIS_PASSWORD="$(reuse_or_generate_secret "" generate_hex_secret)"
                 POSTGRES_DB="corporate_ai"
                 POSTGRES_USER="corporate_ai"
-                POSTGRES_PASSWORD="postgres-secret"
-                SELECTED_INSTALL_MODE="gpu"
+                POSTGRES_PASSWORD="$(reuse_or_generate_secret "" generate_hex_secret)"
+                SECRET_KEY="$(reuse_or_generate_secret "" generate_base64_secret)"
+                load_installer_model_records
+                apply_installer_model_selection "1"
+                DOWNLOAD_DEFAULT_MODEL_NOW="true"
                 AD_SERVER_IP_OVERRIDE=""
-                TEST_ADMIN_USER=""
                 write_env_file
                 cat .env
                 """,
@@ -144,15 +183,18 @@ class InstallProfileLabModeTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "INSTALL_PROFILE"), "standalone_gpu_lab")
         self.assertEqual(self._get_env_value(env_text, "AUTH_MODE"), "ad")
         self.assertEqual(self._get_env_value(env_text, "LAB_OPEN_AUTH_ACK"), "false")
-        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_AUTH_ENABLED"), "false")
+        self.assertEqual(self._get_env_value(env_text, "LOCAL_ADMIN_ENABLED"), "true")
+        self.assertEqual(self._get_env_value(env_text, "LOCAL_ADMIN_FORCE_ROTATE"), "true")
+        self.assertEqual(self._get_env_value(env_text, "LOCAL_ADMIN_BOOTSTRAP_REQUIRED"), "true")
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_AUTH_ENABLED"), "true")
         self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_USERNAME"), "demo_ai")
-        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_PASSWORD_HASH"), "")
-        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_FORCE_ROTATE"), "false")
-        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_BOOTSTRAP_REQUIRED"), "false")
+        self.assertTrue(bool(self._get_env_value(env_text, "STANDALONE_CHAT_PASSWORD_HASH")))
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_FORCE_ROTATE"), "true")
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_BOOTSTRAP_REQUIRED"), "true")
         self.assertEqual(self._get_env_value(env_text, "SSO_ENABLED"), "false")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_AUTH_PROXY_ENABLED"), "false")
         self.assertEqual(self._get_env_value(env_text, "GPU_ENABLED"), "true")
-        self.assertEqual(self._get_env_value(env_text, "INSTALL_TEST_USER"), "")
+        self.assertEqual(self._get_env_value(env_text, "INSTALL_TEST_USER"), "demo_ai")
 
     def test_gpu_mode_override_adds_ollama_gpu_runtime(self):
         with tempfile.TemporaryDirectory() as temp_dir:

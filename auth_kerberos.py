@@ -528,6 +528,57 @@ def is_validation_user(user_info: Dict[str, Any]) -> bool:
     return normalize_username(str(user_info.get("username") or "")) == configured_validation_user
 
 
+def get_validation_user_default_model_access(
+    user_info: Dict[str, Any],
+    available_models: Dict[str, Dict[str, str]],
+    registry_catalog: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Dict[str, str]]:
+    requested_default_model = str(getattr(settings, "DEFAULT_MODEL", "") or "").strip()
+    if not requested_default_model:
+        logger.error(
+            "Installer validation user %s has no DEFAULT_MODEL configured; denying model access",
+            user_info.get("username", "unknown"),
+        )
+        return {}
+
+    resolved_key = requested_default_model if requested_default_model in available_models else ""
+    if not resolved_key:
+        for model_key, live_model in available_models.items():
+            if str(live_model.get("name") or "").strip() == requested_default_model:
+                resolved_key = model_key
+                break
+
+    if not resolved_key:
+        logger.error(
+            "Installer validation user %s requires DEFAULT_MODEL=%s, but it is not live in the runtime catalog",
+            user_info.get("username", "unknown"),
+            requested_default_model,
+        )
+        return {}
+
+    live_model = available_models.get(resolved_key)
+    if live_model is None:
+        logger.error(
+            "Installer validation user %s resolved DEFAULT_MODEL=%s to %s, but the live model entry is missing",
+            user_info.get("username", "unknown"),
+            requested_default_model,
+            resolved_key,
+        )
+        return {}
+
+    registry = registry_catalog if registry_catalog is not None else load_model_registry_catalog()
+    registry_model = registry.get(resolved_key, {}) if registry else {}
+    category_key = str(registry_model.get("category") or "").strip()
+    return {
+        resolved_key: _resolve_model_access_entry(
+            live_model,
+            model_key=resolved_key,
+            category_key=category_key,
+            registry_model=registry_model,
+        )
+    }
+
+
 def load_model_policy_catalog(policy_root: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
     root = Path(policy_root or settings.model_policy_dir)
     if not root.exists() or not root.is_dir():
@@ -667,6 +718,10 @@ def get_allowed_models_for_user(
     if not models:
         return {}
 
+    registry_catalog = load_model_registry_catalog()
+    if is_validation_user(user_info):
+        return get_validation_user_default_model_access(user_info, models, registry_catalog)
+
     policy_catalog = load_model_policy_catalog()
     if not policy_catalog:
         logger.error(
@@ -675,12 +730,17 @@ def get_allowed_models_for_user(
         )
         return {}
 
-    registry_catalog = load_model_registry_catalog()
-    validation_mode = is_validation_user(user_info) and bool(registry_catalog)
-
     allowed_models: Dict[str, Dict[str, str]] = {}
-    if validation_mode:
-        for registry_model in _iter_registry_models(registry_catalog, validation_only=True):
+    allowed_categories = get_allowed_model_categories_for_user(user_info, policy_catalog, registry_catalog)
+    if not allowed_categories:
+        logger.warning(
+            "No model policy categories are available for user %s",
+            user_info.get("username", "unknown"),
+        )
+        return {}
+
+    if registry_catalog:
+        for registry_model in _iter_registry_models(registry_catalog, category_keys=set(allowed_categories)):
             model_key = str(registry_model.get("model_key") or "").strip()
             if not model_key:
                 continue
@@ -689,10 +749,7 @@ def get_allowed_models_for_user(
                 continue
 
             category_key = str(registry_model.get("category") or "").strip()
-            model_policy = {}
-            if category_key:
-                model_policy = policy_catalog.get(category_key, {}).get("models", {}).get(model_key, {})
-
+            model_policy = policy_catalog.get(category_key, {}).get("models", {}).get(model_key, {})
             allowed_models[model_key] = _resolve_model_access_entry(
                 live_model,
                 model_key=model_key,
@@ -701,45 +758,18 @@ def get_allowed_models_for_user(
                 registry_model=registry_model,
             )
     else:
-        allowed_categories = get_allowed_model_categories_for_user(user_info, policy_catalog, registry_catalog)
-        if not allowed_categories:
-            logger.warning(
-                "No model policy categories are available for user %s",
-                user_info.get("username", "unknown"),
-            )
-            return {}
-
-        if registry_catalog:
-            for registry_model in _iter_registry_models(registry_catalog, category_keys=set(allowed_categories)):
-                model_key = str(registry_model.get("model_key") or "").strip()
-                if not model_key:
-                    continue
+        for category_key in allowed_categories:
+            category_policy = policy_catalog.get(category_key, {})
+            for model_key, model_policy in category_policy.get("models", {}).items():
                 live_model = models.get(model_key)
                 if live_model is None:
                     continue
-
-                category_key = str(registry_model.get("category") or "").strip()
-                model_policy = policy_catalog.get(category_key, {}).get("models", {}).get(model_key, {})
                 allowed_models[model_key] = _resolve_model_access_entry(
                     live_model,
                     model_key=model_key,
                     category_key=category_key,
                     policy_model=model_policy,
-                    registry_model=registry_model,
                 )
-        else:
-            for category_key in allowed_categories:
-                category_policy = policy_catalog.get(category_key, {})
-                for model_key, model_policy in category_policy.get("models", {}).items():
-                    live_model = models.get(model_key)
-                    if live_model is None:
-                        continue
-                    allowed_models[model_key] = _resolve_model_access_entry(
-                        live_model,
-                        model_key=model_key,
-                        category_key=category_key,
-                        policy_model=model_policy,
-                    )
 
     if not allowed_models:
         logger.warning(

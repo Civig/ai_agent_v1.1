@@ -672,45 +672,11 @@ install_profile_requires_directory_services() {
 }
 
 select_install_profile() {
-    local requested_profile="${INSTALL_PROFILE:-enterprise}"
-    local normalized_profile=""
-    local input=""
-    local default_choice="1"
-
-    normalized_profile="$(normalize_install_profile "${requested_profile}")" || die "Unsupported INSTALL_PROFILE='${requested_profile}'. Supported values: ${SUPPORTED_INSTALL_PROFILES}"
-
-    if [[ "${normalized_profile}" == "standalone_gpu_lab" ]]; then
-        default_choice="2"
-    fi
-
-    if ! is_interactive_shell; then
-        INSTALL_PROFILE="${normalized_profile}"
-    else
-        print_header "Installation Profile"
-        print_info "1. Enterprise install: validated AD / Kerberos / LDAP baseline"
-        print_warning "2. Standalone GPU Lab install: supports optional standalone test-chat auth for isolated validation"
-        read -r -p "Installation profile / Профиль установки [default: ${default_choice}] (examples: 1 or 2): " input
-        input="$(trim_whitespace "${input}")"
-        case "${input:-${default_choice}}" in
-            1|enterprise)
-                INSTALL_PROFILE="enterprise"
-                ;;
-            2|standalone_gpu_lab|lab)
-                INSTALL_PROFILE="standalone_gpu_lab"
-                ;;
-            *)
-                die "Unsupported installation profile selection"
-                ;;
-        esac
-    fi
-
+    # Standalone GPU Lab install is installer-managed in this branch.
+    INSTALL_PROFILE="standalone_gpu_lab"
     AUTH_MODE="$(auth_mode_for_install_profile "${INSTALL_PROFILE}")" || die "Unsupported installation profile contract"
     LAB_OPEN_AUTH_ACK="false"
-    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
-        print_warning "Selected standalone_gpu_lab: standalone/test chat auth is optional and remains disabled by default"
-    fi
-
-    print_info "Selected installation profile: ${INSTALL_PROFILE}"
+    print_info "Selected installation profile: ${INSTALL_PROFILE} (installer-managed GPU lab contract)"
     print_info "Selected auth mode: ${AUTH_MODE}"
 }
 
@@ -721,6 +687,13 @@ select_install_mode() {
     local input=""
 
     normalized_mode="$(normalize_install_mode "${requested_mode}")" || die "Unsupported INSTALL_MODE='${requested_mode}'. Supported values: ${SUPPORTED_INSTALL_MODES}"
+
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        INSTALL_MODE="gpu"
+        SELECTED_INSTALL_MODE="gpu"
+        print_info "Selected installation mode: ${SELECTED_INSTALL_MODE^^} (installer-managed GPU lab contract)"
+        return
+    fi
 
     if [[ "${normalized_mode}" == "auto" ]]; then
         normalized_mode="${RECOMMENDED_INSTALL_MODE}"
@@ -775,6 +748,11 @@ validate_install_mode() {
     print_warning "Detected target: ${DETECTED_DEPLOYMENT_TARGET}"
     print_warning "Docker GPU runtime: ${AUDIT_GPU_RUNTIME_STATUS}"
     print_warning "GPU compose profile: ${AUDIT_GPU_PROFILE_STATUS}"
+
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        print_warning "Continuing with GPU deployment mode because standalone_gpu_lab requires the installer-managed Ollama GPU override"
+        return
+    fi
 
     if is_interactive_shell; then
         local fallback_answer=""
@@ -1133,6 +1111,11 @@ ensure_ollama_cli() {
 confirm_system_changes() {
     local answer=""
 
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        print_info "Proceeding with installer-managed GPU lab system changes"
+        return
+    fi
+
     if ! is_interactive_shell; then
         print_info "Proceeding non-interactively with ${SELECTED_INSTALL_MODE^^} installation mode"
         return
@@ -1226,6 +1209,18 @@ prompt_secret_or_generate() {
     "${generator}"
 }
 
+reuse_or_generate_secret() {
+    local existing_value="$1"
+    local generator="$2"
+
+    if [[ -n "${existing_value}" ]]; then
+        printf "%s" "${existing_value}"
+        return
+    fi
+
+    "${generator}"
+}
+
 validate_env_value() {
     local key="$1"
     local value="$2"
@@ -1316,8 +1311,11 @@ build_standalone_chat_password_hash() {
 
 print_sensitive_to_tty() {
     local message="$1"
-    if [[ -w /dev/tty ]]; then
-        printf '%s\n' "${message}" >/dev/tty
+    local tty_path=""
+
+    tty_path="$(tty 2>/dev/null || true)"
+    if [[ "${tty_path}" == /dev/* ]]; then
+        printf '%s\n' "${message}" >"${tty_path}" 2>/dev/null || true
     fi
 }
 
@@ -1377,6 +1375,33 @@ configure_local_admin_break_glass() {
     existing_hash="$(get_env_value "${existing_env}" "LOCAL_ADMIN_PASSWORD_HASH" || true)"
     existing_force_rotate="$(get_env_value "${existing_env}" "LOCAL_ADMIN_FORCE_ROTATE" || get_env_value "${ROOT_DIR}/.env.example" "LOCAL_ADMIN_FORCE_ROTATE" || printf "false")"
     existing_bootstrap_required="$(get_env_value "${existing_env}" "LOCAL_ADMIN_BOOTSTRAP_REQUIRED" || get_env_value "${ROOT_DIR}/.env.example" "LOCAL_ADMIN_BOOTSTRAP_REQUIRED" || printf "false")"
+
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        LOCAL_ADMIN_ENABLED="true"
+        LOCAL_ADMIN_USERNAME="$(normalize_local_admin_username "${default_username}")"
+        LOCAL_ADMIN_PLAINTEXT_SECRET=""
+
+        if [[ -n "${existing_hash}" ]]; then
+            LOCAL_ADMIN_PASSWORD_HASH="${existing_hash}"
+            LOCAL_ADMIN_FORCE_ROTATE="$(normalize_boolean_input "${existing_force_rotate}")"
+            LOCAL_ADMIN_BOOTSTRAP_REQUIRED="$(normalize_boolean_input "${existing_bootstrap_required}")"
+            print_info "Keeping existing local break-glass admin credential state for standalone_gpu_lab"
+            return
+        fi
+
+        LOCAL_ADMIN_PLAINTEXT_SECRET="$(generate_urlsafe_secret)"
+        LOCAL_ADMIN_PASSWORD_HASH="$(build_local_admin_password_hash "${LOCAL_ADMIN_PLAINTEXT_SECRET}")"
+        LOCAL_ADMIN_FORCE_ROTATE="true"
+        LOCAL_ADMIN_BOOTSTRAP_REQUIRED="true"
+        write_local_admin_bootstrap_secret_file "${LOCAL_ADMIN_PLAINTEXT_SECRET}"
+        print_info "Generated installer-managed local admin bootstrap secret for standalone_gpu_lab"
+        print_sensitive_to_tty ""
+        print_sensitive_to_tty "Local break-glass admin bootstrap secret (shown once, not logged):"
+        print_sensitive_to_tty "  username: ${LOCAL_ADMIN_USERNAME}"
+        print_sensitive_to_tty "  secret: ${LOCAL_ADMIN_PLAINTEXT_SECRET}"
+        print_sensitive_to_tty "Rotate it on first login before dashboard access."
+        return
+    fi
 
     if ! is_interactive_shell; then
         LOCAL_ADMIN_ENABLED="$(normalize_boolean_input "${default_enabled}")"
@@ -1443,6 +1468,39 @@ configure_standalone_chat_auth() {
     local enable_standalone_chat password_input=""
 
     load_standalone_chat_auth_from_env "${existing_env}"
+
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        default_enabled="${STANDALONE_CHAT_AUTH_ENABLED}"
+        default_username="${STANDALONE_CHAT_USERNAME}"
+        existing_hash="${STANDALONE_CHAT_PASSWORD_HASH}"
+        existing_force_rotate="${STANDALONE_CHAT_FORCE_ROTATE}"
+        existing_bootstrap_required="${STANDALONE_CHAT_BOOTSTRAP_REQUIRED}"
+
+        STANDALONE_CHAT_AUTH_ENABLED="true"
+        STANDALONE_CHAT_USERNAME="$(normalize_standalone_chat_username "${default_username}")"
+        STANDALONE_CHAT_PLAINTEXT_SECRET=""
+
+        if [[ -n "${existing_hash}" ]]; then
+            STANDALONE_CHAT_PASSWORD_HASH="${existing_hash}"
+            STANDALONE_CHAT_FORCE_ROTATE="$(normalize_boolean_input "${existing_force_rotate}")"
+            STANDALONE_CHAT_BOOTSTRAP_REQUIRED="$(normalize_boolean_input "${existing_bootstrap_required}")"
+            print_info "Keeping existing standalone/test chat credential state for standalone_gpu_lab"
+            return
+        fi
+
+        STANDALONE_CHAT_PLAINTEXT_SECRET="$(generate_urlsafe_secret)"
+        STANDALONE_CHAT_PASSWORD_HASH="$(build_standalone_chat_password_hash "${STANDALONE_CHAT_PLAINTEXT_SECRET}")"
+        STANDALONE_CHAT_FORCE_ROTATE="true"
+        STANDALONE_CHAT_BOOTSTRAP_REQUIRED="true"
+        write_standalone_chat_bootstrap_secret_file "${STANDALONE_CHAT_PLAINTEXT_SECRET}"
+        print_info "Generated installer-managed standalone/test chat bootstrap secret for standalone_gpu_lab"
+        print_sensitive_to_tty ""
+        print_sensitive_to_tty "Standalone/test chat bootstrap secret (shown once, not logged):"
+        print_sensitive_to_tty "  username: ${STANDALONE_CHAT_USERNAME}"
+        print_sensitive_to_tty "  secret: ${STANDALONE_CHAT_PLAINTEXT_SECRET}"
+        print_sensitive_to_tty "Rotate it on first login before chat access."
+        return
+    fi
 
     if ! is_interactive_shell; then
         return
@@ -1805,6 +1863,15 @@ prompt_default_model_selection() {
     fi
     apply_installer_model_selection "${model_choice}"
 
+    if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
+        DOWNLOAD_DEFAULT_MODEL_NOW="true"
+        print_info "Selected installer models: ${SELECTED_INSTALLER_MODELS}"
+        print_info "Selected default model: ${DEFAULT_MODEL}"
+        print_info "Selected secondary models: ${SELECTED_SECONDARY_MODELS:-<none>}"
+        print_info "Model pre-pull requested: ${DOWNLOAD_DEFAULT_MODEL_NOW} (installer-managed GPU lab default)"
+        return
+    fi
+
     DOWNLOAD_DEFAULT_MODEL_NOW="$(prompt_boolean_with_default "Download selected model now so chat is ready immediately / Скачать выбранную модель сейчас, чтобы чат был готов сразу (example: y)" "true")"
     print_info "Selected installer models: ${SELECTED_INSTALLER_MODELS}"
     print_info "Selected default model: ${DEFAULT_MODEL}"
@@ -1906,18 +1973,20 @@ collect_configuration() {
 
         configure_local_admin_break_glass "${existing_env}"
         configure_standalone_chat_auth "${existing_env}"
+        TEST_ADMIN_USER="${STANDALONE_CHAT_USERNAME}"
+        TEST_ADMIN_PASSWORD="${STANDALONE_CHAT_PLAINTEXT_SECRET}"
 
-        REDIS_PASSWORD="$(prompt_secret_or_generate "Redis password / Пароль Redis (example: leave blank to generate)" "${existing_redis_password}" generate_hex_secret)"
+        REDIS_PASSWORD="$(reuse_or_generate_secret "${existing_redis_password}" generate_hex_secret)"
         [[ -n "${REDIS_PASSWORD}" ]] || die "Redis password cannot be empty"
 
         POSTGRES_DB="${existing_postgres_db:-corporate_ai}"
         POSTGRES_USER="${existing_postgres_user:-corporate_ai}"
-        POSTGRES_PASSWORD="$(prompt_secret_or_generate "PostgreSQL password / Пароль PostgreSQL (example: leave blank to generate)" "${existing_postgres_password}" generate_hex_secret)"
+        POSTGRES_PASSWORD="$(reuse_or_generate_secret "${existing_postgres_password}" generate_hex_secret)"
         [[ -n "${POSTGRES_DB}" ]] || die "PostgreSQL database name cannot be empty"
         [[ -n "${POSTGRES_USER}" ]] || die "PostgreSQL username cannot be empty"
         [[ -n "${POSTGRES_PASSWORD}" ]] || die "PostgreSQL password cannot be empty"
 
-        SECRET_KEY="$(prompt_secret_or_generate "JWT secret key / JWT secret: ключ подписи (example: leave blank to generate)" "${existing_secret_key}" generate_base64_secret)"
+        SECRET_KEY="$(reuse_or_generate_secret "${existing_secret_key}" generate_base64_secret)"
         [[ ${#SECRET_KEY} -ge 32 ]] || die "JWT secret key must be at least 32 characters long"
 
         prompt_default_model_selection "${existing_default_model}"
@@ -1940,7 +2009,8 @@ collect_configuration() {
         printf "  LOCAL_ADMIN_USERNAME=%s\n" "${LOCAL_ADMIN_USERNAME}"
         printf "  LOCAL_ADMIN_FORCE_ROTATE=%s\n" "${LOCAL_ADMIN_FORCE_ROTATE}"
         printf "  LOCAL_ADMIN_BOOTSTRAP_REQUIRED=%s\n" "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
-        printf "  AUTH_SMOKE_TEST=skipped\n"
+        printf "  INSTALL_TEST_USER=%s\n" "${TEST_ADMIN_USER}"
+        printf "  AUTH_SMOKE_TEST=%s\n" "$( [[ -n "${TEST_ADMIN_USER}" && -n "${TEST_ADMIN_PASSWORD}" ]] && printf "enabled" || printf "skipped" )"
         print_warning "Standalone/test chat auth is demo/test only and does not replace production AD auth"
         return
     fi

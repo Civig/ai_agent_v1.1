@@ -65,27 +65,30 @@ class InstallStandaloneChatContractTests(unittest.TestCase):
         self.assertIn("STANDALONE_CHAT_FORCE_ROTATE", install_en_text)
         self.assertIn("STANDALONE_CHAT_BOOTSTRAP_REQUIRED", security_ru_text)
 
-    def test_noninteractive_defaults_keep_standalone_chat_disabled(self):
+    def test_gpu_lab_auto_defaults_enable_standalone_chat_with_bootstrap_secret(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_install_shell(
                 temp_dir,
                 """
+                INSTALL_PROFILE="standalone_gpu_lab"
                 export INSTALL_NONINTERACTIVE=1
-                load_standalone_chat_auth_from_env "./.env.missing"
+                configure_standalone_chat_auth "./.env.missing"
                 printf 'enabled=%s\\n' "${STANDALONE_CHAT_AUTH_ENABLED}"
                 printf 'username=%s\\n' "${STANDALONE_CHAT_USERNAME}"
                 printf 'hash_present=%s\\n' "$(test -n "${STANDALONE_CHAT_PASSWORD_HASH}" && printf yes || printf no)"
                 printf 'force_rotate=%s\\n' "${STANDALONE_CHAT_FORCE_ROTATE}"
                 printf 'bootstrap_required=%s\\n' "${STANDALONE_CHAT_BOOTSTRAP_REQUIRED}"
+                printf 'secret_file_exists=%s\\n' "$(test -f "${STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE}" && printf yes || printf no)"
                 """,
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-        self.assertIn("enabled=false", result.stdout)
+        self.assertIn("enabled=true", result.stdout)
         self.assertIn("username=demo_ai", result.stdout)
-        self.assertIn("hash_present=no", result.stdout)
-        self.assertIn("force_rotate=false", result.stdout)
-        self.assertIn("bootstrap_required=false", result.stdout)
+        self.assertIn("hash_present=yes", result.stdout)
+        self.assertIn("force_rotate=true", result.stdout)
+        self.assertIn("bootstrap_required=true", result.stdout)
+        self.assertIn("secret_file_exists=yes", result.stdout)
 
     def test_explicit_standalone_chat_password_writes_only_hash_to_env(self):
         with tempfile.TemporaryDirectory() as temp_dir:

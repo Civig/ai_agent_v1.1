@@ -320,6 +320,11 @@ class Settings(BaseSettings):
     def validate_standalone_chat_username(cls, value: str) -> str:
         return normalize_simple_username(value, default="demo_ai", field_name="STANDALONE_CHAT_USERNAME")
 
+    @field_validator("INSTALL_TEST_USER")
+    @classmethod
+    def validate_install_test_user(cls, value: str) -> str:
+        return normalize_simple_username(value, default="", field_name="INSTALL_TEST_USER")
+
     @field_validator("LAB_USER_USERNAME")
     @classmethod
     def validate_lab_user_username(cls, value: str) -> str:
