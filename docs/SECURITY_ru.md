@@ -167,16 +167,32 @@ Installer по умолчанию генерирует self-signed certificates.
 - login attempts, logout, forced rotation и обычная смена пароля логируются без утечки plaintext secret или password material
 - `ADMIN_DASHBOARD_USERS` остаётся отдельным ordinary-operator gate и не заменяется local-admin fallback path
 
+### Standalone/test chat user
+
+Для isolated demo/standalone validation runtime теперь поддерживает отдельного standalone/test chat user на обычном `POST /login`, но только как явно выключаемый test-only path:
+
+- standalone/test chat user disabled by default через `STANDALONE_CHAT_AUTH_ENABLED=false`
+- username по умолчанию: `STANDALONE_CHAT_USERNAME=demo_ai`
+- этот user отделён от local break-glass dashboard admin и не расширяет dashboard access
+- в `.env` хранится только `STANDALONE_CHAT_PASSWORD_HASH`; plaintext password не используется
+- installer-managed `.env` хранит `STANDALONE_CHAT_PASSWORD_HASH` в compose-safe escaped `$$` виде, чтобы Docker Compose не искажал hash на transport boundary
+- если installer в `standalone_gpu_lab` не получает явный пароль, он может сгенерировать one-time bootstrap secret и сохранить plaintext только в root-only host file с `0600`
+- bootstrap/rotation state отражается через `STANDALONE_CHAT_FORCE_ROTATE` и `STANDALONE_CHAT_BOOTSTRAP_REQUIRED`
+- если `STANDALONE_CHAT_AUTH_ENABLED=true` и введённый username совпадает с `STANDALONE_CHAT_USERNAME`, runtime делает только локальную hash-only password verification для этого одного пользователя
+- неверный пароль даёт `401` и не переводит login в anonymous/open mode
+- все остальные usernames продолжают идти в обычный Kerberos/AD flow
+- этот standalone/test chat user предназначен только для обычного chat UI и demo/testing, а не как замена production AD auth
+
 ### Standalone GPU Lab mode
 
-Для isolated GPU validation runtime также поддерживает explicit lab profile, но только как небезопасный инженерный режим:
+Для isolated GPU validation runtime поддерживает explicit profile `standalone_gpu_lab`, но его рекомендуемый auth path теперь остаётся закрытым по умолчанию:
 
 - baseline по умолчанию остаётся enterprise: `INSTALL_PROFILE=enterprise`, `AUTH_MODE=ad`
-- lab mode требует явного набора `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open`, `LAB_OPEN_AUTH_ACK=true`
-- если `AUTH_MODE=lab_open`, но подтверждение отсутствует, startup завершается fail-fast
-- ordinary authentication в этом режиме отключена, а runtime использует synthetic lab identity
-- dashboard в `lab_open` показывает явное warning-сообщение о том, что auth disabled
-- этот режим нельзя публиковать в production или в открытый Интернет без жёсткой сетевой изоляции
+- в поддерживаемом `standalone_gpu_lab` installer по-прежнему не требует AD domain, LDAP server и Kerberos KDC и пропускает Kerberos/LDAP smoke test
+- поддерживаемый test-login path для этого профиля теперь строится вокруг `STANDALONE_CHAT_*`, а не вокруг synthetic open login
+- ordinary `/login` форма остаётся той же; standalone/test chat user работает только если оператор явно включил его и задал hash-only / bootstrap-secret credentials
+- legacy `AUTH_MODE=lab_open` contract остаётся только для explicit backward compatibility и больше не является рекомендуемым installer path
+- этот профиль и любой standalone/test chat user нельзя публиковать в production или в открытый Интернет без жёсткой сетевой изоляции
 
 ## Upload и file security baseline
 

@@ -156,6 +156,11 @@ class Settings(BaseSettings):
     LOCAL_ADMIN_PASSWORD_HASH: str = ""
     LOCAL_ADMIN_FORCE_ROTATE: bool = False
     LOCAL_ADMIN_BOOTSTRAP_REQUIRED: bool = False
+    STANDALONE_CHAT_AUTH_ENABLED: bool = False
+    STANDALONE_CHAT_USERNAME: str = "demo_ai"
+    STANDALONE_CHAT_PASSWORD_HASH: str = ""
+    STANDALONE_CHAT_FORCE_ROTATE: bool = False
+    STANDALONE_CHAT_BOOTSTRAP_REQUIRED: bool = False
     MODEL_POLICY_DIR: str = "model_policies"
     MODEL_REGISTRY_PATH: str = "models/catalog.json"
     MODEL_ACCESS_CODING_GROUPS: str = ""
@@ -310,6 +315,11 @@ class Settings(BaseSettings):
     def validate_local_admin_username(cls, value: str) -> str:
         return normalize_simple_username(value, default="admin_ai", field_name="LOCAL_ADMIN_USERNAME")
 
+    @field_validator("STANDALONE_CHAT_USERNAME")
+    @classmethod
+    def validate_standalone_chat_username(cls, value: str) -> str:
+        return normalize_simple_username(value, default="demo_ai", field_name="STANDALONE_CHAT_USERNAME")
+
     @field_validator("LAB_USER_USERNAME")
     @classmethod
     def validate_lab_user_username(cls, value: str) -> str:
@@ -354,10 +364,10 @@ class Settings(BaseSettings):
     def validate_auth_profile_contract(self) -> "Settings":
         if self.INSTALL_PROFILE == INSTALL_PROFILE_ENTERPRISE and self.AUTH_MODE != AUTH_MODE_AD:
             raise ValueError("INSTALL_PROFILE=enterprise requires AUTH_MODE=ad")
-        if self.INSTALL_PROFILE == INSTALL_PROFILE_STANDALONE_GPU_LAB and self.AUTH_MODE != AUTH_MODE_LAB_OPEN:
-            raise ValueError("INSTALL_PROFILE=standalone_gpu_lab requires AUTH_MODE=lab_open")
         if self.AUTH_MODE == AUTH_MODE_LAB_OPEN and not self.LAB_OPEN_AUTH_ACK:
             raise ValueError("AUTH_MODE=lab_open requires LAB_OPEN_AUTH_ACK=true")
+        if self.STANDALONE_CHAT_AUTH_ENABLED and not self.STANDALONE_CHAT_PASSWORD_HASH.strip():
+            raise ValueError("STANDALONE_CHAT_PASSWORD_HASH must be set when standalone chat auth is enabled")
 
         canonical_local_part = self.LAB_USER_CANONICAL_PRINCIPAL.split("@", 1)[0]
         normalized_local_part = normalize_simple_username(

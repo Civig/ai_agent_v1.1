@@ -53,11 +53,12 @@ class InstallProfileLabModeTests(unittest.TestCase):
 
         self.assertIn("INSTALL_PROFILE=enterprise", env_text)
         self.assertIn("AUTH_MODE=ad", env_text)
+        self.assertIn("STANDALONE_CHAT_AUTH_ENABLED=false", env_text)
+        self.assertIn("STANDALONE_CHAT_USERNAME=demo_ai", env_text)
+        self.assertIn("STANDALONE_CHAT_PASSWORD_HASH=", env_text)
         self.assertIn("LAB_OPEN_AUTH_ACK=false", env_text)
-        self.assertIn("LAB_USER_USERNAME=lab_user", env_text)
-        self.assertIn("LAB_USER_CANONICAL_PRINCIPAL=lab_user@LOCAL.LAB", env_text)
 
-    def test_profile_helper_maps_lab_profile_to_lab_open_and_skips_directory_requirements(self):
+    def test_profile_helper_maps_lab_profile_to_ad_and_skips_directory_requirements(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_install_shell(
                 temp_dir,
@@ -72,10 +73,10 @@ class InstallProfileLabModeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("enterprise_auth=ad", result.stdout)
         self.assertIn("enterprise_directory=yes", result.stdout)
-        self.assertIn("lab_auth=lab_open", result.stdout)
+        self.assertIn("lab_auth=ad", result.stdout)
         self.assertIn("lab_directory=no", result.stdout)
 
-    def test_select_install_profile_noninteractive_sets_lab_ack(self):
+    def test_select_install_profile_noninteractive_keeps_ad_flow_and_disabled_lab_ack(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_install_shell(
                 temp_dir,
@@ -91,8 +92,8 @@ class InstallProfileLabModeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("profile=standalone_gpu_lab", result.stdout)
-        self.assertIn("auth=lab_open", result.stdout)
-        self.assertIn("ack=true", result.stdout)
+        self.assertIn("auth=ad", result.stdout)
+        self.assertIn("ack=false", result.stdout)
 
     def test_write_env_file_writes_standalone_gpu_lab_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -101,9 +102,7 @@ class InstallProfileLabModeTests(unittest.TestCase):
                 """
                 INSTALL_PROFILE="standalone_gpu_lab"
                 AUTH_MODE="$(auth_mode_for_install_profile "${INSTALL_PROFILE}")"
-                LAB_OPEN_AUTH_ACK="true"
-                LAB_USER_USERNAME="lab_user"
-                LAB_USER_CANONICAL_PRINCIPAL="lab_user@LOCAL.LAB"
+                LAB_OPEN_AUTH_ACK="false"
                 DOMAIN="local.lab"
                 LDAP_SERVER_URL="ldap://local.lab"
                 LDAP_GSSAPI_SERVICE_HOST=""
@@ -120,6 +119,11 @@ class InstallProfileLabModeTests(unittest.TestCase):
                 LOCAL_ADMIN_PASSWORD_HASH=""
                 LOCAL_ADMIN_FORCE_ROTATE="false"
                 LOCAL_ADMIN_BOOTSTRAP_REQUIRED="false"
+                STANDALONE_CHAT_AUTH_ENABLED="false"
+                STANDALONE_CHAT_USERNAME="demo_ai"
+                STANDALONE_CHAT_PASSWORD_HASH=""
+                STANDALONE_CHAT_FORCE_ROTATE="false"
+                STANDALONE_CHAT_BOOTSTRAP_REQUIRED="false"
                 MODEL_ACCESS_CODING_GROUPS=""
                 MODEL_ACCESS_ADMIN_GROUPS=""
                 DEFAULT_MODEL="phi3:mini"
@@ -138,14 +142,86 @@ class InstallProfileLabModeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         env_text = result.stdout
         self.assertEqual(self._get_env_value(env_text, "INSTALL_PROFILE"), "standalone_gpu_lab")
-        self.assertEqual(self._get_env_value(env_text, "AUTH_MODE"), "lab_open")
-        self.assertEqual(self._get_env_value(env_text, "LAB_OPEN_AUTH_ACK"), "true")
-        self.assertEqual(self._get_env_value(env_text, "LAB_USER_USERNAME"), "lab_user")
-        self.assertEqual(self._get_env_value(env_text, "LAB_USER_CANONICAL_PRINCIPAL"), "lab_user@LOCAL.LAB")
+        self.assertEqual(self._get_env_value(env_text, "AUTH_MODE"), "ad")
+        self.assertEqual(self._get_env_value(env_text, "LAB_OPEN_AUTH_ACK"), "false")
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_AUTH_ENABLED"), "false")
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_USERNAME"), "demo_ai")
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_PASSWORD_HASH"), "")
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_FORCE_ROTATE"), "false")
+        self.assertEqual(self._get_env_value(env_text, "STANDALONE_CHAT_BOOTSTRAP_REQUIRED"), "false")
         self.assertEqual(self._get_env_value(env_text, "SSO_ENABLED"), "false")
         self.assertEqual(self._get_env_value(env_text, "TRUSTED_AUTH_PROXY_ENABLED"), "false")
         self.assertEqual(self._get_env_value(env_text, "GPU_ENABLED"), "true")
         self.assertEqual(self._get_env_value(env_text, "INSTALL_TEST_USER"), "")
+
+    def test_gpu_mode_override_adds_ollama_gpu_runtime(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_install_shell(
+                temp_dir,
+                """
+                SELECTED_INSTALL_MODE="gpu"
+                AD_SERVER_IP_OVERRIDE=""
+                LDAP_SERVER_HOST="dc01.example.local"
+                KERBEROS_KDC="dc01.example.local"
+                write_compose_override_if_needed
+                cat docker-compose.override.yml
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        override_text = result.stdout
+        self.assertIn("# Managed by Corporate AI Assistant install.sh", override_text)
+        self.assertIn("  ollama:", override_text)
+        self.assertIn("    gpus: all", override_text)
+        self.assertIn("      NVIDIA_VISIBLE_DEVICES: all", override_text)
+        self.assertIn("      NVIDIA_DRIVER_CAPABILITIES: compute,utility", override_text)
+        self.assertNotIn("extra_hosts", override_text)
+
+    def test_gpu_mode_override_combines_ollama_gpu_and_ad_host_overrides(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_install_shell(
+                temp_dir,
+                """
+                SELECTED_INSTALL_MODE="gpu"
+                AD_SERVER_IP_OVERRIDE="10.10.10.10"
+                LDAP_SERVER_HOST="dc01.example.local"
+                KERBEROS_KDC="kdc01.example.local"
+                write_compose_override_if_needed
+                cat docker-compose.override.yml
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        override_text = result.stdout
+        self.assertIn("  ollama:", override_text)
+        self.assertIn("    gpus: all", override_text)
+        self.assertIn("  app:", override_text)
+        self.assertIn("  worker-gpu:", override_text)
+        self.assertIn("      dc01: '10.10.10.10'", override_text)
+        self.assertIn("      dc01.example.local: '10.10.10.10'", override_text)
+        self.assertIn("      kdc01: '10.10.10.10'", override_text)
+        self.assertIn("      kdc01.example.local: '10.10.10.10'", override_text)
+
+    def test_cpu_mode_without_ad_override_does_not_write_installer_override(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_install_shell(
+                temp_dir,
+                """
+                SELECTED_INSTALL_MODE="cpu"
+                AD_SERVER_IP_OVERRIDE=""
+                LDAP_SERVER_HOST="dc01.example.local"
+                KERBEROS_KDC="dc01.example.local"
+                write_compose_override_if_needed
+                if [[ -f docker-compose.override.yml ]]; then
+                    printf 'override_present=yes\\n'
+                else
+                    printf 'override_present=no\\n'
+                fi
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("override_present=no", result.stdout)
 
     def test_install_script_keeps_enterprise_ad_prompts_and_mentions_lab_profile(self):
         script_text = Path(__file__).resolve().parents[1].joinpath("install.sh").read_text(encoding="utf-8")

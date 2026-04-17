@@ -28,6 +28,7 @@ readonly HOST_BACKUP_DIR
 readonly HOST_DOCKER_REPO_BACKUP
 readonly INSTALL_USER
 readonly LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE="${HOST_STATE_DIR}/local-admin-bootstrap.secret"
+readonly STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE="${HOST_STATE_DIR}/standalone-chat-bootstrap.secret"
 
 MANAGED_OVERRIDE_MARKER="# Managed by Corporate AI Assistant install.sh"
 MANAGED_OVERRIDE_FILE="${ROOT_DIR}/docker-compose.override.yml"
@@ -73,6 +74,12 @@ LOCAL_ADMIN_PASSWORD_HASH=""
 LOCAL_ADMIN_FORCE_ROTATE="false"
 LOCAL_ADMIN_BOOTSTRAP_REQUIRED="false"
 LOCAL_ADMIN_PLAINTEXT_SECRET=""
+STANDALONE_CHAT_AUTH_ENABLED="false"
+STANDALONE_CHAT_USERNAME="demo_ai"
+STANDALONE_CHAT_PASSWORD_HASH=""
+STANDALONE_CHAT_FORCE_ROTATE="false"
+STANDALONE_CHAT_BOOTSTRAP_REQUIRED="false"
+STANDALONE_CHAT_PLAINTEXT_SECRET=""
 REDIS_PASSWORD=""
 SECRET_KEY=""
 POSTGRES_DB="corporate_ai"
@@ -652,7 +659,7 @@ auth_mode_for_install_profile() {
             printf "ad"
             ;;
         standalone_gpu_lab)
-            printf "lab_open"
+            printf "ad"
             ;;
         *)
             return 1
@@ -681,7 +688,7 @@ select_install_profile() {
     else
         print_header "Installation Profile"
         print_info "1. Enterprise install: validated AD / Kerberos / LDAP baseline"
-        print_warning "2. Standalone GPU Lab install: disables ordinary auth for isolated validation only"
+        print_warning "2. Standalone GPU Lab install: supports optional standalone test-chat auth for isolated validation"
         read -r -p "Installation profile / Профиль установки [default: ${default_choice}] (examples: 1 or 2): " input
         input="$(trim_whitespace "${input}")"
         case "${input:-${default_choice}}" in
@@ -698,11 +705,9 @@ select_install_profile() {
     fi
 
     AUTH_MODE="$(auth_mode_for_install_profile "${INSTALL_PROFILE}")" || die "Unsupported installation profile contract"
+    LAB_OPEN_AUTH_ACK="false"
     if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
-        LAB_OPEN_AUTH_ACK="true"
-        print_warning "Selected standalone_gpu_lab: ordinary authentication will be disabled for isolated GPU validation only"
-    else
-        LAB_OPEN_AUTH_ACK="false"
+        print_warning "Selected standalone_gpu_lab: standalone/test chat auth is optional and remains disabled by default"
     fi
 
     print_info "Selected installation profile: ${INSTALL_PROFILE}"
@@ -1144,9 +1149,11 @@ get_env_value() {
     local value=""
     [[ -f "${file}" ]] || return 1
     value="$(grep -E "^${key}=" "${file}" | tail -n 1 | cut -d'=' -f2- || true)"
-    if [[ "${key}" == "LOCAL_ADMIN_PASSWORD_HASH" ]]; then
-        value="${value//\$\$/\$}"
-    fi
+    case "${key}" in
+        LOCAL_ADMIN_PASSWORD_HASH|STANDALONE_CHAT_PASSWORD_HASH)
+            value="${value//\$\$/\$}"
+            ;;
+    esac
     printf "%s" "${value}"
 }
 
@@ -1232,9 +1239,11 @@ append_env_line() {
     local key="$2"
     local value="$3"
     validate_env_value "${key}" "${value}"
-    if [[ "${key}" == "LOCAL_ADMIN_PASSWORD_HASH" ]]; then
-        value="${value//\$/\$\$}"
-    fi
+    case "${key}" in
+        LOCAL_ADMIN_PASSWORD_HASH|STANDALONE_CHAT_PASSWORD_HASH)
+            value="${value//\$/\$\$}"
+            ;;
+    esac
     printf '%s=%s\n' "${key}" "${value}" >>"${file}"
 }
 
@@ -1259,6 +1268,18 @@ normalize_local_admin_username() {
         return
     fi
     [[ "${value}" =~ ^[a-z0-9._-]+$ ]] || die "Local admin username may contain only letters, digits, dot, underscore, and dash"
+    printf "%s" "${value}"
+}
+
+normalize_standalone_chat_username() {
+    local value="$1"
+    value="$(trim_whitespace "${value}")"
+    value="${value,,}"
+    if [[ -z "${value}" ]]; then
+        printf "demo_ai"
+        return
+    fi
+    [[ "${value}" =~ ^[a-z0-9._-]+$ ]] || die "Standalone chat username may contain only letters, digits, dot, underscore, and dash"
     printf "%s" "${value}"
 }
 
@@ -1287,6 +1308,12 @@ print(
 PY
 }
 
+build_standalone_chat_password_hash() {
+    local password="$1"
+    [[ -n "${password}" ]] || die "Standalone chat password cannot be empty"
+    build_local_admin_password_hash "${password}"
+}
+
 print_sensitive_to_tty() {
     local message="$1"
     if [[ -w /dev/tty ]]; then
@@ -1296,6 +1323,10 @@ print_sensitive_to_tty() {
 
 remove_local_admin_bootstrap_secret_file() {
     as_root rm -f "${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}" >/dev/null 2>&1 || true
+}
+
+remove_standalone_chat_bootstrap_secret_file() {
+    as_root rm -f "${STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE}" >/dev/null 2>&1 || true
 }
 
 write_local_admin_bootstrap_secret_file() {
@@ -1314,6 +1345,25 @@ EOF
     as_root install -m 0700 -d "${HOST_STATE_DIR}"
     as_root cp "${temp_file}" "${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}"
     as_root chmod 600 "${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}"
+    rm -f "${temp_file}"
+}
+
+write_standalone_chat_bootstrap_secret_file() {
+    local secret_value="$1"
+    local temp_file
+
+    [[ -n "${secret_value}" ]] || return 0
+    temp_file="$(mktemp)"
+    chmod 600 "${temp_file}"
+    cat >"${temp_file}" <<EOF
+Corporate AI Assistant standalone test chat bootstrap secret
+Username: ${STANDALONE_CHAT_USERNAME}
+Generated at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+Secret: ${secret_value}
+EOF
+    as_root install -m 0700 -d "${HOST_STATE_DIR}"
+    as_root cp "${temp_file}" "${STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE}"
+    as_root chmod 600 "${STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE}"
     rm -f "${temp_file}"
 }
 
@@ -1385,6 +1435,90 @@ configure_local_admin_break_glass() {
     print_sensitive_to_tty "  username: ${LOCAL_ADMIN_USERNAME}"
     print_sensitive_to_tty "  secret: ${LOCAL_ADMIN_PLAINTEXT_SECRET}"
     print_sensitive_to_tty "Rotate it on first login before dashboard access."
+}
+
+configure_standalone_chat_auth() {
+    local existing_env="$1"
+    local default_enabled default_username existing_hash existing_force_rotate existing_bootstrap_required
+    local enable_standalone_chat password_input=""
+
+    load_standalone_chat_auth_from_env "${existing_env}"
+
+    if ! is_interactive_shell; then
+        return
+    fi
+
+    default_enabled="${STANDALONE_CHAT_AUTH_ENABLED}"
+    default_username="${STANDALONE_CHAT_USERNAME}"
+    existing_hash="${STANDALONE_CHAT_PASSWORD_HASH}"
+    existing_force_rotate="${STANDALONE_CHAT_FORCE_ROTATE}"
+    existing_bootstrap_required="${STANDALONE_CHAT_BOOTSTRAP_REQUIRED}"
+
+    enable_standalone_chat="$(prompt_boolean_with_default "Enable standalone/test chat login for demo validation only / Включить standalone/test chat login только для demo-проверки (example: n)" "${default_enabled}")"
+    STANDALONE_CHAT_AUTH_ENABLED="${enable_standalone_chat}"
+    STANDALONE_CHAT_USERNAME="$(normalize_standalone_chat_username "$(prompt_with_default "Standalone/test chat username / Username standalone/test chat пользователя (example: demo_ai)" "${default_username}")")"
+    STANDALONE_CHAT_PLAINTEXT_SECRET=""
+
+    if [[ "${STANDALONE_CHAT_AUTH_ENABLED}" != "true" ]]; then
+        STANDALONE_CHAT_PASSWORD_HASH=""
+        STANDALONE_CHAT_FORCE_ROTATE="false"
+        STANDALONE_CHAT_BOOTSTRAP_REQUIRED="false"
+        remove_standalone_chat_bootstrap_secret_file
+        print_info "Standalone/test chat login remains disabled"
+        return
+    fi
+
+    read -r -s -p "Standalone/test chat password / Пароль standalone/test chat пользователя (leave blank to ${existing_hash:+keep existing or }generate one-time bootstrap secret): " password_input
+    printf "\n" >&2
+
+    if [[ -n "${password_input}" ]]; then
+        STANDALONE_CHAT_PASSWORD_HASH="$(build_standalone_chat_password_hash "${password_input}")"
+        STANDALONE_CHAT_FORCE_ROTATE="false"
+        STANDALONE_CHAT_BOOTSTRAP_REQUIRED="false"
+        STANDALONE_CHAT_PLAINTEXT_SECRET=""
+        remove_standalone_chat_bootstrap_secret_file
+        print_info "Standalone/test chat login configured with an explicit operator-supplied password"
+        return
+    fi
+
+    if [[ -n "${existing_hash}" ]]; then
+        STANDALONE_CHAT_PASSWORD_HASH="${existing_hash}"
+        STANDALONE_CHAT_FORCE_ROTATE="$(normalize_boolean_input "${existing_force_rotate}")"
+        STANDALONE_CHAT_BOOTSTRAP_REQUIRED="$(normalize_boolean_input "${existing_bootstrap_required}")"
+        STANDALONE_CHAT_PLAINTEXT_SECRET=""
+        print_info "Keeping existing standalone/test chat credential state"
+        return
+    fi
+
+    STANDALONE_CHAT_PLAINTEXT_SECRET="$(generate_urlsafe_secret)"
+    STANDALONE_CHAT_PASSWORD_HASH="$(build_standalone_chat_password_hash "${STANDALONE_CHAT_PLAINTEXT_SECRET}")"
+    STANDALONE_CHAT_FORCE_ROTATE="true"
+    STANDALONE_CHAT_BOOTSTRAP_REQUIRED="true"
+    write_standalone_chat_bootstrap_secret_file "${STANDALONE_CHAT_PLAINTEXT_SECRET}"
+    print_info "A one-time standalone/test chat bootstrap secret was generated and stored at ${STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE}"
+    print_sensitive_to_tty ""
+    print_sensitive_to_tty "Standalone/test chat bootstrap secret (shown once, not logged):"
+    print_sensitive_to_tty "  username: ${STANDALONE_CHAT_USERNAME}"
+    print_sensitive_to_tty "  secret: ${STANDALONE_CHAT_PLAINTEXT_SECRET}"
+    print_sensitive_to_tty "Rotate it on first login before chat access."
+}
+
+load_standalone_chat_auth_from_env() {
+    local existing_env="$1"
+    local default_enabled default_username existing_hash existing_force_rotate existing_bootstrap_required
+
+    default_enabled="$(get_env_value "${existing_env}" "STANDALONE_CHAT_AUTH_ENABLED" || get_env_value "${ROOT_DIR}/.env.example" "STANDALONE_CHAT_AUTH_ENABLED" || printf "false")"
+    default_username="$(get_env_value "${existing_env}" "STANDALONE_CHAT_USERNAME" || get_env_value "${ROOT_DIR}/.env.example" "STANDALONE_CHAT_USERNAME" || printf "demo_ai")"
+    existing_hash="$(get_env_value "${existing_env}" "STANDALONE_CHAT_PASSWORD_HASH" || true)"
+    existing_force_rotate="$(get_env_value "${existing_env}" "STANDALONE_CHAT_FORCE_ROTATE" || get_env_value "${ROOT_DIR}/.env.example" "STANDALONE_CHAT_FORCE_ROTATE" || printf "false")"
+    existing_bootstrap_required="$(get_env_value "${existing_env}" "STANDALONE_CHAT_BOOTSTRAP_REQUIRED" || get_env_value "${ROOT_DIR}/.env.example" "STANDALONE_CHAT_BOOTSTRAP_REQUIRED" || printf "false")"
+
+    STANDALONE_CHAT_AUTH_ENABLED="$(normalize_boolean_input "${default_enabled}")"
+    STANDALONE_CHAT_USERNAME="$(normalize_standalone_chat_username "${default_username}")"
+    STANDALONE_CHAT_PASSWORD_HASH="${existing_hash}"
+    STANDALONE_CHAT_FORCE_ROTATE="$(normalize_boolean_input "${existing_force_rotate}")"
+    STANDALONE_CHAT_BOOTSTRAP_REQUIRED="$(normalize_boolean_input "${existing_bootstrap_required}")"
+    STANDALONE_CHAT_PLAINTEXT_SECRET=""
 }
 
 derive_base_dn() {
@@ -1722,7 +1856,6 @@ collect_configuration() {
     local example_env="${ROOT_DIR}/.env.example"
     local default_domain default_ldap_host default_kdc_host default_base_dn default_admin_user default_ip_override
     local default_coding_groups default_admin_groups default_sso_enabled default_sso_principal default_sso_keytab
-    local default_lab_user_username
     local existing_redis_password existing_secret_key existing_default_model
     local existing_postgres_db existing_postgres_user existing_postgres_password existing_ldap_gssapi_host
 
@@ -1752,9 +1885,6 @@ collect_configuration() {
     existing_postgres_user="$(get_env_value "${existing_env}" "POSTGRES_USER" || get_env_value "${example_env}" "POSTGRES_USER" || true)"
     existing_postgres_password="$(get_env_value "${existing_env}" "POSTGRES_PASSWORD" || true)"
     existing_ldap_gssapi_host="$(get_env_value "${existing_env}" "LDAP_GSSAPI_SERVICE_HOST" || true)"
-    default_lab_user_username="$(get_env_value "${existing_env}" "LAB_USER_USERNAME" || get_env_value "${example_env}" "LAB_USER_USERNAME" || true)"
-    default_lab_user_username="$(normalize_local_admin_username "${default_lab_user_username:-lab_user}")"
-
     if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
         DOMAIN="local.lab"
         LDAP_SERVER_HOST="local.lab"
@@ -1772,11 +1902,10 @@ collect_configuration() {
         SSO_ENABLED="false"
         SSO_SERVICE_PRINCIPAL=""
         SSO_KEYTAB_PATH="/etc/corporate-ai-sso/http.keytab"
-        LAB_OPEN_AUTH_ACK="true"
-        LAB_USER_USERNAME="${default_lab_user_username}"
-        LAB_USER_CANONICAL_PRINCIPAL="${LAB_USER_USERNAME}@LOCAL.LAB"
+        LAB_OPEN_AUTH_ACK="false"
 
         configure_local_admin_break_glass "${existing_env}"
+        configure_standalone_chat_auth "${existing_env}"
 
         REDIS_PASSWORD="$(prompt_secret_or_generate "Redis password / Пароль Redis (example: leave blank to generate)" "${existing_redis_password}" generate_hex_secret)"
         [[ -n "${REDIS_PASSWORD}" ]] || die "Redis password cannot be empty"
@@ -1796,9 +1925,10 @@ collect_configuration() {
         print_info "Configuration summary"
         printf "  INSTALL_PROFILE=%s\n" "${INSTALL_PROFILE}"
         printf "  AUTH_MODE=%s\n" "${AUTH_MODE}"
-        printf "  LAB_OPEN_AUTH_ACK=%s\n" "${LAB_OPEN_AUTH_ACK}"
-        printf "  LAB_USER_USERNAME=%s\n" "${LAB_USER_USERNAME}"
-        printf "  LAB_USER_CANONICAL_PRINCIPAL=%s\n" "${LAB_USER_CANONICAL_PRINCIPAL}"
+        printf "  STANDALONE_CHAT_AUTH_ENABLED=%s\n" "${STANDALONE_CHAT_AUTH_ENABLED}"
+        printf "  STANDALONE_CHAT_USERNAME=%s\n" "${STANDALONE_CHAT_USERNAME}"
+        printf "  STANDALONE_CHAT_FORCE_ROTATE=%s\n" "${STANDALONE_CHAT_FORCE_ROTATE}"
+        printf "  STANDALONE_CHAT_BOOTSTRAP_REQUIRED=%s\n" "${STANDALONE_CHAT_BOOTSTRAP_REQUIRED}"
         printf "  SELECTED_INSTALLER_MODELS=%s\n" "${SELECTED_INSTALLER_MODELS:-${DEFAULT_MODEL}}"
         printf "  DEFAULT_MODEL=%s\n" "${DEFAULT_MODEL}"
         printf "  SECONDARY_SELECTED_MODELS=%s\n" "${SELECTED_SECONDARY_MODELS:-<none>}"
@@ -1811,7 +1941,7 @@ collect_configuration() {
         printf "  LOCAL_ADMIN_FORCE_ROTATE=%s\n" "${LOCAL_ADMIN_FORCE_ROTATE}"
         printf "  LOCAL_ADMIN_BOOTSTRAP_REQUIRED=%s\n" "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
         printf "  AUTH_SMOKE_TEST=skipped\n"
-        print_warning "Authentication disabled for lab validation only"
+        print_warning "Standalone/test chat auth is demo/test only and does not replace production AD auth"
         return
     fi
 
@@ -1876,6 +2006,7 @@ collect_configuration() {
     fi
 
     configure_local_admin_break_glass "${existing_env}"
+    load_standalone_chat_auth_from_env "${existing_env}"
 
     REDIS_PASSWORD="$(prompt_secret_or_generate "Redis password / Пароль Redis (example: leave blank to generate)" "${existing_redis_password}" generate_hex_secret)"
     [[ -n "${REDIS_PASSWORD}" ]] || die "Redis password cannot be empty"
@@ -1921,6 +2052,10 @@ collect_configuration() {
     printf "  LOCAL_ADMIN_USERNAME=%s\n" "${LOCAL_ADMIN_USERNAME}"
     printf "  LOCAL_ADMIN_FORCE_ROTATE=%s\n" "${LOCAL_ADMIN_FORCE_ROTATE}"
     printf "  LOCAL_ADMIN_BOOTSTRAP_REQUIRED=%s\n" "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
+    printf "  STANDALONE_CHAT_AUTH_ENABLED=%s\n" "${STANDALONE_CHAT_AUTH_ENABLED}"
+    printf "  STANDALONE_CHAT_USERNAME=%s\n" "${STANDALONE_CHAT_USERNAME}"
+    printf "  STANDALONE_CHAT_FORCE_ROTATE=%s\n" "${STANDALONE_CHAT_FORCE_ROTATE}"
+    printf "  STANDALONE_CHAT_BOOTSTRAP_REQUIRED=%s\n" "${STANDALONE_CHAT_BOOTSTRAP_REQUIRED}"
     if [[ "${SSO_ENABLED}" == "true" ]]; then
         printf "  SSO_SERVICE_PRINCIPAL=%s\n" "${SSO_SERVICE_PRINCIPAL}"
         printf "  SSO_KEYTAB_PATH=%s\n" "${SSO_KEYTAB_PATH}"
@@ -1980,6 +2115,8 @@ write_env_file() {
     local temp_file preserved_file regex
     local gpu_enabled_value redis_url_value parser_stage_value parser_public_cutover_value
     local install_profile_value auth_mode_value lab_open_auth_ack_value lab_user_username_value lab_user_canonical_principal_value
+    local standalone_chat_auth_enabled_value standalone_chat_username_value standalone_chat_password_hash_value
+    local standalone_chat_force_rotate_value standalone_chat_bootstrap_required_value
     local persistent_db_url_value trusted_proxy_source_cidrs_value forwarded_allow_ips_value admin_dashboard_users_value
     local ollama_pull_timeout_value
     local redis_image_value postgres_image_value ollama_image_value nginx_image_value
@@ -1996,6 +2133,8 @@ write_env_file() {
         COOKIE_SECURE COOKIE_SAMESITE COOKIE_DOMAIN TRUSTED_AUTH_PROXY_ENABLED
         SSO_ENABLED FORWARDED_ALLOW_IPS TRUSTED_PROXY_SOURCE_CIDRS SSO_LOGIN_PATH SSO_SERVICE_PRINCIPAL SSO_KEYTAB_PATH
         LOCAL_ADMIN_ENABLED LOCAL_ADMIN_USERNAME LOCAL_ADMIN_PASSWORD_HASH LOCAL_ADMIN_FORCE_ROTATE LOCAL_ADMIN_BOOTSTRAP_REQUIRED
+        STANDALONE_CHAT_AUTH_ENABLED STANDALONE_CHAT_USERNAME STANDALONE_CHAT_PASSWORD_HASH
+        STANDALONE_CHAT_FORCE_ROTATE STANDALONE_CHAT_BOOTSTRAP_REQUIRED
         MODEL_POLICY_DIR MODEL_ACCESS_CODING_GROUPS MODEL_ACCESS_ADMIN_GROUPS ADMIN_DASHBOARD_USERS
         REDIS_IMAGE POSTGRES_IMAGE OLLAMA_IMAGE NGINX_IMAGE
         OLLAMA_URL DEFAULT_MODEL OLLAMA_PULL_TIMEOUT_SECONDS AUTO_START_OLLAMA GPU_ENABLED
@@ -2018,6 +2157,11 @@ write_env_file() {
     lab_open_auth_ack_value="$(normalize_boolean_input "${LAB_OPEN_AUTH_ACK:-false}")"
     lab_user_username_value="${LAB_USER_USERNAME}"
     lab_user_canonical_principal_value="${LAB_USER_CANONICAL_PRINCIPAL}"
+    standalone_chat_auth_enabled_value="$(normalize_boolean_input "${STANDALONE_CHAT_AUTH_ENABLED:-false}")"
+    standalone_chat_username_value="${STANDALONE_CHAT_USERNAME}"
+    standalone_chat_password_hash_value="${STANDALONE_CHAT_PASSWORD_HASH}"
+    standalone_chat_force_rotate_value="$(normalize_boolean_input "${STANDALONE_CHAT_FORCE_ROTATE:-false}")"
+    standalone_chat_bootstrap_required_value="$(normalize_boolean_input "${STANDALONE_CHAT_BOOTSTRAP_REQUIRED:-false}")"
     redis_url_value="redis://:${REDIS_PASSWORD}@redis:6379/0"
     parser_stage_value="$(get_env_value "${env_file}" "ENABLE_PARSER_STAGE" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_STAGE" || true)"
     parser_public_cutover_value="$(get_env_value "${env_file}" "ENABLE_PARSER_PUBLIC_CUTOVER" || get_env_value "${ROOT_DIR}/.env.example" "ENABLE_PARSER_PUBLIC_CUTOVER" || true)"
@@ -2102,6 +2246,11 @@ write_env_file() {
     append_env_line "${temp_file}" "LOCAL_ADMIN_PASSWORD_HASH" "${LOCAL_ADMIN_PASSWORD_HASH}"
     append_env_line "${temp_file}" "LOCAL_ADMIN_FORCE_ROTATE" "${LOCAL_ADMIN_FORCE_ROTATE}"
     append_env_line "${temp_file}" "LOCAL_ADMIN_BOOTSTRAP_REQUIRED" "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}"
+    append_env_line "${temp_file}" "STANDALONE_CHAT_AUTH_ENABLED" "${standalone_chat_auth_enabled_value}"
+    append_env_line "${temp_file}" "STANDALONE_CHAT_USERNAME" "${standalone_chat_username_value}"
+    append_env_line "${temp_file}" "STANDALONE_CHAT_PASSWORD_HASH" "${standalone_chat_password_hash_value}"
+    append_env_line "${temp_file}" "STANDALONE_CHAT_FORCE_ROTATE" "${standalone_chat_force_rotate_value}"
+    append_env_line "${temp_file}" "STANDALONE_CHAT_BOOTSTRAP_REQUIRED" "${standalone_chat_bootstrap_required_value}"
     append_env_line "${temp_file}" "MODEL_POLICY_DIR" "model_policies"
     append_env_line "${temp_file}" "MODEL_ACCESS_CODING_GROUPS" "${MODEL_ACCESS_CODING_GROUPS}"
     append_env_line "${temp_file}" "MODEL_ACCESS_ADMIN_GROUPS" "${MODEL_ACCESS_ADMIN_GROUPS}"
@@ -2209,54 +2358,70 @@ write_compose_override_if_needed() {
     local existing_override="${MANAGED_OVERRIDE_FILE}"
     local candidate_hosts=()
     local host_entries=()
+    local gpu_override_enabled="false"
     local short_ldap="${LDAP_SERVER_HOST%%.*}"
     local short_kdc="${KERBEROS_KDC%%.*}"
     local temp_file
     local host_name
     local -A seen_hosts=()
 
-    if [[ -z "${AD_SERVER_IP_OVERRIDE}" ]]; then
+    if [[ "${SELECTED_INSTALL_MODE:-cpu}" == "gpu" ]]; then
+        gpu_override_enabled="true"
+    fi
+
+    if [[ -z "${AD_SERVER_IP_OVERRIDE}" && "${gpu_override_enabled}" != "true" ]]; then
         if [[ -f "${existing_override}" ]] && grep -qF "${MANAGED_OVERRIDE_MARKER}" "${existing_override}"; then
             rm -f "${existing_override}"
-            print_info "Removed installer-managed docker-compose.override.yml because no host override is required"
+            print_info "Removed installer-managed docker-compose.override.yml because no host or GPU override is required"
         fi
         return
     fi
 
     if [[ -f "${existing_override}" ]] && ! grep -qF "${MANAGED_OVERRIDE_MARKER}" "${existing_override}"; then
-        die "Existing docker-compose.override.yml is not installer-managed. Resolve it manually before using AD host overrides."
+        die "Existing docker-compose.override.yml is not installer-managed. Resolve it manually before using installer-managed AD or GPU overrides."
     fi
 
-    candidate_hosts+=("${short_ldap}" "${LDAP_SERVER_HOST}")
-    if [[ "${KERBEROS_KDC}" != "${LDAP_SERVER_HOST}" ]]; then
-        candidate_hosts+=("${short_kdc}" "${KERBEROS_KDC}")
-    fi
-    for host_name in "${candidate_hosts[@]}"; do
-        if [[ -n "${host_name}" && -z "${seen_hosts["${host_name}"]+x}" ]]; then
-            seen_hosts["${host_name}"]=1
-            host_entries+=("${host_name}:${AD_SERVER_IP_OVERRIDE}")
+    if [[ -n "${AD_SERVER_IP_OVERRIDE}" ]]; then
+        candidate_hosts+=("${short_ldap}" "${LDAP_SERVER_HOST}")
+        if [[ "${KERBEROS_KDC}" != "${LDAP_SERVER_HOST}" ]]; then
+            candidate_hosts+=("${short_kdc}" "${KERBEROS_KDC}")
         fi
-    done
+        for host_name in "${candidate_hosts[@]}"; do
+            if [[ -n "${host_name}" && -z "${seen_hosts["${host_name}"]+x}" ]]; then
+                seen_hosts["${host_name}"]=1
+                host_entries+=("${host_name}:${AD_SERVER_IP_OVERRIDE}")
+            fi
+        done
+    fi
 
     temp_file="$(mktemp)"
     {
         printf "%s\n" "${MANAGED_OVERRIDE_MARKER}"
         printf "services:\n"
-        for service in app scheduler worker-chat worker-siem worker-batch worker-gpu; do
-            printf "  %s:\n" "${service}"
-            printf "    extra_hosts:\n"
-            local entry host_name host_ip
-            for entry in "${host_entries[@]}"; do
-                host_name="${entry%%:*}"
-                host_ip="${entry#*:}"
-                printf "      %s: '%s'\n" "${host_name}" "${host_ip}"
+        if [[ "${gpu_override_enabled}" == "true" ]]; then
+            printf "  ollama:\n"
+            printf "    gpus: all\n"
+            printf "    environment:\n"
+            printf "      NVIDIA_VISIBLE_DEVICES: all\n"
+            printf "      NVIDIA_DRIVER_CAPABILITIES: compute,utility\n"
+        fi
+        if [[ "${#host_entries[@]}" -gt 0 ]]; then
+            for service in app scheduler worker-chat worker-siem worker-batch worker-gpu; do
+                printf "  %s:\n" "${service}"
+                printf "    extra_hosts:\n"
+                local entry host_name host_ip
+                for entry in "${host_entries[@]}"; do
+                    host_name="${entry%%:*}"
+                    host_ip="${entry#*:}"
+                    printf "      %s: '%s'\n" "${host_name}" "${host_ip}"
+                done
             done
-        done
+        fi
     } >"${temp_file}"
 
     mv "${temp_file}" "${existing_override}"
     chmod 644 "${existing_override}"
-    print_success "docker-compose.override.yml written for AD host override"
+    print_success "docker-compose.override.yml written for installer-managed AD/GPU overrides"
 }
 
 extract_ollama_host_dir() {
@@ -2664,6 +2829,14 @@ print_final_summary() {
         print_info "Local break-glass admin force rotate=${LOCAL_ADMIN_FORCE_ROTATE}"
         if [[ "${LOCAL_ADMIN_BOOTSTRAP_REQUIRED}" == "true" ]]; then
             print_info "Local break-glass bootstrap secret file=${LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE}"
+        fi
+    fi
+    print_info "Standalone/test chat auth enabled=${STANDALONE_CHAT_AUTH_ENABLED}"
+    if [[ "${STANDALONE_CHAT_AUTH_ENABLED}" == "true" ]]; then
+        print_info "Standalone/test chat username=${STANDALONE_CHAT_USERNAME}"
+        print_info "Standalone/test chat force rotate=${STANDALONE_CHAT_FORCE_ROTATE}"
+        if [[ "${STANDALONE_CHAT_BOOTSTRAP_REQUIRED}" == "true" ]]; then
+            print_info "Standalone/test chat bootstrap secret file=${STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE}"
         fi
     fi
     print_info "Model pre-pull: ${MODEL_BOOTSTRAP_STATUS}"

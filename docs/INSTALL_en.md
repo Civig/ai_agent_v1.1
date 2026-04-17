@@ -102,6 +102,14 @@ Important current implementation note:
 
 If you use the installer and provide an AD IP override, it may generate an installer-managed `docker-compose.override.yml`.
 
+In `INSTALL_MODE=gpu`, the same installer-managed override also grants GPU access to `ollama`:
+
+- `gpus: all`
+- `NVIDIA_VISIBLE_DEVICES=all`
+- `NVIDIA_DRIVER_CAPABILITIES=compute,utility`
+
+When both `INSTALL_MODE=gpu` and `AD_SERVER_IP_OVERRIDE` are enabled, the installer combines both contracts in the same managed override and does not require manual post-install edits.
+
 ## Environment Configuration
 
 The repository ships [.env.example](../.env.example) as a template. The real deployment uses `.env`.
@@ -111,6 +119,12 @@ Key environment groups include:
 - install / auth profile:
   - `INSTALL_PROFILE`
   - `AUTH_MODE`
+  - `STANDALONE_CHAT_AUTH_ENABLED`
+  - `STANDALONE_CHAT_USERNAME`
+  - `STANDALONE_CHAT_PASSWORD_HASH`
+  - `STANDALONE_CHAT_FORCE_ROTATE`
+  - `STANDALONE_CHAT_BOOTSTRAP_REQUIRED`
+  - legacy compatibility only:
   - `LAB_OPEN_AUTH_ACK`
   - `LAB_USER_USERNAME`
   - `LAB_USER_CANONICAL_PRINCIPAL`
@@ -211,13 +225,15 @@ The practical local break-glass admin contract is:
 - the local break-glass session grants access only to `/admin/dashboard` and `/api/admin/dashboard/*`; the ordinary chat user flow remains on the existing AD/Kerberos path
 - `ADMIN_DASHBOARD_USERS` and the local break-glass admin are separate access models; enabling one does not replace or widen the other
 
-The repository also supports an explicit isolated GPU validation profile:
+The repository also supports an explicit `standalone_gpu_lab` profile for isolated GPU validation:
 
 - the default baseline remains `INSTALL_PROFILE=enterprise` with `AUTH_MODE=ad`
-- the lab path is enabled only through `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open`, and `LAB_OPEN_AUTH_ACK=true`
 - in `standalone_gpu_lab`, the installer does not require an AD domain, LDAP server, or Kerberos KDC and skips the Kerberos/LDAP auth smoke test
-- the runtime uses a synthetic lab user (`LAB_USER_USERNAME`, `LAB_USER_CANONICAL_PRINCIPAL`) for chat/API/dashboard validation
-- `lab_open` is for isolated validation only and must not be used as a production exposure
+- the installer keeps the ordinary `AUTH_MODE=ad` path and can optionally configure a separate standalone/test chat user through `STANDALONE_CHAT_*`
+- that standalone/test chat user is disabled by default and uses a hash-only / bootstrap-secret contract, with no plaintext password stored in `.env`
+- the ordinary `/login` path is not replaced silently: when the submitted username matches `STANDALONE_CHAT_USERNAME`, the runtime performs local hash-only verification for that user only; all other usernames continue through the Kerberos/AD flow
+- the standalone/test chat user is for demo/standalone validation only and does not replace production AD authentication
+- legacy `AUTH_MODE=lab_open` remains only as a backward-compatibility contract for explicit manual env use and is no longer the recommended installer path
 
 The same file-processing baseline also supports additional parser/file-chat limit knobs through env/settings overrides, including max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap, and OCR timeout. `.env.example` intentionally keeps the template compact and does not enumerate every advanced parser limit by default.
 
@@ -257,11 +273,15 @@ For `standalone_gpu_lab`, the installer writes this `.env` contract:
 
 ```dotenv
 INSTALL_PROFILE=standalone_gpu_lab
-AUTH_MODE=lab_open
-LAB_OPEN_AUTH_ACK=true
-LAB_USER_USERNAME=lab_user
-LAB_USER_CANONICAL_PRINCIPAL=lab_user@LOCAL.LAB
+AUTH_MODE=ad
+STANDALONE_CHAT_AUTH_ENABLED=false
+STANDALONE_CHAT_USERNAME=demo_ai
+STANDALONE_CHAT_PASSWORD_HASH=
+STANDALONE_CHAT_FORCE_ROTATE=false
+STANDALONE_CHAT_BOOTSTRAP_REQUIRED=false
 ```
+
+The installer-managed `.env` also preserves legacy `LAB_*` compatibility keys in a disabled/default state, but they are no longer the recommended validation path.
 
 ### What the installer actually does
 

@@ -167,16 +167,32 @@ For emergency operator recovery, the runtime now supports a separate local break
 - login attempts, logout, forced rotation, and normal password change are logged without disclosing plaintext password or bootstrap-secret material
 - `ADMIN_DASHBOARD_USERS` remains a separate ordinary-operator gate and is not replaced by the local-admin fallback path
 
+### Standalone/test chat user
+
+For isolated demo/standalone validation, the runtime also supports a separate standalone/test chat user on the ordinary `POST /login` path, but only as an explicitly disabled-by-default test-only mode:
+
+- the standalone/test chat user is disabled by default with `STANDALONE_CHAT_AUTH_ENABLED=false`
+- the default username is `STANDALONE_CHAT_USERNAME=demo_ai`
+- this standalone/test chat user is separate from the local break-glass dashboard admin and does not widen dashboard access
+- `.env` stores only `STANDALONE_CHAT_PASSWORD_HASH`; plaintext passwords are not used
+- the installer-managed `.env` stores `STANDALONE_CHAT_PASSWORD_HASH` in compose-safe escaped `$$` form so Docker Compose does not mangle the hash on the transport boundary
+- if the installer running in `standalone_gpu_lab` is not given an explicit password, it can generate a one-time bootstrap secret and store that plaintext only in a root-only `0600` host file
+- bootstrap and rotation state are tracked through `STANDALONE_CHAT_FORCE_ROTATE` and `STANDALONE_CHAT_BOOTSTRAP_REQUIRED`
+- when `STANDALONE_CHAT_AUTH_ENABLED=true` and the submitted username matches `STANDALONE_CHAT_USERNAME`, the runtime performs local hash-only password verification for that standalone/test chat user only
+- a wrong password returns `401` and does not fall through to any anonymous/open login path
+- all other usernames continue through the ordinary Kerberos/AD flow
+- this standalone/test chat user is meant only for ordinary chat UI demo/testing and is not a replacement for production AD authentication
+
 ### Standalone GPU Lab mode
 
-For isolated GPU validation, the runtime also supports an explicit lab profile, but only as an intentionally insecure engineering mode:
+For isolated GPU validation, the runtime supports an explicit `standalone_gpu_lab` profile, but the supported authentication path now remains closed by default:
 
 - the default baseline remains enterprise: `INSTALL_PROFILE=enterprise`, `AUTH_MODE=ad`
-- lab mode requires the explicit combination `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open`, and `LAB_OPEN_AUTH_ACK=true`
-- if `AUTH_MODE=lab_open` is configured without that acknowledgment, startup fails fast
-- ordinary authentication is disabled in that mode and the runtime uses a synthetic lab identity
-- the dashboard shows an explicit warning whenever `lab_open` is active
-- this mode must not be exposed to production users or the public Internet without strict network isolation
+- in the supported `standalone_gpu_lab` path, the installer still skips AD domain, LDAP server, and Kerberos KDC prompts and omits the Kerberos/LDAP smoke test
+- the supported test-login path for that profile now relies on `STANDALONE_CHAT_*`, not on a synthetic open-login bypass
+- the ordinary `/login` form remains the same; the standalone/test chat user works only when the operator explicitly enables it and configures hash-only / bootstrap-secret credentials
+- the legacy `AUTH_MODE=lab_open` contract remains only for explicit backward compatibility and is no longer the recommended installer path
+- this profile and any standalone/test chat user must not be exposed to production users or the public Internet without strict network isolation
 
 ## Upload and File Security Baseline
 

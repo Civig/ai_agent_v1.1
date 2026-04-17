@@ -687,6 +687,59 @@ def local_admin_username() -> str:
     return normalize_username(settings.LOCAL_ADMIN_USERNAME or "admin_ai")
 
 
+def standalone_chat_username() -> str:
+    return normalize_username(getattr(settings, "STANDALONE_CHAT_USERNAME", "") or "demo_ai")
+
+
+def standalone_chat_password_hash() -> str:
+    return normalize_local_admin_password_hash_transport(getattr(settings, "STANDALONE_CHAT_PASSWORD_HASH", ""))
+
+
+def standalone_chat_auth_enabled() -> bool:
+    return (
+        bool(getattr(settings, "STANDALONE_CHAT_AUTH_ENABLED", False))
+        and bool(standalone_chat_username())
+        and bool(standalone_chat_password_hash())
+    )
+
+
+def standalone_chat_login_matches_username(username: str) -> bool:
+    normalized_username = normalize_username(username)
+    return standalone_chat_auth_enabled() and bool(normalized_username) and normalized_username == standalone_chat_username()
+
+
+async def build_standalone_chat_session_user(request: Request, username: str) -> Dict[str, Any]:
+    normalized_username = normalize_username(username) or standalone_chat_username() or "demo_ai"
+    user_info = enrich_identity_session_fields(
+        {
+            "username": normalized_username,
+            "canonical_principal": f"{normalized_username}@STANDALONE.LOCAL",
+            "display_name": normalized_username,
+            "email": f"{normalized_username}@standalone.local",
+            "groups": [],
+            "auth_source": AUTH_SOURCE_PASSWORD,
+        },
+        auth_source=AUTH_SOURCE_PASSWORD,
+    )
+    available_models = await request.app.state.llm_gateway.get_model_catalog()
+    try:
+        model_info = await resolve_runtime_model(
+            user_info,
+            available_models,
+            request.app.state.llm_gateway,
+            allow_user_fallback=True,
+        )
+    except LookupError:
+        logger.error("No LLM models available during standalone/test chat login for user %s", user_info["username"])
+        model_info = get_placeholder_model_info()
+    return {
+        **user_info,
+        "model": model_info["name"],
+        "model_description": model_info["description"],
+        "model_key": model_info["key"],
+    }
+
+
 def local_admin_env_state() -> Dict[str, Any]:
     normalized_password_hash = normalize_local_admin_password_hash_transport(settings.LOCAL_ADMIN_PASSWORD_HASH)
     base_env_revision = hashlib.sha256(
@@ -1167,9 +1220,9 @@ def build_login_template_context(request: Request, **extra: Any) -> Dict[str, An
         "request": request,
         "auth_mode": settings.AUTH_MODE,
         "install_profile": settings.INSTALL_PROFILE,
-        "lab_open_auth_enabled": is_lab_open_auth_enabled(),
-        "lab_open_warning": LAB_OPEN_AUTH_WARNING,
-        "lab_user_username": settings.LAB_USER_USERNAME,
+        "standalone_chat_auth_enabled": standalone_chat_auth_enabled(),
+        "standalone_chat_username": standalone_chat_username(),
+        "standalone_chat_bootstrap_required": bool(getattr(settings, "STANDALONE_CHAT_BOOTSTRAP_REQUIRED", False)),
         "sso_login_enabled": trusted_proxy_sso_enabled(),
         "sso_login_path": settings.SSO_LOGIN_PATH,
         "local_admin_enabled": local_admin_enabled(),
@@ -2110,7 +2163,7 @@ async def health(request: Request) -> Response:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
-    if current_user or is_lab_open_auth_enabled():
+    if current_user:
         return RedirectResponse(url="/chat", status_code=303)
     return RedirectResponse(url="/login", status_code=303)
 
@@ -2172,14 +2225,38 @@ app.add_api_route(settings.SSO_LOGIN_PATH, sso_login_entry, methods=["GET"])
 
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    if is_lab_open_auth_enabled():
-        lab_user = await build_lab_open_session_user(request)
-        logger.warning("Issuing synthetic lab_open session for %s", lab_user["username"])
-        response = RedirectResponse(url="/chat", status_code=303)
-        return maybe_issue_lab_auth_session(response, request, lab_user)
-
     try:
         await request.app.state.login_rate_limiter.check(build_login_rate_subject(request, username))
+        if standalone_chat_login_matches_username(username):
+            if not verify_local_admin_password(password, standalone_chat_password_hash()):
+                logger.warning(
+                    "Rejected standalone/test chat login for username=%s from client=%s",
+                    normalize_username(username) or "<invalid>",
+                    get_request_client_host(request) or "unknown",
+                )
+                return templates.TemplateResponse(
+                    request,
+                    "login.html",
+                    build_login_template_context(request, error="Неверное имя пользователя или пароль"),
+                    status_code=401,
+                )
+
+            user_info = await build_standalone_chat_session_user(request, username)
+            response = RedirectResponse(url="/chat", status_code=303)
+            set_auth_cookies(
+                response,
+                create_access_token(
+                    build_token_payload(user_info, "access"),
+                    expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+                ),
+                create_access_token(
+                    build_token_payload(user_info, "refresh"),
+                    expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+                ),
+                csrf_token=generate_csrf_token(),
+            )
+            return response
+
         user_info = await asyncio.to_thread(kerberos_auth.authenticate, username, password)
         if not user_info:
             return templates.TemplateResponse(

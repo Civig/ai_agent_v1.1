@@ -161,18 +161,18 @@
 <div class="login-container">
     <div class="login-header">
         <h1>Corporate AI Assistant</h1>
-        {% if lab_open_auth_enabled %}
-        <p>Standalone GPU Lab mode без AD / Kerberos / LDAP</p>
+        {% if standalone_chat_auth_enabled %}
+        <p>Корпоративный вход и demo/test login для изолированной проверки</p>
         {% else %}
         <p>Корпоративный вход через доменную учётную запись</p>
         {% endif %}
     </div>
 
-    {% if lab_open_auth_enabled %}
+    {% if standalone_chat_auth_enabled %}
     <div class="warning-message">
-        <strong>Небезопасный lab profile</strong><br>
-        {{ lab_open_warning }}<br>
-        Не публикуйте этот режим в production или в открытый Интернет без жёсткой сетевой изоляции.
+        <strong>Включён demo/test chat login</strong><br>
+        Этот режим предназначен только для demo и standalone validation, не заменяет production AD/Kerberos auth.<br>
+        Используйте обычную форму входа с username <code>{{ standalone_chat_username }}</code>.
     </div>
     {% endif %}
 
@@ -180,13 +180,6 @@
     <div class="error-message">❌ {{ error }}</div>
     {% endif %}
 
-    {% if lab_open_auth_enabled %}
-    <form method="post" action="/login">
-        <input type="hidden" name="username" value="{{ lab_user_username }}">
-        <input type="hidden" name="password" value="lab-open">
-        <button type="submit">Открыть LAB</button>
-    </form>
-    {% else %}
     <form method="post" action="/login">
         <div class="form-group">
             <label for="username">Имя пользователя</label>
@@ -202,7 +195,6 @@
 
         <button type="submit">Войти в систему</button>
     </form>
-    {% endif %}
 
     {% if sso_login_enabled %}
     <a class="secondary-action" href="{{ sso_login_path }}">Войти через AD SSO</a>
@@ -212,10 +204,13 @@
     {% endif %}
 
     <div class="info-message">
-        {% if lab_open_auth_enabled %}
-        <strong>Лабораторная synthetic identity</strong><br>
-        Обычный AD/Kerberos login отключён; runtime использует synthetic user <code>{{ lab_user_username }}</code><br>
-        После входа откроются chat, file-chat, threads и operator dashboard в пределах isolated GPU lab.
+        {% if standalone_chat_auth_enabled %}
+        <strong>Обычный login path сохранён</strong><br>
+        AD/Kerberos login продолжает работать как обычно.<br>
+        Если введён username <code>{{ standalone_chat_username }}</code>, runtime использует локальную hash-only проверку demo/test пользователя.
+        {% if standalone_chat_bootstrap_required %}
+        <br>Для первого входа используйте one-time bootstrap secret, если installer сгенерировал его автоматически.
+        {% endif %}
         {% else %}
         <strong>Корпоративная аутентификация Kerberos</strong><br>
         Вход выполняется через доменную учетную запись<br>

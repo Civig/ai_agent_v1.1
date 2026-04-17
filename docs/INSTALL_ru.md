@@ -102,6 +102,14 @@ Compose stack реально включает:
 
 Если во время `install.sh` указан AD IP override, установщик может сгенерировать installer-managed `docker-compose.override.yml`.
 
+В `INSTALL_MODE=gpu` тот же installer-managed override также добавляет GPU-доступ для `ollama`:
+
+- `gpus: all`
+- `NVIDIA_VISIBLE_DEVICES=all`
+- `NVIDIA_DRIVER_CAPABILITIES=compute,utility`
+
+Если одновременно включены `INSTALL_MODE=gpu` и `AD_SERVER_IP_OVERRIDE`, установщик объединяет оба контракта в одном managed override и не требует ручного редактирования после install.
+
 ## Конфигурация окружения
 
 В репозитории есть шаблон [`.env.example`](../.env.example). Для реального развёртывания используется `.env`.
@@ -111,6 +119,12 @@ Compose stack реально включает:
 - install / auth profile:
   - `INSTALL_PROFILE`
   - `AUTH_MODE`
+  - `STANDALONE_CHAT_AUTH_ENABLED`
+  - `STANDALONE_CHAT_USERNAME`
+  - `STANDALONE_CHAT_PASSWORD_HASH`
+  - `STANDALONE_CHAT_FORCE_ROTATE`
+  - `STANDALONE_CHAT_BOOTSTRAP_REQUIRED`
+  - legacy compatibility only:
   - `LAB_OPEN_AUTH_ACK`
   - `LAB_USER_USERNAME`
   - `LAB_USER_CANONICAL_PRINCIPAL`
@@ -211,13 +225,15 @@ Read-only dashboard operator gate теперь задаётся через `ADMI
 - local break-glass session даёт доступ только к `/admin/dashboard` и `/api/admin/dashboard/*`; обычный chat user flow остаётся на текущем AD/Kerberos path
 - `ADMIN_DASHBOARD_USERS` и local break-glass admin — это две разные модели доступа; включение одной не заменяет и не расширяет другую
 
-Отдельно поддерживается explicit lab profile для isolated GPU validation:
+Отдельно поддерживается explicit profile `standalone_gpu_lab` для isolated GPU validation:
 
 - baseline по умолчанию остаётся `INSTALL_PROFILE=enterprise` и `AUTH_MODE=ad`
-- lab path включается только через `INSTALL_PROFILE=standalone_gpu_lab`, `AUTH_MODE=lab_open` и `LAB_OPEN_AUTH_ACK=true`
 - в `standalone_gpu_lab` installer не требует AD domain, LDAP server, Kerberos KDC и не запускает Kerberos/LDAP auth smoke
-- runtime использует synthetic user (`LAB_USER_USERNAME`, `LAB_USER_CANONICAL_PRINCIPAL`) для chat/API/dashboard validation
-- `lab_open` предназначен только для isolated validation и не должен использоваться как production exposure
+- installer сохраняет обычный `AUTH_MODE=ad` и при желании предлагает отдельного standalone/test chat user через `STANDALONE_CHAT_*`
+- этот standalone/test chat user disabled by default и использует только hash-only / bootstrap-secret contract, без plaintext password в `.env`
+- обычный `/login` path не меняется silently: если введён `STANDALONE_CHAT_USERNAME`, runtime проверяет локальный hash-only password только для этого пользователя; остальные usernames продолжают идти в Kerberos/AD flow
+- standalone/test chat user предназначен только для demo/standalone validation и не заменяет production AD auth
+- legacy `AUTH_MODE=lab_open` остаётся только как backward-compatibility contract для явных ручных env и не является рекомендуемым installer path
 
 Тот же file-processing baseline также поддерживает дополнительные env/settings knobs для parser/file-chat limits: max file count, per-file size, total request size, document-character budget, PDF page cap, image dimension cap и OCR timeout. Шаблон `.env.example` сознательно не перечисляет каждый advanced parser limit по отдельности.
 
@@ -257,11 +273,15 @@ Installer также предлагает профиль установки:
 
 ```dotenv
 INSTALL_PROFILE=standalone_gpu_lab
-AUTH_MODE=lab_open
-LAB_OPEN_AUTH_ACK=true
-LAB_USER_USERNAME=lab_user
-LAB_USER_CANONICAL_PRINCIPAL=lab_user@LOCAL.LAB
+AUTH_MODE=ad
+STANDALONE_CHAT_AUTH_ENABLED=false
+STANDALONE_CHAT_USERNAME=demo_ai
+STANDALONE_CHAT_PASSWORD_HASH=
+STANDALONE_CHAT_FORCE_ROTATE=false
+STANDALONE_CHAT_BOOTSTRAP_REQUIRED=false
 ```
+
+Installer-managed `.env` также сохраняет legacy `LAB_*` compatibility keys в disabled/default состоянии, но они больше не являются рекомендуемым validation path.
 
 ### Что реально делает установщик
 

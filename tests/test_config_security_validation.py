@@ -7,6 +7,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
 os.environ.setdefault("COOKIE_SECURE", "false")
 
 import config as config_module
+from local_admin_security import build_local_admin_password_hash
 
 
 class ConfigSecurityValidationTests(unittest.TestCase):
@@ -18,6 +19,9 @@ class ConfigSecurityValidationTests(unittest.TestCase):
 
         self.assertEqual(settings.INSTALL_PROFILE, "enterprise")
         self.assertEqual(settings.AUTH_MODE, "ad")
+        self.assertFalse(settings.STANDALONE_CHAT_AUTH_ENABLED)
+        self.assertEqual(settings.STANDALONE_CHAT_USERNAME, "demo_ai")
+        self.assertEqual(settings.STANDALONE_CHAT_PASSWORD_HASH, "")
         self.assertFalse(settings.LAB_OPEN_AUTH_ACK)
 
     def test_unknown_install_profile_is_rejected(self):
@@ -64,7 +68,49 @@ class ConfigSecurityValidationTests(unittest.TestCase):
 
         self.assertIn("INSTALL_PROFILE=enterprise requires AUTH_MODE=ad", str(error.exception))
 
-    def test_standalone_gpu_lab_profile_accepts_explicit_lab_open_contract(self):
+    def test_standalone_gpu_lab_profile_accepts_ad_contract(self):
+        settings = config_module.Settings(
+            SECRET_KEY="x" * 40,
+            COOKIE_SECURE=False,
+            INSTALL_PROFILE="standalone_gpu_lab",
+            AUTH_MODE="ad",
+        )
+
+        self.assertEqual(settings.INSTALL_PROFILE, "standalone_gpu_lab")
+        self.assertEqual(settings.AUTH_MODE, "ad")
+        self.assertFalse(settings.lab_open_auth_enabled)
+
+    def test_standalone_chat_auth_requires_hash_when_enabled(self):
+        with self.assertRaises(ValidationError) as error:
+            config_module.Settings(
+                SECRET_KEY="x" * 40,
+                COOKIE_SECURE=False,
+                AUTH_MODE="ad",
+                STANDALONE_CHAT_AUTH_ENABLED=True,
+                STANDALONE_CHAT_USERNAME="demo_ai",
+                STANDALONE_CHAT_PASSWORD_HASH="",
+            )
+
+        self.assertIn("STANDALONE_CHAT_PASSWORD_HASH must be set when standalone chat auth is enabled", str(error.exception))
+
+    def test_standalone_chat_hash_only_contract_is_valid(self):
+        password_hash = build_local_admin_password_hash("StandaloneTestPassword-123")
+
+        settings = config_module.Settings(
+            SECRET_KEY="x" * 40,
+            COOKIE_SECURE=False,
+            AUTH_MODE="ad",
+            STANDALONE_CHAT_AUTH_ENABLED=True,
+            STANDALONE_CHAT_USERNAME="Demo_AI",
+            STANDALONE_CHAT_PASSWORD_HASH=password_hash,
+        )
+
+        self.assertTrue(settings.STANDALONE_CHAT_AUTH_ENABLED)
+        self.assertEqual(settings.STANDALONE_CHAT_USERNAME, "demo_ai")
+        self.assertEqual(settings.STANDALONE_CHAT_PASSWORD_HASH, password_hash)
+        self.assertFalse(settings.lab_open_auth_enabled)
+
+    def test_legacy_lab_open_contract_remains_valid_when_acknowledged(self):
         settings = config_module.Settings(
             SECRET_KEY="x" * 40,
             COOKIE_SECURE=False,
