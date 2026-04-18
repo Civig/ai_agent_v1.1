@@ -7,6 +7,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-1234567890-test-abcdef")
 os.environ.setdefault("COOKIE_SECURE", "false")
 
 from llm_gateway import JOB_STATUS_ADMITTED, JOB_STATUS_QUEUED, LLMGateway, WORKLOAD_CHAT
+from scheduler import ResourceAwareScheduler
 
 
 MODEL_CATALOG = {
@@ -175,6 +176,21 @@ class SchedulerChatAdmissionStallTests(unittest.IsolatedAsyncioTestCase):
         gateway.get_model_catalog = AsyncMock(return_value=MODEL_CATALOG)
         return gateway
 
+    def build_scheduler(self) -> ResourceAwareScheduler:
+        scheduler = ResourceAwareScheduler()
+        scheduler.gateway.get_target_usage = AsyncMock(
+            return_value={
+                "reserved_vram_mb": 0,
+                "reserved_ram_mb": 0,
+                "reserved_tokens": 0,
+                "active_jobs": 0,
+                "reserved_tokens_chat": 0,
+                "reserved_tokens_siem": 0,
+                "reserved_tokens_batch": 0,
+            }
+        )
+        return scheduler
+
     async def test_idle_cpu_chat_job_reaches_admission_and_dispatch_under_cold_start_override(self):
         gateway = self.build_gateway()
         job_id = await gateway.enqueue_job(
@@ -250,6 +266,63 @@ class SchedulerChatAdmissionStallTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job["status"], JOB_STATUS_QUEUED)
         self.assertIsNone(job["assigned_target_id"])
         self.assertEqual(dispatch_queue, [])
+
+    async def test_pick_target_prefers_matching_gpu_target_for_gpu_chat_jobs(self):
+        scheduler = self.build_scheduler()
+        job = {
+            "id": "job-1",
+            "workload_class": WORKLOAD_CHAT,
+            "worker_pool": "chat",
+            "target_kind": "gpu",
+            "model_key": "demo-model",
+        }
+        targets = {
+            "ollama-main": {
+                "target_id": "ollama-main",
+                "target_kind": "cpu",
+                "ram_free_mb": 32768,
+                "loaded_models": [],
+                "pinned_models": [],
+            },
+            "ollama-gpu": {
+                "target_id": "ollama-gpu",
+                "target_kind": "gpu",
+                "vram_free_mb": 24576,
+                "loaded_models": [],
+                "pinned_models": [],
+            },
+        }
+        active_pairs = {("chat", "ollama-main"), ("chat", "ollama-gpu")}
+
+        target = await scheduler.pick_target(job, targets, active_pairs)
+
+        self.assertIsNotNone(target)
+        self.assertEqual(target["target_id"], "ollama-gpu")
+
+    async def test_pick_target_keeps_cpu_fallback_when_gpu_target_is_not_available(self):
+        scheduler = self.build_scheduler()
+        job = {
+            "id": "job-1",
+            "workload_class": WORKLOAD_CHAT,
+            "worker_pool": "chat",
+            "target_kind": "gpu",
+            "model_key": "demo-model",
+        }
+        targets = {
+            "ollama-main": {
+                "target_id": "ollama-main",
+                "target_kind": "cpu",
+                "ram_free_mb": 32768,
+                "loaded_models": [],
+                "pinned_models": [],
+            }
+        }
+        active_pairs = {("chat", "ollama-main")}
+
+        target = await scheduler.pick_target(job, targets, active_pairs)
+
+        self.assertIsNotNone(target)
+        self.assertEqual(target["target_id"], "ollama-main")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from contextlib import suppress
 from typing import Any, Dict, Optional
 
 from config import settings
-from llm_gateway import LLMGateway
+from llm_gateway import LLMGateway, normalize_target_kind
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -82,7 +82,9 @@ class ResourceAwareScheduler:
         workload_class = job["workload_class"]
         worker_pool = job["worker_pool"]
         model_key = job["model_key"]
-        eligible: list[tuple[tuple[Any, ...], Dict[str, Any]]] = []
+        requested_target_kind = normalize_target_kind(job.get("target_kind"))
+        matching_kind: list[tuple[tuple[Any, ...], Dict[str, Any]]] = []
+        fallback_kind: list[tuple[tuple[Any, ...], Dict[str, Any]]] = []
 
         for target in targets.values():
             target_id = target["target_id"]
@@ -98,8 +100,11 @@ class ResourceAwareScheduler:
                 -free_score,
                 target_id,
             )
-            eligible.append((score, target))
+            normalized_target_kind = normalize_target_kind(target.get("target_kind"))
+            bucket = matching_kind if normalized_target_kind == requested_target_kind else fallback_kind
+            bucket.append((score, target))
 
+        eligible = matching_kind or fallback_kind
         if not eligible:
             return None
         eligible.sort(key=lambda item: item[0])
