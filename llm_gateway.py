@@ -19,7 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover
     class RedisError(Exception):
         pass
 
-from config import settings
+from config import resolve_model_catalog_key, settings
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,24 @@ def compute_queue_wait_ms(job: Dict[str, Any]) -> int:
     if enqueued_at_ms <= 0:
         return 0
     return max(0, started_at_ms - enqueued_at_ms)
+
+
+def compute_pending_wait_ms(job: Dict[str, Any]) -> int:
+    admitted_at_ms = _safe_int(job.get("admitted_at_ms"))
+    if admitted_at_ms <= 0:
+        return 0
+    enqueued_at_ms = _safe_int(job.get("enqueued_at_ms")) or _safe_int(job.get("created_at_ms"))
+    if enqueued_at_ms <= 0:
+        return 0
+    return max(0, admitted_at_ms - enqueued_at_ms)
+
+
+def compute_admitted_wait_ms(job: Dict[str, Any]) -> int:
+    started_at_ms = _safe_int(job.get("started_at_ms"))
+    admitted_at_ms = _safe_int(job.get("admitted_at_ms"))
+    if started_at_ms <= 0 or admitted_at_ms <= 0:
+        return 0
+    return max(0, started_at_ms - admitted_at_ms)
 
 
 def compute_total_job_ms(job: Dict[str, Any]) -> int:
@@ -1395,8 +1413,8 @@ class LLMGateway(RedisBackedComponent):
             logger.error("Refusing to enqueue job %s for user %s because no LLM models are available", job_id, username)
             raise HTTPException(status_code=503, detail="No LLM models available")
 
-        model_info = catalog.get(model_key) or catalog.get(model_name)
-        if model_info is None:
+        resolved_model_key = resolve_model_catalog_key(model_key, catalog) or resolve_model_catalog_key(model_name, catalog)
+        if resolved_model_key is None:
             missing_model = (model_name or model_key or "").strip() or "unknown"
             logger.error(
                 "Refusing to enqueue job %s for user %s with unknown model %s",
@@ -1405,6 +1423,9 @@ class LLMGateway(RedisBackedComponent):
                 missing_model,
             )
             raise HTTPException(status_code=404, detail=f"LLM model not found: {missing_model}")
+        model_info = catalog[resolved_model_key]
+        model_key = resolved_model_key
+        model_name = (model_info.get("name") or resolved_model_key).strip() or resolved_model_key
 
         logger.info(
             "Enqueueing LLM job %s for user %s with model key=%s name=%s",
@@ -1447,6 +1468,8 @@ class LLMGateway(RedisBackedComponent):
             "admitted_at_ms": None,
             "started_at_ms": None,
             "queue_wait_ms": 0,
+            "pending_wait_ms": 0,
+            "admitted_wait_ms": 0,
             "deadline_at": now + settings.LLM_JOB_DEADLINE_SECONDS,
             "retry_count": 0,
             "max_retries": settings.SCHEDULER_MAX_JOB_RETRIES,
@@ -1735,6 +1758,7 @@ class LLMGateway(RedisBackedComponent):
             logger.warning(
                 "job_terminal_observability job_id=%s username=%s job_kind=%s workload_class=%s target_kind=%s "
                 "model_key=%s model_name=%s file_count=%s doc_chars=%s prompt_chars=%s history_messages=%s queue_wait_ms=%s "
+                "pending_wait_ms=%s admitted_wait_ms=%s "
                 "inference_ms=%s total_ms=%s total_job_ms=%s terminal_status=%s error_type=%s",
                 job_fields["job_id"],
                 job_fields["username"],
@@ -1748,6 +1772,8 @@ class LLMGateway(RedisBackedComponent):
                 job_fields["prompt_chars"],
                 job_fields["history_messages"],
                 max(0, now_ms - (_safe_int(job.get("enqueued_at_ms")) or _safe_int(job.get("created_at_ms")) or now_ms)),
+                compute_pending_wait_ms(job),
+                compute_admitted_wait_ms(job),
                 0,
                 total_job_ms,
                 total_job_ms,
@@ -1761,16 +1787,20 @@ class LLMGateway(RedisBackedComponent):
         job["started_at"] = job.get("started_at") or now
         job["started_at_ms"] = job.get("started_at_ms") or now_ms
         job["queue_wait_ms"] = compute_queue_wait_ms(job)
+        job["pending_wait_ms"] = compute_pending_wait_ms(job)
+        job["admitted_wait_ms"] = compute_admitted_wait_ms(job)
         job["lease_until"] = now + settings.SCHEDULER_JOB_LEASE_SECONDS
         await self.save_job(job)
         await self.redis.zadd(self.ACTIVE_JOBS_ZSET, {job_id: job["lease_until"]})
         await self.emit_event(job_id, {"job_id": job_id, "running": True, "target_id": target_id})
         logger.info(
-            "job_queue_observability job_id=%s workload_class=%s target_kind=%s queue_wait_ms=%s",
+            "job_queue_observability job_id=%s workload_class=%s target_kind=%s queue_wait_ms=%s pending_wait_ms=%s admitted_wait_ms=%s",
             job_id,
             job.get("workload_class", WORKLOAD_CHAT),
             normalize_target_kind(job.get("target_kind")),
             job.get("queue_wait_ms") or 0,
+            job.get("pending_wait_ms") or 0,
+            job.get("admitted_wait_ms") or 0,
         )
         return job
 
@@ -1824,12 +1854,17 @@ class LLMGateway(RedisBackedComponent):
 
             now = int(time.time())
             now_ms = current_time_ms()
+            pending_wait_ms = max(
+                0,
+                now_ms - (_safe_int(job.get("enqueued_at_ms")) or _safe_int(job.get("created_at_ms")) or now_ms),
+            )
             job.update(
                 {
                     "status": JOB_STATUS_ADMITTED,
                     "assigned_target_id": target_id,
                     "admitted_at": now,
                     "admitted_at_ms": now_ms,
+                    "pending_wait_ms": pending_wait_ms,
                     "lease_until": now + settings.SCHEDULER_JOB_LEASE_SECONDS,
                     "reserved_tokens": admission["reserved_tokens"],
                     "reserved_vram_mb": admission["reserved_vram_mb"],
@@ -2031,6 +2066,8 @@ class LLMGateway(RedisBackedComponent):
                 "started_at_ms": None,
                 "enqueued_at_ms": current_time_ms(),
                 "queue_wait_ms": 0,
+                "pending_wait_ms": 0,
+                "admitted_wait_ms": 0,
                 "lease_until": None,
                 "reserved_tokens": 0,
                 "reserved_vram_mb": 0,
@@ -2169,6 +2206,21 @@ class LLMGateway(RedisBackedComponent):
 
                 job["retry_count"] = retry_count
                 job = await self.downgrade_job_target_kind_if_needed(job)
+                logger.warning(
+                    "job_stale_requeue_observability job_id=%s workload_class=%s target_kind=%s "
+                    "preserved_enqueued_at_ms=%s previous_admitted_at_ms=%s previous_started_at_ms=%s "
+                    "queue_wait_ms=%s pending_wait_ms=%s admitted_wait_ms=%s retry_count=%s",
+                    job_id,
+                    job.get("workload_class", WORKLOAD_CHAT),
+                    normalize_target_kind(job.get("target_kind")),
+                    _safe_int(job.get("enqueued_at_ms")) or _safe_int(job.get("created_at_ms")),
+                    _safe_int(job.get("admitted_at_ms")),
+                    _safe_int(job.get("started_at_ms")),
+                    compute_queue_wait_ms(job),
+                    compute_pending_wait_ms(job),
+                    compute_admitted_wait_ms(job),
+                    retry_count,
+                )
                 job.update(
                     {
                         "status": JOB_STATUS_QUEUED,

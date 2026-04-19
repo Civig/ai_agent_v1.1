@@ -11,6 +11,8 @@ from llm_gateway import (
     WORKLOAD_CHAT,
     WORKLOAD_PARSE,
     classify_observability_error,
+    compute_admitted_wait_ms,
+    compute_pending_wait_ms,
     compute_queue_wait_ms,
     compute_total_job_ms,
     extract_job_observability_fields,
@@ -21,6 +23,13 @@ class ObservabilityBaselineTests(unittest.TestCase):
     def test_compute_queue_wait_ms_uses_enqueued_and_started_timestamps(self):
         job = {"enqueued_at_ms": 1_000, "started_at_ms": 1_450}
         self.assertEqual(compute_queue_wait_ms(job), 450)
+
+    def test_queue_wait_split_uses_admitted_boundary(self):
+        job = {"enqueued_at_ms": 1_000, "admitted_at_ms": 1_500, "started_at_ms": 2_200}
+
+        self.assertEqual(compute_pending_wait_ms(job), 500)
+        self.assertEqual(compute_admitted_wait_ms(job), 700)
+        self.assertEqual(compute_queue_wait_ms(job), 1_200)
 
     def test_compute_total_job_ms_uses_created_and_finished_timestamps(self):
         job = {"created_at_ms": 2_000, "finished_at_ms": 3_250}

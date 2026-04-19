@@ -43,6 +43,8 @@ from llm_gateway import (
     LIFECYCLE_STAGE_PARSER_PREPARED,
     LLMGateway,
     WORKER_POOL_PARSER,
+    compute_admitted_wait_ms,
+    compute_pending_wait_ms,
     compute_queue_wait_ms,
     current_time_ms,
     elapsed_ms,
@@ -874,6 +876,8 @@ class LLMWorker:
         started_at = time.perf_counter()
         job_fields = extract_job_observability_fields(job)
         queue_wait_ms = int(job.get("queue_wait_ms") or compute_queue_wait_ms(job))
+        pending_wait_ms = int(job.get("pending_wait_ms") or compute_pending_wait_ms(job))
+        admitted_wait_ms = int(job.get("admitted_wait_ms") or compute_admitted_wait_ms(job))
         created_at_ms = int(job.get("created_at_ms") or job.get("enqueued_at_ms") or current_time_ms())
         try:
             logger.info(
@@ -970,6 +974,7 @@ class LLMWorker:
             logger.info(
                 "job_terminal_observability job_id=%s username=%s job_kind=%s workload_class=%s target_kind=%s "
                 "model_key=%s model_name=%s file_count=%s doc_chars=%s prompt_chars=%s history_messages=%s queue_wait_ms=%s "
+                "pending_wait_ms=%s admitted_wait_ms=%s "
                 "inference_ms=%s total_ms=%s total_job_ms=%s terminal_status=%s error_type=%s",
                 job_fields["job_id"],
                 job_fields["username"],
@@ -983,6 +988,8 @@ class LLMWorker:
                 job_fields["prompt_chars"],
                 job_fields["history_messages"],
                 queue_wait_ms,
+                pending_wait_ms,
+                admitted_wait_ms,
                 inference_ms,
                 total_job_ms,
                 total_job_ms,

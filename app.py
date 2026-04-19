@@ -47,6 +47,7 @@ from auth_kerberos import (
     revoke_token,
     settings,
 )
+from config import resolve_model_catalog_key
 from dashboard_telemetry import (
     HISTORY_RANGE_SECONDS,
     build_dashboard_event,
@@ -1699,13 +1700,10 @@ def resolve_model_identifier(
     if not candidate:
         return None
 
-    if candidate in allowed_models:
-        model_info = allowed_models[candidate]
-        return {"key": candidate, "name": model_info["name"], "description": model_info["description"]}
-
-    for key, model_info in allowed_models.items():
-        if model_info["name"] == candidate:
-            return {"key": key, "name": model_info["name"], "description": model_info["description"]}
+    resolved_key = resolve_model_catalog_key(candidate, allowed_models)
+    if resolved_key:
+        model_info = allowed_models[resolved_key]
+        return {"key": resolved_key, "name": model_info["name"], "description": model_info["description"]}
 
     return None
 

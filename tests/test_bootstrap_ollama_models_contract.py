@@ -88,6 +88,72 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertIn("Attempting to pull phi3:mini into Ollama (attempt 1/2", result.stdout)
         self.assertIn("Attempting to pull phi3:mini into Ollama (attempt 2/2", result.stdout)
 
+    def test_has_model_accepts_short_alias_when_latest_tag_is_live(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_bootstrap_shell(
+                temp_dir,
+                """
+                list_models() {
+                    printf 'mistral:latest\\n'
+                    printf 'qwen2.5:14b\\n'
+                }
+                set +e
+                has_model "mistral"
+                short_status=$?
+                has_model "qwen2.5:14b"
+                explicit_status=$?
+                has_model "qwen2.5"
+                missing_status=$?
+                set -e
+                printf 'short=%s\\n' "${short_status}"
+                printf 'explicit=%s\\n' "${explicit_status}"
+                printf 'missing=%s\\n' "${missing_status}"
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("short=0", result.stdout)
+        self.assertIn("explicit=0", result.stdout)
+        self.assertIn("missing=1", result.stdout)
+
+    def test_installer_presence_check_accepts_short_alias_when_latest_tag_is_live(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_install_shell(
+                temp_dir,
+                """
+                DEFAULT_MODEL="mistral"
+                SELECTED_INSTALLER_MODELS="mistral"
+                SELECTED_SECONDARY_MODELS=""
+                DOWNLOAD_DEFAULT_MODEL_NOW="true"
+                docker_compose() {
+                    if [[ "$*" == "exec -T ollama ollama list" ]]; then
+                        printf 'NAME ID SIZE MODIFIED\\n'
+                        printf 'mistral:latest abc 4.4GB now\\n'
+                        return 0
+                    fi
+                    return 1
+                }
+                output_file="$(mktemp)"
+                set +e
+                ensure_default_model_available >"${output_file}" 2>&1
+                status=$?
+                set -e
+                output="$(cat "${output_file}")"
+                rm -f "${output_file}"
+                printf 'status=%s\\n' "${status}"
+                printf 'bootstrap_status=%s\\n' "${MODEL_BOOTSTRAP_STATUS}"
+                printf 'present=%s\\n' "${MODEL_PRESENT_AFTER_BOOTSTRAP}"
+                printf 'ready=%s\\n' "${CHAT_READY_IMMEDIATELY}"
+                printf '%s\\n' "${output}"
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("status=0", result.stdout)
+        self.assertIn("bootstrap_status=already-present", result.stdout)
+        self.assertIn("present=yes", result.stdout)
+        self.assertIn("ready=yes", result.stdout)
+
     def test_main_succeeds_via_local_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_bootstrap_shell(

@@ -31,6 +31,8 @@ from llm_gateway import (
     JOB_STATUS_CANCELLED,
     JOB_STATUS_COMPLETED,
     JOB_STATUS_FAILED,
+    JOB_STATUS_QUEUED,
+    JOB_STATUS_RUNNING,
     LIFECYCLE_STAGE_CHILD_CANCELLED,
     LIFECYCLE_STAGE_CHILD_COMPLETED,
     LIFECYCLE_STAGE_CHILD_ENQUEUED,
@@ -304,6 +306,50 @@ class GatewayGroundworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(job["parser_metadata"])
         self.assertIsNone(job["child_job_id"])
         self.assertIsNone(job["lifecycle_stage"])
+
+    async def test_stale_requeue_logs_preserved_enqueue_boundary(self):
+        gateway = self.build_gateway()
+
+        job_id = await gateway.enqueue_job(
+            username="alice",
+            model_key="demo-model",
+            model_name="demo-model",
+            prompt="hello",
+            history=[],
+            workload_class=WORKLOAD_CHAT,
+        )
+        await gateway.redis.lrem(gateway.pending_queue_key(WORKLOAD_CHAT, "p1"), 1, job_id)
+        job = await gateway.get_job(job_id)
+        enqueued_at_ms = int(job["enqueued_at_ms"])
+        job.update(
+            {
+                "status": JOB_STATUS_RUNNING,
+                "assigned_target_id": "cpu-target",
+                "assigned_worker_id": "worker-1",
+                "lease_until": 1,
+                "deadline_at": 4_000_000_000,
+                "admitted_at_ms": enqueued_at_ms + 100,
+                "started_at_ms": enqueued_at_ms + 300,
+                "queue_wait_ms": 300,
+                "pending_wait_ms": 100,
+                "admitted_wait_ms": 200,
+                "reserved_tokens": 1,
+                "reserved_ram_mb": 1,
+            }
+        )
+        await gateway.save_job(job)
+        await gateway.redis.zadd(gateway.ACTIVE_JOBS_ZSET, {job_id: 1})
+        gateway.redis.lists[gateway.processing_queue_key("worker-1")].append(job_id)
+
+        with self.assertLogs("llm_gateway", level="WARNING") as captured:
+            recovered = await gateway.requeue_stale_jobs()
+
+        requeued_job = await gateway.get_job(job_id)
+        self.assertEqual(recovered, 1)
+        self.assertEqual(requeued_job["status"], JOB_STATUS_QUEUED)
+        self.assertEqual(int(requeued_job["enqueued_at_ms"]), enqueued_at_ms)
+        self.assertIn("job_stale_requeue_observability", "\n".join(captured.output))
+        self.assertIn(f"preserved_enqueued_at_ms={enqueued_at_ms}", "\n".join(captured.output))
 
     async def test_child_enqueue_once_persists_root_child_linkage(self):
         gateway = self.build_gateway()

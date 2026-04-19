@@ -37,6 +37,37 @@ AUTH_MODE_AD = "ad"
 AUTH_MODE_LAB_OPEN = "lab_open"
 
 
+def model_identifier_candidates(model_identifier: Optional[str]) -> tuple[str, ...]:
+    candidate = (model_identifier or "").strip()
+    if not candidate:
+        return ()
+
+    candidates = [candidate]
+    if ":" not in candidate:
+        candidates.append(f"{candidate}:latest")
+    return tuple(candidates)
+
+
+def resolve_model_catalog_key(
+    model_identifier: Optional[str],
+    available_models: Dict[str, Dict[str, str]],
+) -> Optional[str]:
+    if not available_models:
+        return None
+
+    candidates = model_identifier_candidates(model_identifier)
+    for candidate in candidates:
+        if candidate in available_models:
+            return candidate
+
+    for candidate in candidates:
+        for key, model_info in available_models.items():
+            if (model_info.get("name") or "").strip() == candidate:
+                return key
+
+    return None
+
+
 def parse_group_mapping(value: Optional[str]) -> tuple[str, ...]:
     normalized_groups: list[str] = []
     seen: set[str] = set()
@@ -510,12 +541,10 @@ class Settings(BaseSettings):
     def pick_available_model(self, available_models: Dict[str, Dict[str, str]]) -> Optional[str]:
         if not available_models:
             return None
-        if self.DEFAULT_MODEL and self.DEFAULT_MODEL in available_models:
-            return self.DEFAULT_MODEL
         if self.DEFAULT_MODEL:
-            for key, model_info in available_models.items():
-                if model_info.get("name") == self.DEFAULT_MODEL:
-                    return key
+            resolved_key = resolve_model_catalog_key(self.DEFAULT_MODEL, available_models)
+            if resolved_key:
+                return resolved_key
         fallback_key = next(iter(available_models))
         if self.DEFAULT_MODEL and fallback_key != self.DEFAULT_MODEL:
             logger.warning("Default model %s is unavailable; falling back to %s", self.DEFAULT_MODEL, fallback_key)

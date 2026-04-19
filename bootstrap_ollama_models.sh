@@ -11,6 +11,37 @@ trim_whitespace() {
     printf "%s" "${value}"
 }
 
+model_latest_alias() {
+    local model
+    model="$(trim_whitespace "${1:-}")"
+    [[ -n "${model}" ]] || return 1
+    if [[ "${model}" == *:* ]]; then
+        printf '%s' "${model}"
+    else
+        printf '%s:latest' "${model}"
+    fi
+}
+
+model_name_matches() {
+    local requested="$1"
+    local latest_alias=""
+    local candidate=""
+
+    requested="$(trim_whitespace "${requested}")"
+    [[ -n "${requested}" ]] || return 1
+    latest_alias="$(model_latest_alias "${requested}")"
+
+    while IFS= read -r candidate; do
+        candidate="$(trim_whitespace "${candidate}")"
+        [[ -n "${candidate}" ]] || continue
+        [[ "${candidate}" == "${requested}" ]] && return 0
+        if [[ "${requested}" != *:* && "${candidate}" == "${latest_alias}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 info() {
     printf '[INFO] %s\n' "$*"
 }
@@ -161,7 +192,7 @@ list_models() {
 
 has_model() {
     local model="$1"
-    list_models | grep -Fx "${model}" >/dev/null 2>&1
+    list_models | model_name_matches "${model}"
 }
 
 can_reach_ollama_registry() {

@@ -202,6 +202,37 @@ trim_whitespace() {
     printf "%s" "${value}"
 }
 
+model_latest_alias() {
+    local model
+    model="$(trim_whitespace "${1:-}")"
+    [[ -n "${model}" ]] || return 1
+    if [[ "${model}" == *:* ]]; then
+        printf '%s' "${model}"
+    else
+        printf '%s:latest' "${model}"
+    fi
+}
+
+model_name_matches() {
+    local requested="$1"
+    local latest_alias=""
+    local candidate=""
+
+    requested="$(trim_whitespace "${requested}")"
+    [[ -n "${requested}" ]] || return 1
+    latest_alias="$(model_latest_alias "${requested}")"
+
+    while IFS= read -r candidate; do
+        candidate="$(trim_whitespace "${candidate}")"
+        [[ -n "${candidate}" ]] || continue
+        [[ "${candidate}" == "${requested}" ]] && return 0
+        if [[ "${requested}" != *:* && "${candidate}" == "${latest_alias}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 yes_no_unknown() {
     local value="$1"
     case "${value}" in
@@ -881,6 +912,15 @@ docker_cmd() {
 
 docker_compose() {
     docker_cmd compose "$@"
+}
+
+list_ollama_model_names() {
+    docker_compose exec -T ollama ollama list 2>/dev/null | awk 'NR>1 && NF {print $1}'
+}
+
+has_ollama_model() {
+    local model="$1"
+    list_ollama_model_names | model_name_matches "${model}"
 }
 
 docker_compose_for_install_mode() {
@@ -2745,7 +2785,7 @@ ensure_default_model_available() {
     print_info "Default model: ${DEFAULT_MODEL}"
     print_info "Secondary selected models: ${SELECTED_SECONDARY_MODELS:-<none>}"
 
-    if docker_compose exec -T ollama ollama list 2>/dev/null | awk 'NR>1 && NF {print $1}' | grep -Fx "${DEFAULT_MODEL}" >/dev/null 2>&1 && [[ -z "${SELECTED_SECONDARY_MODELS}" ]]; then
+    if has_ollama_model "${DEFAULT_MODEL}" && [[ -z "${SELECTED_SECONDARY_MODELS}" ]]; then
         MODEL_BOOTSTRAP_STATUS="already-present"
         MODEL_PRESENT_AFTER_BOOTSTRAP="yes"
         CHAT_READY_IMMEDIATELY="yes"
@@ -2785,7 +2825,7 @@ ensure_default_model_available() {
         done <<<"${BOOTSTRAP_FAILED_DETAILS}"
     fi
 
-    if docker_compose exec -T ollama ollama list 2>/dev/null | awk 'NR>1 && NF {print $1}' | grep -Fx "${DEFAULT_MODEL}" >/dev/null 2>&1; then
+    if has_ollama_model "${DEFAULT_MODEL}"; then
         MODEL_PRESENT_AFTER_BOOTSTRAP="yes"
         CHAT_READY_IMMEDIATELY="yes"
         print_success "Selected default model ${DEFAULT_MODEL} is present in runtime"

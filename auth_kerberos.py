@@ -15,7 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from ldap3.utils.conv import escape_filter_chars
 
-from config import settings
+from config import resolve_model_catalog_key, settings
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
@@ -541,12 +541,7 @@ def get_validation_user_default_model_access(
         )
         return {}
 
-    resolved_key = requested_default_model if requested_default_model in available_models else ""
-    if not resolved_key:
-        for model_key, live_model in available_models.items():
-            if str(live_model.get("name") or "").strip() == requested_default_model:
-                resolved_key = model_key
-                break
+    resolved_key = resolve_model_catalog_key(requested_default_model, available_models) or ""
 
     if not resolved_key:
         logger.error(
@@ -567,7 +562,7 @@ def get_validation_user_default_model_access(
         return {}
 
     registry = registry_catalog if registry_catalog is not None else load_model_registry_catalog()
-    registry_model = registry.get(resolved_key, {}) if registry else {}
+    registry_model = (registry.get(resolved_key) or registry.get(requested_default_model) or {}) if registry else {}
     category_key = str(registry_model.get("category") or "").strip()
     return {
         resolved_key: _resolve_model_access_entry(
@@ -744,15 +739,18 @@ def get_allowed_models_for_user(
             model_key = str(registry_model.get("model_key") or "").strip()
             if not model_key:
                 continue
-            live_model = models.get(model_key)
+            resolved_model_key = resolve_model_catalog_key(model_key, models)
+            if not resolved_model_key:
+                continue
+            live_model = models.get(resolved_model_key)
             if live_model is None:
                 continue
 
             category_key = str(registry_model.get("category") or "").strip()
             model_policy = policy_catalog.get(category_key, {}).get("models", {}).get(model_key, {})
-            allowed_models[model_key] = _resolve_model_access_entry(
+            allowed_models[resolved_model_key] = _resolve_model_access_entry(
                 live_model,
-                model_key=model_key,
+                model_key=resolved_model_key,
                 category_key=category_key,
                 policy_model=model_policy,
                 registry_model=registry_model,
@@ -761,12 +759,15 @@ def get_allowed_models_for_user(
         for category_key in allowed_categories:
             category_policy = policy_catalog.get(category_key, {})
             for model_key, model_policy in category_policy.get("models", {}).items():
-                live_model = models.get(model_key)
+                resolved_model_key = resolve_model_catalog_key(model_key, models)
+                if not resolved_model_key:
+                    continue
+                live_model = models.get(resolved_model_key)
                 if live_model is None:
                     continue
-                allowed_models[model_key] = _resolve_model_access_entry(
+                allowed_models[resolved_model_key] = _resolve_model_access_entry(
                     live_model,
-                    model_key=model_key,
+                    model_key=resolved_model_key,
                     category_key=category_key,
                     policy_model=model_policy,
                 )
