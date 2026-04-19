@@ -81,21 +81,7 @@ DOCUMENT_RETRY_PATTERNS = (
     "прикрепите файл",
 )
 DOCUMENT_NO_INFO_PATTERNS = (
-    "не указан",
-    "не указана",
-    "не указано",
-    "не указаны",
-    "нет даты",
-    "нет данных",
-    "нет сведений",
-    "не упоминается",
-    "не содержится",
-    "не содержит информации",
-    "отсутствует",
-    "отсутствуют",
-    "нет информации",
-    "не представлена",
-    "не представлен",
+    DOCUMENT_NO_INFORMATION_RESPONSE.lower(),
 )
 
 
@@ -144,7 +130,7 @@ def normalize_document_response(response_text: str) -> str:
         return DOCUMENT_NO_INFORMATION_RESPONSE
 
     lowered = normalized.lower()
-    if any(pattern in lowered for pattern in DOCUMENT_NO_INFO_PATTERNS):
+    if lowered in DOCUMENT_NO_INFO_PATTERNS:
         return DOCUMENT_NO_INFORMATION_RESPONSE
 
     return normalized

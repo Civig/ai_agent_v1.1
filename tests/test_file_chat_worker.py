@@ -22,7 +22,7 @@ fake_httpx = types.SimpleNamespace(
 sys.modules.setdefault("httpx", fake_httpx)
 
 from llm_gateway import JOB_KIND_FILE_CHAT
-from worker import LLMWorker
+from worker import DOCUMENT_NO_INFORMATION_RESPONSE, LLMWorker
 
 
 class FakeStreamResponse:
@@ -109,6 +109,96 @@ class FileChatWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("doc_chars=123", joined_logs)
         self.assertIn("inference_ms=", joined_logs)
         self.assertIn("total_ms=", joined_logs)
+
+    async def test_file_chat_job_keeps_specific_missing_field_answer(self):
+        worker = self.build_worker()
+        answer = "В документе не указана дата договора. Сумма договора: 10 руб."
+        worker.ollama.stream_chat = AsyncMock(
+            return_value=FakeStreamResponse(
+                [
+                    json.dumps({"message": {"content": answer}}),
+                    json.dumps({"done": True}),
+                ]
+            )
+        )
+
+        job = {
+            "id": "job-file-specific-missing",
+            "username": "alice",
+            "thread_id": "thread-file",
+            "model_name": "demo",
+            "prompt": "initial prompt",
+            "history": [],
+            "deadline_at": int(time.time()) + 30,
+            "job_kind": JOB_KIND_FILE_CHAT,
+            "file_chat": {
+                "retry_prompt": "retry prompt",
+                "suppress_token_stream": True,
+                "doc_chars": 123,
+                "files": [{"name": "report.txt", "size": 12}],
+            },
+        }
+
+        await worker.process_job(job)
+
+        worker.gateway.mark_job_completed.assert_awaited_once()
+        worker.conversation_writer.append_message.assert_any_await(
+            "alice",
+            "assistant",
+            answer,
+            thread_id="thread-file",
+        )
+        worker.gateway.emit_event.assert_any_await("job-file-specific-missing", {"result": answer})
+
+    async def test_file_chat_job_keeps_inaccessible_file_safeguard_after_retry(self):
+        worker = self.build_worker()
+        worker.ollama.stream_chat = AsyncMock(
+            side_effect=[
+                FakeStreamResponse(
+                    [
+                        json.dumps({"message": {"content": "Я не имею доступа к файлам."}}),
+                        json.dumps({"done": True}),
+                    ]
+                ),
+                FakeStreamResponse(
+                    [
+                        json.dumps({"message": {"content": "Пожалуйста, прикрепите файл."}}),
+                        json.dumps({"done": True}),
+                    ]
+                ),
+            ]
+        )
+
+        job = {
+            "id": "job-file-inaccessible",
+            "username": "alice",
+            "thread_id": "thread-file",
+            "model_name": "demo",
+            "prompt": "initial prompt",
+            "history": [],
+            "deadline_at": int(time.time()) + 30,
+            "job_kind": JOB_KIND_FILE_CHAT,
+            "file_chat": {
+                "retry_prompt": "retry prompt",
+                "suppress_token_stream": True,
+                "doc_chars": 123,
+                "files": [{"name": "report.txt", "size": 12}],
+            },
+        }
+
+        await worker.process_job(job)
+
+        worker.gateway.mark_job_completed.assert_awaited_once()
+        worker.conversation_writer.append_message.assert_any_await(
+            "alice",
+            "assistant",
+            DOCUMENT_NO_INFORMATION_RESPONSE,
+            thread_id="thread-file",
+        )
+        worker.gateway.emit_event.assert_any_await(
+            "job-file-inaccessible",
+            {"result": DOCUMENT_NO_INFORMATION_RESPONSE},
+        )
 
     async def test_normal_chat_job_still_streams_tokens(self):
         worker = self.build_worker()

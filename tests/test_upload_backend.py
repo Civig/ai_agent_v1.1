@@ -108,19 +108,30 @@ class UploadBackendTests(unittest.TestCase):
         self.assertTrue(response_requires_document_retry(""))
         self.assertFalse(response_requires_document_retry("В документе указана сумма 1500 руб."))
 
-    def test_normalize_document_response_rewrites_missing_info_to_fixed_phrase(self):
+    def test_normalize_document_response_keeps_specific_missing_fields(self):
         self.assertEqual(
             normalize_document_response("В документе не указана дата договора."),
-            DOCUMENT_NO_INFORMATION_RESPONSE,
+            "В документе не указана дата договора.",
         )
         self.assertEqual(
             normalize_document_response("Нет информации о дате."),
-            DOCUMENT_NO_INFORMATION_RESPONSE,
+            "Нет информации о дате.",
         )
         self.assertEqual(
             normalize_document_response("Сумма договора: 1500 руб."),
             "Сумма договора: 1500 руб.",
         )
+
+    def test_retry_document_prompt_does_not_force_exact_no_info_phrase(self):
+        prompt = parser_stage.build_retry_document_prompt(
+            "Какая дата указана в документе?",
+            [{"name": "report.txt", "content": "Сумма договора: 1500 руб."}],
+        )
+
+        self.assertIn("Нельзя говорить, что у тебя нет доступа к файлам", prompt)
+        self.assertIn(DOCUMENT_NO_INFORMATION_RESPONSE, prompt)
+        self.assertNotIn("верни только точную фразу", prompt)
+        self.assertNotIn("Ответь ровно так", prompt)
 
     def test_stage_uploads_rejects_unsupported_extension(self):
         upload = UploadFile(filename="malware.exe", file=io.BytesIO(b"payload"))
