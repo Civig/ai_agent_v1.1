@@ -1,0 +1,11 @@
+# Smoke Fixture: Entity List
+Project: Project Helios
+Document code: SMK-ENT-001
+
+Entities:
+- ALPHA-17: primary telemetry sensor
+- BRAVO-42: backup relay
+- CHARLIE-09: audit node
+
+Owner: Smoke QA
+Region: EU-North

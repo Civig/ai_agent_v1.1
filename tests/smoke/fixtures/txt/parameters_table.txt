@@ -1,0 +1,6 @@
+# Smoke Fixture: Parameters
+parameter | value | unit | note
+max_tokens | 2048 | tokens | deterministic test budget
+temperature | 0.2 | ratio | low variance
+retry_limit | 3 | attempts | bounded retry
+ocr_timeout | 30 | seconds | parser guard

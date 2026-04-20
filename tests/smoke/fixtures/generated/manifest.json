@@ -1,0 +1,61 @@
+{
+  "generated_by": "scripts/smoke/generate_fixtures.py",
+  "fixture_count": 11,
+  "fixtures": [
+    {
+      "path": "tests/smoke/fixtures/docx/mixed_content.docx",
+      "bytes": 1169,
+      "sha256": "a09177b2fbc4cdcf4c35f708d0ba1f5318647eed50d21a73a813d87b25cdc58a"
+    },
+    {
+      "path": "tests/smoke/fixtures/docx/table_and_paragraphs.docx",
+      "bytes": 1132,
+      "sha256": "eb99559b3955754795f09ba020a5776460d299f4868ccc75355f3e0be2854d1a"
+    },
+    {
+      "path": "tests/smoke/fixtures/images/ocr_success.png",
+      "bytes": 1539,
+      "sha256": "3bbba31554f1fbe315571b780f8499b7a04172974929c4a92ef29c3a968445d4"
+    },
+    {
+      "path": "tests/smoke/fixtures/images/oversized_dimension.png",
+      "bytes": 20300,
+      "sha256": "5ab7e2e8a1114310532c187c783d3fa19c651616ccd79a9e63ebd448a4c6001b"
+    },
+    {
+      "path": "tests/smoke/fixtures/pdf/entity_report.pdf",
+      "bytes": 847,
+      "sha256": "7553ab6c97a92de547ea0dad69de09f853764e282faea2f76e0181ddcb13c35a"
+    },
+    {
+      "path": "tests/smoke/fixtures/pdf/mixed_3p_report.pdf",
+      "bytes": 1715,
+      "sha256": "e13f7da86c35fcb57649345ea1c43a2f1506f79b4cac7522cc3ab8f381ce83ef"
+    },
+    {
+      "path": "tests/smoke/fixtures/pdf/monthly_metrics.pdf",
+      "bytes": 867,
+      "sha256": "9e299fc144186c2e7051e03be3647638e37adf7bac00d9692869be60bf669e24"
+    },
+    {
+      "path": "tests/smoke/fixtures/pdf/parameter_table.pdf",
+      "bytes": 911,
+      "sha256": "25e478ae4ffe96bc18fb52d379796d5f296fa8a82169d69cc651bc36968d76e4"
+    },
+    {
+      "path": "tests/smoke/fixtures/txt/entities.txt",
+      "bytes": 212,
+      "sha256": "3a03b111f46ed79770b0a23955530e09519dbe21be851cb4c294130860f6f616"
+    },
+    {
+      "path": "tests/smoke/fixtures/txt/missing_fields.txt",
+      "bytes": 189,
+      "sha256": "647d6b887876b78106bd5c82b62f8a10527fdcb2f64d32797d504845b80f12b4"
+    },
+    {
+      "path": "tests/smoke/fixtures/txt/parameters_table.txt",
+      "bytes": 241,
+      "sha256": "f92bdd4506d1a4bc19bb5a5e8addf77afc7a593bdb96ed6d5a70fa3b82c81b7a"
+    }
+  ]
+}

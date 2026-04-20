@@ -45,6 +45,7 @@ Thumbs.db
 # Logs
 *.log
 .install/
+artifacts/
 
 # Backups
 *.backup.*
