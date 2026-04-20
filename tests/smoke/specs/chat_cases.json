@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "Deterministic-ish short chat smoke prompts. Prompts ask the model to echo exact tokens so the evaluator can stay simple.",
+  "cases": [
+    {
+      "id": "chat_exact_ok",
+      "prompt": "Ответь ровно одной строкой: SMOKE_CHAT_OK",
+      "must_contain": ["SMOKE_CHAT_OK"],
+      "must_not_contain": ["ошибка", "error"],
+      "expected_status": "success",
+      "notes": "Baseline chat request and SSE completion check."
+    },
+    {
+      "id": "chat_short_arithmetic",
+      "prompt": "Сколько будет 2 + 2? Ответь ровно одной цифрой.",
+      "must_contain": ["4"],
+      "must_not_contain": ["5", "ошибка"],
+      "expected_status": "success",
+      "notes": "Tiny reasoning smoke with a stable answer."
+    },
+    {
+      "id": "chat_model_readiness_phrase",
+      "prompt": "Для проверки готовности модели верни фразу MODEL_READY_SMOKE и больше ничего.",
+      "must_contain": ["MODEL_READY_SMOKE"],
+      "must_not_contain": ["не могу", "нет доступа"],
+      "expected_status": "success",
+      "notes": "Catches model/runtime path failures that still return an HTTP 200 stream."
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# Smoke Fixture: Partial Record
+Ticket: SMK-PARTIAL-003
+Owner: Smoke QA
+Priority: Medium
+Region: EU-North
+
+Known missing fields:
+- Budget is not provided.
+- Final deadline is not provided.

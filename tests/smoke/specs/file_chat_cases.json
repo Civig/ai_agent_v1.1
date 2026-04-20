@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "description": "File-chat smoke cases for parser, OCR, document grounding and controlled failures.",
+  "cases": [
+    {
+      "id": "txt_list_entities",
+      "file": "tests/smoke/fixtures/txt/entities.txt",
+      "prompt": "Перечисли сущности из документа. Верни только имена сущностей через запятую.",
+      "must_contain": ["ALPHA-17", "BRAVO-42", "CHARLIE-09"],
+      "must_not_contain": ["DELTA-99"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "TXT entity extraction."
+    },
+    {
+      "id": "txt_extract_parameters",
+      "file": "tests/smoke/fixtures/txt/parameters_table.txt",
+      "prompt": "Извлеки параметры max_tokens, temperature, retry_limit и ocr_timeout с их значениями.",
+      "must_contain": ["max_tokens", "2048", "temperature", "0.2", "retry_limit", "3", "ocr_timeout", "30"],
+      "must_not_contain": ["4096"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "Table-like TXT parameter extraction."
+    },
+    {
+      "id": "txt_partial_missing_fields",
+      "file": "tests/smoke/fixtures/txt/missing_fields.txt",
+      "prompt": "Верни Ticket, Owner, Priority и Region. Для Budget и Final deadline напиши НЕ УКАЗАНО.",
+      "must_contain": ["SMK-PARTIAL-003", "Smoke QA", "Medium", "EU-North", "НЕ УКАЗАНО"],
+      "must_not_contain": ["1000000", "2027"],
+      "expected_status": "success",
+      "allowed_fallback": true,
+      "notes": "Partial-answer case: known fields should be returned, missing fields should stay missing."
+    },
+    {
+      "id": "pdf_list_entities",
+      "file": "tests/smoke/fixtures/pdf/entity_report.pdf",
+      "prompt": "Перечисли все сущности из PDF. Верни только коды сущностей.",
+      "must_contain": ["ALPHA-17", "BRAVO-42", "CHARLIE-09"],
+      "must_not_contain": ["OMEGA-00"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "PDF text extraction with named entities."
+    },
+    {
+      "id": "pdf_extract_table",
+      "file": "tests/smoke/fixtures/pdf/parameter_table.pdf",
+      "prompt": "Извлеки таблицу параметров из PDF. Обязательно укажи temperature и retry_limit.",
+      "must_contain": ["temperature", "0.2", "retry_limit", "3"],
+      "must_not_contain": ["0.9"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "PDF table-like content."
+    },
+    {
+      "id": "pdf_monthly_metrics",
+      "file": "tests/smoke/fixtures/pdf/monthly_metrics.pdf",
+      "prompt": "Перечисли месяцы и success rate из документа.",
+      "must_contain": ["January", "91%", "February", "93%", "March", "95%", "April", "94%"],
+      "must_not_contain": ["December"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "Several months and success metrics."
+    },
+    {
+      "id": "pdf_mixed_three_pages",
+      "file": "tests/smoke/fixtures/pdf/mixed_3p_report.pdf",
+      "prompt": "Кратко перечисли проект, сущности, параметры и месячные метрики из 3-страничного PDF.",
+      "must_contain": ["Project Helios", "ALPHA-17", "max_tokens", "January", "April"],
+      "must_not_contain": ["Project Apollo"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "2-3 page mixed PDF content."
+    },
+    {
+      "id": "docx_table_and_paragraphs",
+      "file": "tests/smoke/fixtures/docx/table_and_paragraphs.docx",
+      "prompt": "Извлеки параметры из DOCX-таблицы и назови проект из абзацев.",
+      "must_contain": ["Project Helios", "max_tokens", "2048", "temperature", "0.2"],
+      "must_not_contain": ["Project Apollo"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "DOCX table and paragraph extraction."
+    },
+    {
+      "id": "docx_mixed_content",
+      "file": "tests/smoke/fixtures/docx/mixed_content.docx",
+      "prompt": "Перечисли сущности и месячные показатели из DOCX.",
+      "must_contain": ["ALPHA-17", "BRAVO-42", "CHARLIE-09", "January", "91%", "March", "95%"],
+      "must_not_contain": ["DELTA-99"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "DOCX mixed content."
+    },
+    {
+      "id": "txt_missing_budget_question",
+      "file": "tests/smoke/fixtures/txt/entities.txt",
+      "prompt": "Какой бюджет указан в документе? Если бюджет не указан, ответь ровно: НЕ УКАЗАНО.",
+      "must_contain": ["НЕ УКАЗАНО"],
+      "must_not_contain": ["руб", "USD", "EUR"],
+      "expected_status": "success",
+      "allowed_fallback": true,
+      "notes": "Question about absent information."
+    },
+    {
+      "id": "image_ocr_success",
+      "file": "tests/smoke/fixtures/images/ocr_success.png",
+      "prompt": "Прочитай текст на изображении и верни найденный код и score.",
+      "must_contain": ["ALPHA", "17", "98"],
+      "must_not_contain": ["BRAVO-42"],
+      "expected_status": "success",
+      "allowed_fallback": false,
+      "notes": "Small OCR-positive PNG."
+    },
+    {
+      "id": "image_oversized_dimension_failure",
+      "file": "tests/smoke/fixtures/images/oversized_dimension.png",
+      "prompt": "Прочитай текст на изображении.",
+      "must_contain": ["превышает", "лимит"],
+      "must_not_contain": [],
+      "expected_status": "failure",
+      "allowed_fallback": false,
+      "notes": "Controlled parse failure: image dimension exceeds FILE_PROCESSING_IMAGE_MAX_DIMENSION."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "light": {
+      "concurrency": 1,
+      "chat_requests": 3,
+      "file_chat_cases": 1,
+      "timeout_seconds": 180,
+      "notes": "Single-user smoke-load contour for first rented GPU host validation."
+    },
+    "medium": {
+      "concurrency": 3,
+      "chat_requests": 9,
+      "file_chat_cases": 2,
+      "timeout_seconds": 240,
+      "notes": "Small concurrent contour. Keep below default single-user login and request rate limits unless using multiple users."
+    },
+    "warm_cold": {
+      "concurrency": 1,
+      "cold_chat_requests": 1,
+      "warm_chat_requests": 3,
+      "file_chat_cases": 1,
+      "quiet_seconds_after_cold": 2,
+      "timeout_seconds": 240,
+      "notes": "Separates the first cold answer from a short warm sequence."
+    }
+  }
+}
