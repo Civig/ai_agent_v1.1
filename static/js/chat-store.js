@@ -23,8 +23,8 @@ export class ChatStore {
         this.listeners = new Set();
         this.state = {
             status: ChatLifecycle.IDLE,
-            currentModel: initialState.currentModel || "phi3:mini",
-            currentModelKey: initialState.currentModelKey || "phi3:mini",
+            currentModel: initialState.currentModel || initialState.currentModelKey || "",
+            currentModelKey: initialState.currentModelKey || initialState.currentModel || "",
             currentModelDescription: initialState.currentModelDescription || "Модель по умолчанию",
             authLabel: initialState.authLabel || "Kerberos / Active Directory",
             environmentLabel: initialState.environmentLabel || "corp.local",

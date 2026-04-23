@@ -5,6 +5,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from tests.model_contract_test_helper import exported_canonical_default_model
+
 
 class InstallPostgresProfileTests(unittest.TestCase):
     def _copy_install_fixture(self, temp_dir: str) -> Path:
@@ -51,7 +53,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
             SSO_KEYTAB_PATH="/etc/corporate-ai-sso/http.keytab"
             MODEL_ACCESS_CODING_GROUPS=""
             MODEL_ACCESS_ADMIN_GROUPS=""
-            DEFAULT_MODEL="phi3:mini"
+            DEFAULT_MODEL="$(python3 ./tools/export_installer_model_catalog.py --default-model ./models/catalog.json)"
             REDIS_PASSWORD="redis-secret"
             POSTGRES_DB="corporate_ai"
             POSTGRES_USER="corporate_ai"
@@ -138,6 +140,10 @@ class InstallPostgresProfileTests(unittest.TestCase):
         )
         return result.stdout
 
+    def _run_exported_default_model(self, temp_dir: str) -> str:
+        temp_root = self._copy_install_fixture(temp_dir)
+        return exported_canonical_default_model(temp_root)
+
     @staticmethod
     def _parse_model_catalog_keys(records_text: str) -> list[str]:
         keys: list[str] = []
@@ -157,6 +163,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         return None
 
     def test_fresh_install_profile_enables_postgres_conversation_runtime(self):
+        expected_default_model = exported_canonical_default_model(Path(__file__).resolve().parents[1])
         with tempfile.TemporaryDirectory() as temp_dir:
             env_text = self._run_write_env_file(temp_dir)
 
@@ -188,6 +195,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_DUAL_WRITE_CONVERSATION"), "true")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_READ_THREADS"), "true")
         self.assertEqual(self._get_env_value(env_text, "PERSISTENT_DB_READ_MESSAGES"), "true")
+        self.assertEqual(self._get_env_value(env_text, "DEFAULT_MODEL"), expected_default_model)
         self.assertEqual(
             self._get_env_value(env_text, "PERSISTENT_DB_URL"),
             "postgresql+psycopg://corporate_ai:postgres-secret@postgres:5432/corporate_ai",
@@ -287,9 +295,11 @@ class InstallPostgresProfileTests(unittest.TestCase):
     def test_curated_installer_catalog_is_loaded_from_registry_in_expected_order(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             records_text = self._run_model_catalog_records(temp_dir)
+            default_model = self._run_exported_default_model(temp_dir)
 
+        keys = self._parse_model_catalog_keys(records_text)
         self.assertEqual(
-            self._parse_model_catalog_keys(records_text),
+            keys,
             [
                 "phi3:mini",
                 "gemma2:2b",
@@ -300,6 +310,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
                 "qwen2.5:14b",
             ],
         )
+        self.assertEqual(default_model, keys[0])
 
     def test_non_installable_and_catalog_only_models_do_not_leak_into_installer_shortlist(self):
         with tempfile.TemporaryDirectory() as temp_dir:

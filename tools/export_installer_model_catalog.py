@@ -20,6 +20,7 @@ REQUIRED_FIELDS = (
     "installer_comment",
     "installer_source_hint",
 )
+DEFAULT_MODEL_FLAG = "--default-model"
 
 
 def as_gb(value: object) -> str:
@@ -94,13 +95,30 @@ def emit_records(models: list[dict]) -> None:
         print("|".join(record))
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) > 2:
-        raise SystemExit("Usage: export_installer_model_catalog.py [registry-path]")
+def emit_default_model(models: list[dict]) -> None:
+    default_model = str(models[0].get("install_name") or "").strip()
+    if not default_model:
+        raise SystemExit("Installer model registry does not define a canonical default model")
+    print(default_model)
 
-    registry_path = Path(argv[1]) if len(argv) == 2 else Path(__file__).resolve().parents[1] / "models" / "catalog.json"
+
+def main(argv: list[str]) -> int:
+    args = list(argv[1:])
+    emit_default_only = False
+    if args and args[0] == DEFAULT_MODEL_FLAG:
+        emit_default_only = True
+        args = args[1:]
+
+    if len(args) > 1:
+        raise SystemExit("Usage: export_installer_model_catalog.py [--default-model] [registry-path]")
+
+    registry_path = Path(args[0]) if args else Path(__file__).resolve().parents[1] / "models" / "catalog.json"
     payload = load_registry(registry_path)
-    emit_records(installer_models(payload))
+    models = installer_models(payload)
+    if emit_default_only:
+        emit_default_model(models)
+    else:
+        emit_records(models)
     return 0
 
 

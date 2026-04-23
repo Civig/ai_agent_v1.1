@@ -1761,7 +1761,7 @@ def resolve_requested_model(
 
 
 def get_placeholder_model_info() -> Dict[str, str]:
-    placeholder_key = settings.DEFAULT_MODEL or "llm-unavailable"
+    placeholder_key = settings.default_model_identifier or "llm-unavailable"
     return {
         "key": placeholder_key,
         "name": placeholder_key,
@@ -1770,9 +1770,10 @@ def get_placeholder_model_info() -> Dict[str, str]:
 
 
 def _select_cpu_lightweight_model(allowed_models: Dict[str, Dict[str, str]]) -> Optional[Dict[str, str]]:
-    for key, model_info in allowed_models.items():
-        if key == "phi3:mini" or model_info.get("name") == "phi3:mini":
-            return {"key": key, "name": model_info["name"], "description": model_info["description"]}
+    preferred_default_key = resolve_model_catalog_key(settings.default_model_identifier, allowed_models)
+    if preferred_default_key:
+        model_info = allowed_models[preferred_default_key]
+        return {"key": preferred_default_key, "name": model_info["name"], "description": model_info["description"]}
 
     lightweight_models = []
     for key, model_info in allowed_models.items():
@@ -2976,6 +2977,7 @@ async def refresh_access_token(request: Request):
         if await is_token_revoked(redis_client, payload):
             return JSONResponse({"error": "Invalid refresh token"}, status_code=401)
 
+        default_model = settings.default_model_identifier or "llm-unavailable"
         current_user = enrich_identity_session_fields(
             {
                 "username": payload.get("sub", ""),
@@ -2983,9 +2985,9 @@ async def refresh_access_token(request: Request):
                 "display_name": payload.get("display_name", payload.get("sub", "")),
                 "email": payload.get("email", f"{payload.get('sub', '')}@{settings.LDAP_DOMAIN}"),
                 "groups": payload.get("groups", []),
-                "model": payload.get("model", settings.DEFAULT_MODEL or "phi3:mini"),
+                "model": payload.get("model", default_model),
                 "model_description": payload.get("model_description", "Модель по умолчанию"),
-                "model_key": payload.get("model_key", payload.get("model", settings.DEFAULT_MODEL or "phi3:mini")),
+                "model_key": payload.get("model_key", payload.get("model", default_model)),
                 "auth_source": payload.get("auth_source"),
                 "auth_time": payload.get("auth_time"),
                 "directory_checked_at": payload.get("directory_checked_at"),

@@ -5,6 +5,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from tests.model_contract_test_helper import exported_canonical_default_model
+
 
 class BootstrapOllamaModelsContractTests(unittest.TestCase):
     def _copy_fixture(self, temp_dir: str) -> Path:
@@ -59,19 +61,25 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
             text=True,
         )
 
+    def _run_exported_default_model(self, temp_dir: str) -> str:
+        temp_root = self._copy_fixture(temp_dir)
+        return exported_canonical_default_model(temp_root)
+
     def test_pull_model_uses_bounded_retry_budget(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_bootstrap_shell(
                 temp_dir,
                 """
                 attempt_log="$(mktemp)"
+                default_model="$(python3 ./tools/export_installer_model_catalog.py --default-model ./models/catalog.json)"
                 run_with_timeout() {
                     printf 'attempt\\n' >> "${attempt_log}"
                     return 124
                 }
                 sleep() { :; }
                 set +e
-                output="$(pull_model "phi3:mini" 2>&1)"
+                output="$(pull_model "${default_model}" 2>&1)"
                 status=$?
                 set -e
                 attempts="$(wc -l < "${attempt_log}")"
@@ -85,8 +93,32 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("status=124", result.stdout)
         self.assertIn("attempts=2", result.stdout)
-        self.assertIn("Attempting to pull phi3:mini into Ollama (attempt 1/2", result.stdout)
-        self.assertIn("Attempting to pull phi3:mini into Ollama (attempt 2/2", result.stdout)
+        self.assertIn(f"Attempting to pull {expected_default_model} into Ollama (attempt 1/2", result.stdout)
+        self.assertIn(f"Attempting to pull {expected_default_model} into Ollama (attempt 2/2", result.stdout)
+
+    def test_bootstrap_uses_exported_canonical_default_when_env_default_is_blank(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_fixture(temp_dir)
+            expected_default_model = exported_canonical_default_model(temp_root)
+            shell_script = textwrap.dedent(
+                """
+                set -Eeuo pipefail
+                cd "$1"
+                unset DEFAULT_MODEL
+                export BOOTSTRAP_OLLAMA_SOURCE_ONLY=1
+                source ./bootstrap_ollama_models.sh
+                printf 'default=%s\\n' "${DEFAULT_MODEL}"
+                """
+            )
+            result = subprocess.run(
+                ["bash", "-lc", shell_script, "bash", str(temp_root)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn(f"default={expected_default_model}", result.stdout)
 
     def test_has_model_accepts_short_alias_when_latest_tag_is_live(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -156,11 +188,12 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
 
     def test_main_succeeds_via_local_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_bootstrap_shell(
                 temp_dir,
                 """
                 model_ready=0
-                DEFAULT_MODEL="phi3:mini"
+                DEFAULT_MODEL="$(python3 ./tools/export_installer_model_catalog.py --default-model ./models/catalog.json)"
                 LOCAL_GGUF="/tmp/offline-model.gguf"
                 list_models() {
                     if [[ "${model_ready}" == "1" ]]; then
@@ -187,13 +220,15 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("status=0", result.stdout)
         self.assertIn("available after local GGUF bootstrap", result.stdout)
+        self.assertIn(expected_default_model, result.stdout)
 
     def test_main_fails_explicitly_when_pull_fails_and_no_local_asset_exists(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_bootstrap_shell(
                 temp_dir,
                 """
-                DEFAULT_MODEL="phi3:mini"
+                DEFAULT_MODEL="$(python3 ./tools/export_installer_model_catalog.py --default-model ./models/catalog.json)"
                 LOCAL_GGUF=""
                 list_models() { :; }
                 has_model() { return 1; }
@@ -210,15 +245,19 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("status=1", result.stdout)
-        self.assertIn("Model bootstrap failed: bounded pull for phi3:mini did not complete successfully and no local GGUF asset is available", result.stdout)
+        self.assertIn(
+            f"Model bootstrap failed: bounded pull for {expected_default_model} did not complete successfully and no local GGUF asset is available",
+            result.stdout,
+        )
 
     def test_main_succeeds_via_bounded_online_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_bootstrap_shell(
                 temp_dir,
                 """
                 model_ready=0
-                DEFAULT_MODEL="phi3:mini"
+                DEFAULT_MODEL="$(python3 ./tools/export_installer_model_catalog.py --default-model ./models/catalog.json)"
                 LOCAL_GGUF=""
                 list_models() {
                     if [[ "${model_ready}" == "1" ]]; then
@@ -245,14 +284,16 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("status=0", result.stdout)
         self.assertIn("available after bounded online bootstrap", result.stdout)
+        self.assertIn(expected_default_model, result.stdout)
 
     def test_main_bootstraps_selected_secondary_models_and_reports_failures(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_bootstrap_shell(
                 temp_dir,
                 """
                 available_models=""
-                DEFAULT_MODEL="phi3:mini"
+                DEFAULT_MODEL="$(python3 ./tools/export_installer_model_catalog.py --default-model ./models/catalog.json)"
                 SECONDARY_MODELS="gemma2:2b,codellama:13b"
                 list_models() {
                     local model=""
@@ -265,7 +306,7 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
                 }
                 can_reach_ollama_registry() { return 0; }
                 pull_model() {
-                    if [[ "$1" == "phi3:mini" || "$1" == "gemma2:2b" ]]; then
+                    if [[ "$1" == "${DEFAULT_MODEL}" || "$1" == "gemma2:2b" ]]; then
                         available_models="${available_models} $1"
                         return 0
                     fi
@@ -282,16 +323,17 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("status=0", result.stdout)
-        self.assertIn("BOOTSTRAP_SUMMARY|successful|phi3:mini,gemma2:2b", result.stdout)
+        self.assertIn(f"BOOTSTRAP_SUMMARY|successful|{expected_default_model},gemma2:2b", result.stdout)
         self.assertIn("BOOTSTRAP_SUMMARY|failed|codellama:13b", result.stdout)
         self.assertIn("BOOTSTRAP_FAILURE_DETAIL|codellama:13b|pull exited with status 1", result.stdout)
 
     def test_install_uses_bootstrap_script_contract_without_exec_bit_dependency(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_install_shell(
                 temp_dir,
                 """
-                DEFAULT_MODEL="phi3:mini"
+                DEFAULT_MODEL="$(python3 ./tools/export_installer_model_catalog.py --default-model ./models/catalog.json)"
                 SELECTED_SECONDARY_MODELS="gemma2:2b,qwen2.5-coder:7b"
                 DOWNLOAD_DEFAULT_MODEL_NOW="true"
                 printf '%s\n' \
@@ -331,3 +373,4 @@ class BootstrapOllamaModelsContractTests(unittest.TestCase):
         self.assertIn("model_status=done", result.stdout)
         self.assertIn("model_present=yes", result.stdout)
         self.assertIn("chat_ready=yes", result.stdout)
+        self.assertIn(expected_default_model, result.stdout)

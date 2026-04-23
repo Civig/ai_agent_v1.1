@@ -1,4 +1,5 @@
 ﻿import ipaddress
+import json
 import logging
 import re
 from functools import lru_cache
@@ -65,6 +66,52 @@ def resolve_model_catalog_key(
             if (model_info.get("name") or "").strip() == candidate:
                 return key
 
+    return None
+
+
+def _installer_model_sort_key(model: Dict[str, object]) -> tuple[int, str]:
+    raw_order = model.get("installer_order")
+    if isinstance(raw_order, bool) or not isinstance(raw_order, int):
+        raw_order = 10**9
+    model_name = str(model.get("install_name") or "").strip()
+    return raw_order, model_name
+
+
+def load_model_registry_payload(registry_path: Path) -> Dict[str, object]:
+    try:
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load model registry payload from %s: %s", registry_path, exc)
+        return {}
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        logger.warning("Model registry payload at %s does not contain a valid 'models' array", registry_path)
+        return {}
+
+    return payload
+
+
+def installer_registry_models(payload: Dict[str, object]) -> list[Dict[str, object]]:
+    raw_models = payload.get("models")
+    if not isinstance(raw_models, list):
+        return []
+
+    models = [
+        model
+        for model in raw_models
+        if isinstance(model, dict)
+        and model.get("enabled_in_installer") is True
+        and model.get("installer_installable") is True
+    ]
+    return sorted(models, key=_installer_model_sort_key)
+
+
+def canonical_installer_default_model(registry_path: Path) -> Optional[str]:
+    payload = load_model_registry_payload(registry_path)
+    for model in installer_registry_models(payload):
+        install_name = str(model.get("install_name") or "").strip()
+        if install_name:
+            return install_name
     return None
 
 
@@ -538,16 +585,24 @@ class Settings(BaseSettings):
             logger.warning("Failed to fetch models from Ollama: %s", exc)
         return {}
 
+    @property
+    def default_model_identifier(self) -> Optional[str]:
+        configured_default = (self.DEFAULT_MODEL or "").strip()
+        if configured_default:
+            return configured_default
+        return canonical_installer_default_model(self.model_registry_path)
+
     def pick_available_model(self, available_models: Dict[str, Dict[str, str]]) -> Optional[str]:
         if not available_models:
             return None
-        if self.DEFAULT_MODEL:
-            resolved_key = resolve_model_catalog_key(self.DEFAULT_MODEL, available_models)
+        default_model = self.default_model_identifier
+        if default_model:
+            resolved_key = resolve_model_catalog_key(default_model, available_models)
             if resolved_key:
                 return resolved_key
         fallback_key = next(iter(available_models))
-        if self.DEFAULT_MODEL and fallback_key != self.DEFAULT_MODEL:
-            logger.warning("Default model %s is unavailable; falling back to %s", self.DEFAULT_MODEL, fallback_key)
+        if default_model and fallback_key != default_model:
+            logger.warning("Default model %s is unavailable; falling back to %s", default_model, fallback_key)
         return fallback_key
 
 

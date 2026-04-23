@@ -386,7 +386,7 @@ def get_lab_user_identity() -> Dict[str, Any]:
     _, _, principal_domain = canonical_principal.partition("@")
     email_domain = principal_domain.lower() or "local.lab"
     display_name = " ".join(part.capitalize() for part in re.split(r"[_-]+", username) if part) or "Lab User"
-    default_model = (settings.DEFAULT_MODEL or "").strip() or "phi3:mini"
+    default_model = settings.default_model_identifier or "llm-unavailable"
     return enrich_identity_session_fields(
         {
             "username": username,
@@ -533,7 +533,7 @@ def get_validation_user_default_model_access(
     available_models: Dict[str, Dict[str, str]],
     registry_catalog: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, str]]:
-    requested_default_model = str(getattr(settings, "DEFAULT_MODEL", "") or "").strip()
+    requested_default_model = str(settings.default_model_identifier or "").strip()
     if not requested_default_model:
         logger.error(
             "Installer validation user %s has no DEFAULT_MODEL configured; denying model access",
@@ -786,7 +786,7 @@ def get_model_for_user(user_info: Dict[str, Any]) -> Dict[str, str]:
     available_models = settings.get_available_models()
     allowed_models = get_allowed_models_for_user(user_info, available_models)
     if not allowed_models:
-        placeholder_key = settings.DEFAULT_MODEL or "llm-unavailable"
+        placeholder_key = settings.default_model_identifier or "llm-unavailable"
         logger.error("No LLM models available while assigning a model to user %s", user_info["username"])
         return {
             "name": placeholder_key,
@@ -894,14 +894,15 @@ async def get_current_user(
         if not username:
             return None
 
+        default_model = settings.default_model_identifier or "llm-unavailable"
         user_info = {
             "username": username,
             "display_name": payload.get("display_name", username),
             "email": payload.get("email", f"{username}@{settings.LDAP_DOMAIN}"),
             "groups": payload.get("groups", []),
-            "model": payload.get("model", settings.DEFAULT_MODEL or "phi3:mini"),
+            "model": payload.get("model", default_model),
             "model_description": payload.get("model_description", "Модель по умолчанию"),
-            "model_key": payload.get("model_key", payload.get("model", settings.DEFAULT_MODEL or "phi3:mini")),
+            "model_key": payload.get("model_key", payload.get("model", default_model)),
         }
         return enrich_identity_session_fields(
             {

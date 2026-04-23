@@ -59,7 +59,7 @@ AUTH_MODE="ad"
 LAB_OPEN_AUTH_ACK="${LAB_OPEN_AUTH_ACK:-false}"
 LAB_USER_USERNAME="lab_user"
 LAB_USER_CANONICAL_PRINCIPAL="lab_user@LOCAL.LAB"
-DEFAULT_MODEL="phi3:mini"
+DEFAULT_MODEL=""
 DOWNLOAD_DEFAULT_MODEL_NOW="true"
 SELECTED_INSTALLER_MODELS=""
 SELECTED_SECONDARY_MODELS=""
@@ -1694,6 +1694,24 @@ model_catalog_records() {
     python3 "${exporter_path}" "${registry_path}" || die "Failed to read installer model registry"
 }
 
+canonical_installer_default_model() {
+    local registry_path="${ROOT_DIR}/models/catalog.json"
+    local exporter_path="${ROOT_DIR}/tools/export_installer_model_catalog.py"
+
+    [[ -f "${registry_path}" ]] || die "Installer model registry not found at ${registry_path}"
+    [[ -f "${exporter_path}" ]] || die "Installer model catalog exporter not found at ${exporter_path}"
+    command_exists python3 || die "python3 is required to read the installer model registry"
+
+    python3 "${exporter_path}" --default-model "${registry_path}" || die "Failed to resolve canonical installer default model"
+}
+
+ensure_canonical_default_model() {
+    if [[ -n "${DEFAULT_MODEL}" ]]; then
+        return 0
+    fi
+    DEFAULT_MODEL="$(canonical_installer_default_model)"
+}
+
 load_installer_model_records() {
     INSTALLER_MODEL_RECORDS=()
     local record=""
@@ -1870,6 +1888,7 @@ print_model_catalog() {
 
 prompt_default_model_selection() {
     local existing_default_model="$1"
+    ensure_canonical_default_model
     local default_choice_model="${existing_default_model:-${DEFAULT_MODEL}}"
     local default_choice_number=""
     local model_choice=""
@@ -1948,6 +1967,8 @@ validate_smoke_test_model_contract() {
     if [[ -z "${TEST_ADMIN_USER}" ]]; then
         return 0
     fi
+
+    ensure_canonical_default_model
 
     if is_model_in_installer_catalog "${DEFAULT_MODEL}"; then
         return 0

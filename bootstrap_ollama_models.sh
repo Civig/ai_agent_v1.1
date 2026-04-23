@@ -67,6 +67,17 @@ load_env_value() {
     printf '%s' "${value}"
 }
 
+catalog_default_model() {
+    local registry_path="${ROOT_DIR}/models/catalog.json"
+    local exporter_path="${ROOT_DIR}/tools/export_installer_model_catalog.py"
+
+    [[ -f "${registry_path}" ]] || return 1
+    [[ -f "${exporter_path}" ]] || return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+
+    python3 "${exporter_path}" --default-model "${registry_path}"
+}
+
 is_positive_integer() {
     [[ "${1:-}" =~ ^[0-9]+$ ]] && [[ "${1}" -gt 0 ]]
 }
@@ -127,7 +138,7 @@ PY
 }
 
 DEFAULT_MODEL="${DEFAULT_MODEL:-$(load_env_value "DEFAULT_MODEL")}"
-DEFAULT_MODEL="${DEFAULT_MODEL:-gemma2:2b}"
+DEFAULT_MODEL="${DEFAULT_MODEL:-$(catalog_default_model || true)}"
 SECONDARY_MODEL="${SECONDARY_MODEL:-}"
 SECONDARY_MODELS="${SECONDARY_MODELS:-}"
 LOCAL_GGUF="${LOCAL_GGUF:-$(find "${ROOT_DIR}/models" -maxdepth 1 -type f -name '*.gguf' | head -n 1 || true)}"
