@@ -27,6 +27,7 @@ readonly HOST_STATE_FILE
 readonly HOST_BACKUP_DIR
 readonly HOST_DOCKER_REPO_BACKUP
 readonly INSTALL_USER
+readonly CUSTOM_INSTALLER_MODEL_SENTINEL="__custom_model__"
 readonly LOCAL_ADMIN_BOOTSTRAP_SECRET_FILE="${HOST_STATE_DIR}/local-admin-bootstrap.secret"
 readonly STANDALONE_CHAT_BOOTSTRAP_SECRET_FILE="${HOST_STATE_DIR}/standalone-chat-bootstrap.secret"
 
@@ -1694,6 +1695,17 @@ model_catalog_records() {
     python3 "${exporter_path}" "${registry_path}" || die "Failed to read installer model registry"
 }
 
+hot_model_catalog_records() {
+    local registry_path="${ROOT_DIR}/models/catalog.json"
+    local exporter_path="${ROOT_DIR}/tools/export_installer_model_catalog.py"
+
+    [[ -f "${registry_path}" ]] || die "Installer model registry not found at ${registry_path}"
+    [[ -f "${exporter_path}" ]] || die "Installer model catalog exporter not found at ${exporter_path}"
+    command_exists python3 || die "python3 is required to read the installer model registry"
+
+    python3 "${exporter_path}" --hot-list "${registry_path}" || die "Failed to read installer hot model registry"
+}
+
 canonical_installer_default_model() {
     local registry_path="${ROOT_DIR}/models/catalog.json"
     local exporter_path="${ROOT_DIR}/tools/export_installer_model_catalog.py"
@@ -1718,18 +1730,19 @@ load_installer_model_records() {
     while IFS= read -r record; do
         [[ -n "${record}" ]] || continue
         INSTALLER_MODEL_RECORDS+=("${record}")
-    done < <(model_catalog_records)
+    done < <(hot_model_catalog_records)
 
-    [[ "${#INSTALLER_MODEL_RECORDS[@]}" -gt 0 ]] || die "Installer model registry does not contain installable models"
+    [[ "${#INSTALLER_MODEL_RECORDS[@]}" -gt 0 ]] || die "Installer model registry does not contain curated hot-list models"
 }
 
 installer_record_field() {
     local record="$1"
     local field_name="$2"
-    local model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint
+    local family model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint
 
-    IFS='|' read -r model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint <<<"${record}"
+    IFS='|' read -r family model_id display_name purpose cpu_guidance min_ram rec_ram gpu_guidance min_vram comment source_hint <<<"${record}"
     case "${field_name}" in
+        family) printf '%s' "${family}" ;;
         model_id) printf '%s' "${model_id}" ;;
         display_name) printf '%s' "${display_name}" ;;
         purpose) printf '%s' "${purpose}" ;;
@@ -1742,6 +1755,13 @@ installer_record_field() {
         source_hint) printf '%s' "${source_hint}" ;;
         *) return 1 ;;
     esac
+}
+
+installer_custom_choice_number() {
+    if [[ "${#INSTALLER_MODEL_RECORDS[@]}" -eq 0 ]]; then
+        load_installer_model_records
+    fi
+    printf '%s' "$(( ${#INSTALLER_MODEL_RECORDS[@]} + 1 ))"
 }
 
 installer_model_id_by_number() {
@@ -1780,6 +1800,7 @@ installer_default_choice_number() {
 parse_numeric_model_selection() {
     local selection="$1"
     local total_models=0
+    local custom_choice_number=0
     local trimmed_selection=""
     local -a raw_choices=()
     local -a chosen_numbers=()
@@ -1790,7 +1811,8 @@ parse_numeric_model_selection() {
     if [[ "${#INSTALLER_MODEL_RECORDS[@]}" -eq 0 ]]; then
         load_installer_model_records
     fi
-    total_models="${#INSTALLER_MODEL_RECORDS[@]}"
+    total_models=$(( ${#INSTALLER_MODEL_RECORDS[@]} + 1 ))
+    custom_choice_number="${total_models}"
 
     trimmed_selection="$(trim_whitespace "${selection}")"
     if [[ -z "${trimmed_selection}" ]]; then
@@ -1815,6 +1837,14 @@ parse_numeric_model_selection() {
             printf 'Model selection number is out of range: %s\n' "${choice}" >&2
             return 1
         fi
+        if [[ "${choice_number}" -eq "${custom_choice_number}" ]]; then
+            if [[ "${#raw_choices[@]}" -gt 1 ]]; then
+                printf 'Custom model selection cannot be combined with other installer menu choices\n' >&2
+                return 1
+            fi
+            printf '%s\n' "${CUSTOM_INSTALLER_MODEL_SENTINEL}"
+            return 0
+        fi
         if array_contains "${choice_number}" "${chosen_numbers[@]}"; then
             printf 'Duplicate model selection number: %s\n' "${choice}" >&2
             return 1
@@ -1826,11 +1856,8 @@ parse_numeric_model_selection() {
     done
 }
 
-apply_installer_model_selection() {
-    local selection="$1"
-    local -a selected_models=()
-
-    mapfile -t selected_models < <(parse_numeric_model_selection "${selection}") || die "Invalid installer model selection: ${selection}"
+apply_resolved_model_selection() {
+    local -a selected_models=("$@")
     [[ "${#selected_models[@]}" -gt 0 ]] || die "At least one installer model must be selected"
 
     DEFAULT_MODEL="${selected_models[0]}"
@@ -1840,6 +1867,19 @@ apply_installer_model_selection() {
     else
         SELECTED_SECONDARY_MODELS=""
     fi
+}
+
+apply_installer_model_selection() {
+    local selection="$1"
+    local -a selected_models=()
+
+    mapfile -t selected_models < <(parse_numeric_model_selection "${selection}") || die "Invalid installer model selection: ${selection}"
+    [[ "${#selected_models[@]}" -gt 0 ]] || die "At least one installer model must be selected"
+    if [[ "${selected_models[0]}" == "${CUSTOM_INSTALLER_MODEL_SENTINEL}" ]]; then
+        die "Custom installer selection requires explicit custom model input"
+    fi
+
+    apply_resolved_model_selection "${selected_models[@]}"
 }
 
 is_model_in_installer_catalog() {
@@ -1859,20 +1899,26 @@ is_model_in_installer_catalog() {
 print_model_catalog() {
     local index=1
     local record=""
+    local current_family=""
+    local custom_choice_number=""
 
     if [[ "${#INSTALLER_MODEL_RECORDS[@]}" -eq 0 ]]; then
         load_installer_model_records
     fi
+    custom_choice_number="$(installer_custom_choice_number)"
     print_header "Model Selection"
     print_info "Deployment profile: ${SELECTED_INSTALL_MODE^^}"
-    print_info "Installer model catalog: installable project-oriented options sourced from models/catalog.json"
+    print_info "Installer hot list: curated project-oriented options sourced from models/catalog.json"
     print_info "Choose one or more installer numbers such as 1 or 1,2,5"
+    print_info "Custom model is a separate path and cannot be combined with other menu choices"
 
     for record in "${INSTALLER_MODEL_RECORDS[@]}"; do
-        printf "%2d. %s (%s)\n" "${index}" \
-            "$(installer_record_field "${record}" "model_id")" \
-            "$(installer_record_field "${record}" "display_name")"
-        printf "    Purpose: %s\n" "$(installer_record_field "${record}" "purpose")"
+        if [[ "$(installer_record_field "${record}" "family")" != "${current_family}" ]]; then
+            current_family="$(installer_record_field "${record}" "family")"
+            printf "\n%s\n" "${current_family}"
+        fi
+        printf "%2d. %s\n" "${index}" "$(installer_record_field "${record}" "model_id")"
+        printf "    %s\n" "$(installer_record_field "${record}" "purpose")"
         printf "    CPU: %s | Minimum RAM: %s | Recommended RAM: %s\n" \
             "$(installer_record_field "${record}" "cpu_guidance")" \
             "$(installer_record_field "${record}" "min_ram")" \
@@ -1880,10 +1926,76 @@ print_model_catalog() {
         printf "    GPU: %s | Minimum VRAM: %s\n" \
             "$(installer_record_field "${record}" "gpu_guidance")" \
             "$(installer_record_field "${record}" "min_vram")"
-        printf "    Comment: %s\n" "$(installer_record_field "${record}" "comment")"
-        printf "    Source: %s | Installable: true\n" "$(installer_record_field "${record}" "source_hint")"
         index=$((index + 1))
     done
+
+    printf "\nСвоя модель\n"
+    printf "%2d. Своя модель\n" "${custom_choice_number}"
+    printf "    Указать модель вручную по exact Ollama tag\n"
+}
+
+catalog_model_status() {
+    local registry_path="${ROOT_DIR}/models/catalog.json"
+    local target_model="$1"
+
+    [[ -f "${registry_path}" ]] || die "Installer model registry not found at ${registry_path}"
+    command_exists python3 || die "python3 is required to read the installer model registry"
+
+    python3 - "${registry_path}" "${target_model}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+registry_path = Path(sys.argv[1])
+target_model = sys.argv[2].strip()
+payload = json.loads(registry_path.read_text(encoding="utf-8"))
+
+for model in payload.get("models", []):
+    if str(model.get("install_name") or "").strip() != target_model:
+        continue
+    if model.get("enabled_in_installer") is True and model.get("installer_installable") is True:
+        print("installable")
+    else:
+        print("catalog")
+    break
+else:
+    print("missing")
+PY
+}
+
+apply_custom_model_selection() {
+    local default_model="$1"
+    local custom_model=""
+    local model_status=""
+
+    read -r -p "Custom model / Своя модель: exact Ollama tag [default: ${default_model}]: " custom_model
+    custom_model="$(trim_whitespace "${custom_model}")"
+    if [[ -z "${custom_model}" ]]; then
+        custom_model="${default_model}"
+    fi
+    [[ -n "${custom_model}" ]] || die "Custom model tag cannot be empty"
+
+    model_status="$(catalog_model_status "${custom_model}")"
+    case "${model_status}" in
+        installable)
+            print_info "Custom model '${custom_model}' is present in the installable installer catalog"
+            ;;
+        catalog)
+            print_warning "Custom model '${custom_model}' exists in models/catalog.json but is outside the installer-managed installable catalog"
+            print_warning "Smoke validation user requires an installable catalog model"
+            ;;
+        missing)
+            print_warning "Custom model '${custom_model}' is not present in models/catalog.json"
+            print_warning "Installer will keep the exact tag as-is and cannot validate compatibility in advance"
+            ;;
+        *)
+            die "Unexpected custom model catalog status for '${custom_model}': ${model_status}"
+            ;;
+    esac
+
+    DEFAULT_MODEL="${custom_model}"
+    SELECTED_INSTALLER_MODELS="${DEFAULT_MODEL}"
+    SELECTED_SECONDARY_MODELS=""
 }
 
 prompt_default_model_selection() {
@@ -1891,7 +2003,9 @@ prompt_default_model_selection() {
     ensure_canonical_default_model
     local default_choice_model="${existing_default_model:-${DEFAULT_MODEL}}"
     local default_choice_number=""
+    local custom_choice_number=""
     local model_choice=""
+    local -a selected_models=()
 
     if ! is_interactive_shell; then
         DEFAULT_MODEL="${default_choice_model}"
@@ -1904,13 +2018,11 @@ prompt_default_model_selection() {
     fi
 
     load_installer_model_records
-    if ! default_choice_number="$(installer_default_choice_number "${default_choice_model}" || true)"; then
-        default_choice_number=""
-    fi
+    custom_choice_number="$(installer_custom_choice_number)"
+    default_choice_number="$(installer_default_choice_number "${default_choice_model}" || true)"
     if [[ -z "${default_choice_number}" ]]; then
-        default_choice_number="1"
-        default_choice_model="$(installer_record_field "${INSTALLER_MODEL_RECORDS[0]}" "model_id")"
-        print_warning "Existing/default model is not in the installable installer catalog; falling back to ${default_choice_model}"
+        default_choice_number="${custom_choice_number}"
+        print_info "Existing/default model ${default_choice_model} is outside the curated hot list and is available via the custom model path"
     fi
 
     print_model_catalog
@@ -1920,7 +2032,14 @@ prompt_default_model_selection() {
     if [[ -z "${model_choice}" ]]; then
         model_choice="${default_choice_number}"
     fi
-    apply_installer_model_selection "${model_choice}"
+
+    mapfile -t selected_models < <(parse_numeric_model_selection "${model_choice}") || die "Invalid installer model selection: ${model_choice}"
+    [[ "${#selected_models[@]}" -gt 0 ]] || die "At least one installer model must be selected"
+    if [[ "${selected_models[0]}" == "${CUSTOM_INSTALLER_MODEL_SENTINEL}" ]]; then
+        apply_custom_model_selection "${default_choice_model}"
+    else
+        apply_resolved_model_selection "${selected_models[@]}"
+    fi
 
     if [[ "${INSTALL_PROFILE}" == "standalone_gpu_lab" ]]; then
         DOWNLOAD_DEFAULT_MODEL_NOW="true"

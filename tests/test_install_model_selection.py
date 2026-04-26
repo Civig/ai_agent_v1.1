@@ -62,7 +62,6 @@ class InstallModelSelectionTests(unittest.TestCase):
 
     def test_numeric_single_select_sets_default_without_secondary_models(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_install_shell(
                 temp_dir,
                 """
@@ -75,13 +74,12 @@ class InstallModelSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-        self.assertIn(f"selected={expected_default_model}", result.stdout)
-        self.assertIn(f"default={expected_default_model}", result.stdout)
+        self.assertIn("selected=deepseek-r1:8b", result.stdout)
+        self.assertIn("default=deepseek-r1:8b", result.stdout)
         self.assertIn("secondary=<none>", result.stdout)
 
     def test_numeric_multi_select_preserves_order_and_sets_default_and_secondary_models(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_install_shell(
                 temp_dir,
                 """
@@ -94,13 +92,12 @@ class InstallModelSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-        self.assertIn(f"selected={expected_default_model},gemma2:2b,llama3.1:8b", result.stdout)
-        self.assertIn(f"default={expected_default_model}", result.stdout)
-        self.assertIn("secondary=gemma2:2b,llama3.1:8b", result.stdout)
+        self.assertIn("selected=deepseek-r1:8b,deepseek-r1:14b,qwen3:14b", result.stdout)
+        self.assertIn("default=deepseek-r1:8b", result.stdout)
+        self.assertIn("secondary=deepseek-r1:14b,qwen3:14b", result.stdout)
 
     def test_numeric_multi_select_trims_spaces(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            expected_default_model = self._run_exported_default_model(temp_dir)
             result = self._run_install_shell(
                 temp_dir,
                 """
@@ -111,7 +108,7 @@ class InstallModelSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-        self.assertIn(f"models={expected_default_model},gemma2:2b,llama3.1:8b", result.stdout)
+        self.assertIn("models=deepseek-r1:8b,deepseek-r1:14b,qwen3:14b", result.stdout)
 
     def test_numeric_multi_select_rejects_invalid_numbers(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -150,6 +147,33 @@ class InstallModelSelectionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("status=1", result.stdout)
         self.assertIn("Duplicate model selection number", result.stdout)
+
+    def test_custom_model_prompt_preserves_exact_existing_default_via_custom_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            expected_default_model = self._run_exported_default_model(temp_dir)
+            result = self._run_install_shell(
+                temp_dir,
+                f"""
+                is_interactive_shell() {{
+                    return 0
+                }}
+                SELECTED_INSTALL_MODE="cpu"
+                INSTALL_PROFILE="enterprise"
+                custom_choice="$(installer_custom_choice_number)"
+                prompt_input="$(printf '%s\\n\\n%s\\n' "${{custom_choice}}" "n")"
+                prompt_default_model_selection "{expected_default_model}" <<< "${{prompt_input}}"
+                printf 'selected=%s\\n' "${{SELECTED_INSTALLER_MODELS}}"
+                printf 'default=%s\\n' "${{DEFAULT_MODEL}}"
+                printf 'secondary=%s\\n' "${{SELECTED_SECONDARY_MODELS:-<none>}}"
+                printf 'download=%s\\n' "${{DOWNLOAD_DEFAULT_MODEL_NOW}}"
+                """,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn(f"selected={expected_default_model}", result.stdout)
+        self.assertIn(f"default={expected_default_model}", result.stdout)
+        self.assertIn("secondary=<none>", result.stdout)
+        self.assertIn("download=false", result.stdout)
 
 
 if __name__ == "__main__":

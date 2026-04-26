@@ -21,6 +21,7 @@ REQUIRED_FIELDS = (
     "installer_source_hint",
 )
 DEFAULT_MODEL_FLAG = "--default-model"
+HOT_LIST_FLAG = "--hot-list"
 
 
 def as_gb(value: object) -> str:
@@ -66,6 +67,26 @@ def installer_models(payload: dict) -> list[dict]:
     )
 
 
+def hot_installer_models(payload: dict) -> list[dict]:
+    models = [
+        model
+        for model in payload["models"]
+        if model.get("enabled_in_installer") is True
+        and model.get("installer_installable") is True
+        and model.get("installer_hot") is True
+    ]
+    if not models:
+        raise SystemExit("Installer model registry does not contain any curated hot-list models")
+    return sorted(
+        models,
+        key=lambda model: (
+            int(model.get("installer_hot_order", 10**9)),
+            int(model.get("installer_order", 10**9)),
+            str(model.get("install_name", "")),
+        ),
+    )
+
+
 def validate_model(model: dict) -> None:
     model_key = str(model.get("install_name") or model.get("id") or "unknown-model")
     missing = [field for field in REQUIRED_FIELDS if field not in model]
@@ -95,6 +116,31 @@ def emit_records(models: list[dict]) -> None:
         print("|".join(record))
 
 
+def emit_hot_records(models: list[dict]) -> None:
+    for model in models:
+        validate_model(model)
+        family = str(model.get("family") or "").strip()
+        if not family:
+            raise SystemExit(f"Curated hot-list model '{model['install_name']}' is missing family")
+
+        record = [
+            family,
+            str(model["install_name"]).strip(),
+            str(model["installer_display_name"]).strip(),
+            str(model["installer_summary"]).strip(),
+            str(model["installer_cpu_guidance"]).strip(),
+            as_gb(model["installer_min_ram_gb"]),
+            as_gb(model["installer_rec_ram_gb"]),
+            str(model["installer_gpu_guidance"]).strip(),
+            as_gb(model["installer_min_vram_gb"]),
+            str(model["installer_comment"]).strip(),
+            str(model["installer_source_hint"]).strip(),
+        ]
+        if not all(record):
+            raise SystemExit(f"Curated hot-list model '{model['install_name']}' contains an empty installer field")
+        print("|".join(record))
+
+
 def emit_default_model(models: list[dict]) -> None:
     default_model = str(models[0].get("install_name") or "").strip()
     if not default_model:
@@ -105,19 +151,33 @@ def emit_default_model(models: list[dict]) -> None:
 def main(argv: list[str]) -> int:
     args = list(argv[1:])
     emit_default_only = False
-    if args and args[0] == DEFAULT_MODEL_FLAG:
-        emit_default_only = True
-        args = args[1:]
+    emit_hot_only = False
+    while args and args[0].startswith("--"):
+        flag = args.pop(0)
+        if flag == DEFAULT_MODEL_FLAG:
+            emit_default_only = True
+            continue
+        if flag == HOT_LIST_FLAG:
+            emit_hot_only = True
+            continue
+        raise SystemExit("Usage: export_installer_model_catalog.py [--default-model] [--hot-list] [registry-path]")
+
+    if emit_default_only and emit_hot_only:
+        raise SystemExit("Usage: export_installer_model_catalog.py [--default-model] [--hot-list] [registry-path]")
 
     if len(args) > 1:
-        raise SystemExit("Usage: export_installer_model_catalog.py [--default-model] [registry-path]")
+        raise SystemExit("Usage: export_installer_model_catalog.py [--default-model] [--hot-list] [registry-path]")
 
     registry_path = Path(args[0]) if args else Path(__file__).resolve().parents[1] / "models" / "catalog.json"
     payload = load_registry(registry_path)
-    models = installer_models(payload)
     if emit_default_only:
+        models = installer_models(payload)
         emit_default_model(models)
+    elif emit_hot_only:
+        models = hot_installer_models(payload)
+        emit_hot_records(models)
     else:
+        models = installer_models(payload)
         emit_records(models)
     return 0
 

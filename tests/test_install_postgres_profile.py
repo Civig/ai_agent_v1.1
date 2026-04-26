@@ -140,6 +140,25 @@ class InstallPostgresProfileTests(unittest.TestCase):
         )
         return result.stdout
 
+    def _run_hot_model_catalog_records(self, temp_dir: str) -> str:
+        temp_root = self._copy_install_fixture(temp_dir)
+        shell_script = textwrap.dedent(
+            """
+            set -Eeuo pipefail
+            cd "$1"
+            export INSTALL_SH_SOURCE_ONLY=1
+            source ./install.sh
+            hot_model_catalog_records
+            """
+        )
+        result = subprocess.run(
+            ["bash", "-lc", shell_script, "bash", str(temp_root)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
+
     def _run_exported_default_model(self, temp_dir: str) -> str:
         temp_root = self._copy_install_fixture(temp_dir)
         return exported_canonical_default_model(temp_root)
@@ -152,6 +171,19 @@ class InstallPostgresProfileTests(unittest.TestCase):
             if not line:
                 continue
             keys.append(line.split("|", 1)[0])
+        return keys
+
+    @staticmethod
+    def _parse_hot_model_catalog_keys(records_text: str) -> list[str]:
+        keys: list[str] = []
+        for line in records_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("|")
+            if len(parts) < 2:
+                continue
+            keys.append(parts[1])
         return keys
 
     @staticmethod
@@ -286,7 +318,7 @@ class InstallPostgresProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_validate_smoke_test_model_contract(
                 temp_dir,
-                default_model="qwen2.5-coder:7b",
+                default_model="deepseek-r1:8b",
                 test_admin_user="aitest",
             )
 
@@ -294,33 +326,38 @@ class InstallPostgresProfileTests(unittest.TestCase):
 
     def test_curated_installer_catalog_is_loaded_from_registry_in_expected_order(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            records_text = self._run_model_catalog_records(temp_dir)
+            records_text = self._run_hot_model_catalog_records(temp_dir)
             default_model = self._run_exported_default_model(temp_dir)
 
-        keys = self._parse_model_catalog_keys(records_text)
+        keys = self._parse_hot_model_catalog_keys(records_text)
         self.assertEqual(
             keys,
             [
-                "phi3:mini",
-                "gemma2:2b",
-                "mistral",
-                "qwen2.5-coder:7b",
+                "deepseek-r1:8b",
+                "deepseek-r1:14b",
+                "deepseek-r1:32b",
+                "qwen3:8b",
+                "qwen3:14b",
+                "qwen3:30b",
+                "gemma3:4b",
+                "gemma3:12b",
                 "llama3.1:8b",
-                "codellama:13b",
-                "qwen2.5:14b",
+                "llama3.1:70b",
+                "mistral-small3.1",
             ],
         )
-        self.assertEqual(default_model, keys[0])
+        self.assertEqual(default_model, "phi3:mini")
+        self.assertNotEqual(default_model, keys[0])
 
     def test_non_installable_and_catalog_only_models_do_not_leak_into_installer_shortlist(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            records_text = self._run_model_catalog_records(temp_dir)
+            records_text = self._run_hot_model_catalog_records(temp_dir)
 
-        keys = self._parse_model_catalog_keys(records_text)
+        keys = self._parse_hot_model_catalog_keys(records_text)
         self.assertNotIn("deepseek-coder:7b", keys)
         self.assertNotIn("gpt-oss:20b", keys)
         self.assertNotIn("qwen3.5:0.8b", keys)
-        self.assertNotIn("gemma3:4b", keys)
+        self.assertNotIn("phi3:mini", keys)
         self.assertNotIn("phi4-mini", keys)
 
     def test_smoke_validation_user_rejects_custom_model_outside_curated_catalog(self):
