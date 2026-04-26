@@ -1,3 +1,4 @@
+import json
 import shutil
 import subprocess
 import tempfile
@@ -359,6 +360,31 @@ class InstallPostgresProfileTests(unittest.TestCase):
         self.assertNotIn("qwen3.5:0.8b", keys)
         self.assertNotIn("phi3:mini", keys)
         self.assertNotIn("phi4-mini", keys)
+
+    def test_hot_models_are_present_in_policy_files_for_their_catalog_policy_tier(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        catalog = json.loads((repo_root / "models" / "catalog.json").read_text(encoding="utf-8"))
+        policy_members: dict[str, dict[str, dict[str, object]]] = {}
+
+        for category in ("general", "coding", "admin"):
+            payload = json.loads((repo_root / "model_policies" / category / "policy.json").read_text(encoding="utf-8"))
+            policy_members[category] = {entry["model_key"]: entry for entry in payload.get("models", [])}
+
+        missing: list[str] = []
+        gpu_flag_missing: list[str] = []
+        for model in catalog["models"]:
+            if model.get("installer_hot") is not True:
+                continue
+            category = str(model.get("policy_tier") or "").strip()
+            model_key = str(model.get("install_name") or "").strip()
+            if not category or model_key not in policy_members.get(category, {}):
+                missing.append(f"{model_key}:{category or '<none>'}")
+                continue
+            if model.get("gpu_required") is True and policy_members[category][model_key].get("requires_gpu") is not True:
+                gpu_flag_missing.append(model_key)
+
+        self.assertEqual(missing, [])
+        self.assertEqual(gpu_flag_missing, [])
 
     def test_smoke_validation_user_rejects_custom_model_outside_curated_catalog(self):
         with tempfile.TemporaryDirectory() as temp_dir:
