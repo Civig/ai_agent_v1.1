@@ -133,6 +133,8 @@ docker compose exec -T app bash -lc 'getent hosts pypi.org || true'
 
 ### How to check
 
+The `ollama pull` command below uses the current canonical `DEFAULT_MODEL` (`phi3:mini`) only as a manual example. It is not the full installer catalog and not the source of truth for the hot list, which now comes from `models/catalog.json`.
+
 ```bash
 docker compose exec -T ollama ollama list
 docker compose exec -T ollama ollama pull phi3:mini
@@ -145,6 +147,7 @@ docker compose logs --tail=100 ollama
 - retry `ollama pull` only after the basic Docker/PyPI/host reachability checks succeed
 - if the external Ollama endpoint remains unavailable while local DNS and egress are healthy, wait and retry later
 - this is outside application scope until the model source is reachable
+- the smoke or validation path for `INSTALL_TEST_USER` still checks only the current `DEFAULT_MODEL`
 
 ## Login Failed or Kerberos Error
 

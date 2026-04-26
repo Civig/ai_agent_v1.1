@@ -155,6 +155,8 @@ docker compose exec -T ollama ollama list
 
 ### Подтянуть модель вручную
 
+Эти команды ниже являются только примерами ручного `ollama pull`. Актуальный installer hot list строится из `models/catalog.json`, а не из этого блока; текущий canonical `DEFAULT_MODEL` по catalog contract остаётся `phi3:mini`.
+
 ```bash
 docker compose exec -T ollama ollama pull phi3:mini
 docker compose exec -T ollama ollama pull gemma2:2b
@@ -167,6 +169,8 @@ docker compose exec -T ollama ollama pull gemma2:2b
 ```
 
 `bootstrap_ollama_models.sh` использует bounded pull timeout и, при наличии локального `models/*.gguf`, может перейти на local fallback. Если ни pull, ни local asset не дали `DEFAULT_MODEL`, script завершится явной ошибкой.
+
+Smoke или validation path для `INSTALL_TEST_USER` остаётся `DEFAULT_MODEL`-only и не раскрывает весь installer hot list.
 
 ## Проверка queue и job lifecycle
 

@@ -202,6 +202,8 @@ If you intentionally want to refresh the dependency or image baseline, treat tha
 
 The installer writes `.env` for you. On a fresh install it enables the new parser file path out of the box with `ENABLE_PARSER_STAGE=true` and `ENABLE_PARSER_PUBLIC_CUTOVER=true`, and it also writes the current PostgreSQL-backed conversation persistence baseline with `PERSISTENT_DB_ENABLED=true`, schema bootstrap, dual-write, and read-cutover flags. If `.env` already exists and those values are set explicitly, the installer keeps them.
 
+The canonical `DEFAULT_MODEL` is derived from the contract in `models/catalog.json`; the current canonical value remains `phi3:mini`. The smoke or validation path for `INSTALL_TEST_USER` remains `DEFAULT_MODEL`-only: that user validates only the current default model and does not receive the full installer hot list.
+
 For trusted reverse-proxy SSO, operators must verify `TRUSTED_PROXY_SOURCE_CIDRS` separately. It must list the source addresses/CIDRs of the reverse proxy hop that actually reaches `app`. A loopback-only value is correct only when that hop really arrives from loopback.
 
 Uvicorn proxy-header trust uses a separate runtime knob, `FORWARDED_ALLOW_IPS`. When it is left empty, container startup automatically limits trust to loopback addresses plus the local CIDRs attached to the `app` container so the current Docker Compose + nginx baseline keeps working without wildcard trust. For production, operators should explicitly set the exact reverse-proxy source IP/CIDR that reaches `app`.
@@ -507,7 +509,9 @@ Use GPU mode only when:
 
 The application depends on at least one Ollama model being available.
 
-The installer now shows only installable models from the installer view and accepts numeric selections:
+The installer now builds a curated hot list from `models/catalog.json`, shows it grouped by family, and accepts numeric selections for that list. It also provides a separate custom-model path where the operator can enter an exact Ollama tag manually.
+
+For the hot list, the following selection formats work:
 
 - `1` for a single model
 - `1,2,5` for multiple models
@@ -533,6 +537,8 @@ Bootstrap contract:
 - a fully offline bootstrap is not promised unless the required local model asset has been prepared in advance
 
 Useful checks:
+
+The `ollama pull` commands below remain manual examples only. They are not the source of truth for the installer catalog and do not describe the full current hot list.
 
 ```bash
 docker compose exec -T ollama ollama list

@@ -202,6 +202,8 @@ Compose stack реально включает:
 
 `install.sh` пишет `.env` сам. Для fresh install он сразу включает новый parser file path через `ENABLE_PARSER_STAGE=true` и `ENABLE_PARSER_PUBLIC_CUTOVER=true`, а также текущий PostgreSQL-backed conversation persistence baseline через `PERSISTENT_DB_ENABLED=true`, schema bootstrap, dual-write и read-cutover flags. Если `.env` уже существует и в нём эти значения заданы явно, installer их сохраняет.
 
+Canonical `DEFAULT_MODEL` выводится из contract в `models/catalog.json`; текущее canonical значение остаётся `phi3:mini`. Smoke или validation path для `INSTALL_TEST_USER` остаётся `DEFAULT_MODEL`-only: этот пользователь проверяет только текущую default model и не получает весь installer hot list.
+
 Для trusted reverse-proxy SSO оператор должен отдельно проверить `TRUSTED_PROXY_SOURCE_CIDRS`: это должен быть список source addresses/CIDR того reverse proxy, который реально обращается к `app`. Значение loopback подходит только там, где hop до `app` действительно приходит с loopback.
 
 Для Uvicorn proxy-header trust действует отдельный runtime knob `FORWARDED_ALLOW_IPS`. Если он пустой, container startup автоматически ограничивает доверие loopback-адресами и локальными CIDR сетевых интерфейсов самого `app` container, чтобы текущий Docker Compose + nginx baseline продолжал работать без wildcard trust. Для production оператор должен явно задать точный source IP/CIDR reverse proxy hop, который доходит до `app`.
@@ -507,7 +509,9 @@ docker compose --profile gpu up -d
 
 Приложению нужна хотя бы одна доступная модель Ollama.
 
-Installer теперь показывает только installable-модели из installer view и принимает нумерованный выбор:
+Installer теперь строит curated hot list из `models/catalog.json`, показывает его по семействам и принимает нумерованный выбор для этого списка. Отдельно доступен путь `Своя модель`, где можно ввести exact Ollama tag вручную.
+
+Для hot list работают такие варианты выбора:
 
 - `1` для одной модели
 - `1,2,5` для нескольких моделей
@@ -533,6 +537,8 @@ Installer уже пытается выполнить bounded bootstrap для в
 - fully offline bootstrap не обещается без заранее подготовленного локального model asset
 
 Полезные проверки:
+
+Команды `ollama pull` ниже остаются только примерами ручной проверки. Они не являются source of truth для installer catalog и не описывают полный актуальный hot list.
 
 ```bash
 docker compose exec -T ollama ollama list
