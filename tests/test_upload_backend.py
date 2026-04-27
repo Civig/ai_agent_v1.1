@@ -367,6 +367,37 @@ class UploadBackendTests(unittest.TestCase):
 
         self.assertEqual(text, "fallback-page-1\nfallback-page-2")
 
+    def test_extract_text_from_pdf_rejects_empty_text_layer_without_ocr(self):
+        class FakePage:
+            def __init__(self, text):
+                self.text = text
+
+            def extract_text(self):
+                return self.text
+
+        class FakePdfReader:
+            def __init__(self, path):
+                self.path = path
+                self.pages = [FakePage(None), FakePage("  \n\t"), FakePage("")]
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pypdf":
+                return types.SimpleNamespace(PdfReader=FakePdfReader)
+            if name == "pytesseract":
+                raise AssertionError("PDF no-text detection must not use image OCR")
+            return original_import(name, globals, locals, fromlist, level)
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            handle.write(b"%PDF-1.4\n%dummy\n")
+            handle.flush()
+            with mock.patch("builtins.__import__", side_effect=fake_import):
+                with self.assertRaises(RuntimeError) as error:
+                    extract_text_from_pdf(Path(handle.name))
+
+        self.assertEqual(str(error.exception), parser_stage.pdf_no_text_layer_detail())
+
     def test_extract_text_from_pdf_falls_back_to_fitz_when_pypdf_is_unavailable(self):
         class FakePage:
             def __init__(self, text):

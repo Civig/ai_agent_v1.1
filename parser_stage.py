@@ -141,6 +141,10 @@ def pdf_parse_failed_detail() -> str:
     return "Не удалось извлечь текст из PDF"
 
 
+def pdf_no_text_layer_detail() -> str:
+    return "PDF не содержит извлекаемого текстового слоя; OCR для PDF пока не поддержан"
+
+
 def image_dimension_limit_exceeded_detail(width: int, height: int) -> str:
     return (
         f"Изображение превышает лимит размера: {width}x{height}. "
@@ -228,6 +232,13 @@ def extract_text_from_docx(path: Path) -> str:
     return trim_document_content("".join(text_chunks))
 
 
+def _trim_pdf_text_or_raise(text_fragments: list[str]) -> str:
+    text = trim_document_content("\n".join(text_fragments))
+    if not text.strip():
+        raise RuntimeError(pdf_no_text_layer_detail())
+    return text
+
+
 def extract_text_from_pdf(path: Path) -> str:
     parse_errors: list[Exception] = []
     try:
@@ -240,7 +251,7 @@ def extract_text_from_pdf(path: Path) -> str:
             page_count = len(reader.pages)
             if page_count > MAX_PDF_PAGES:
                 raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
-            return trim_document_content("\n".join((page.extract_text() or "") for page in reader.pages))
+            return _trim_pdf_text_or_raise([(page.extract_text() or "") for page in reader.pages])
         except RuntimeError:
             raise
         except Exception as exc:
@@ -259,7 +270,7 @@ def extract_text_from_pdf(path: Path) -> str:
             page_count = len(document)
             if page_count > MAX_PDF_PAGES:
                 raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
-            return trim_document_content("\n".join(document[index].get_text() for index in range(page_count)))
+            return _trim_pdf_text_or_raise([document[index].get_text() for index in range(page_count)])
         finally:
             document.close()
     except RuntimeError:
