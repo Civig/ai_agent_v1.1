@@ -461,6 +461,32 @@ class UploadBackendTests(unittest.TestCase):
 
         self.assertEqual(str(error.exception), "Не удалось извлечь текст из PDF")
 
+    def test_prepare_image_for_ocr_grayscales_and_bounds_small_image_upscale(self):
+        from PIL import Image
+
+        source = Image.new("RGB", (120, 80), "white")
+        prepared = parser_stage.prepare_image_for_ocr(source)
+
+        self.assertEqual(source.mode, "RGB")
+        self.assertEqual(prepared.mode, "L")
+        self.assertGreater(prepared.size[0], source.size[0])
+        self.assertGreater(prepared.size[1], source.size[1])
+        self.assertLessEqual(max(prepared.size), parser_stage.IMAGE_OCR_MAX_DIMENSION)
+
+    def test_prepare_image_for_ocr_keeps_large_image_within_guardrail(self):
+        from PIL import Image
+
+        source = Image.new(
+            "RGB",
+            (parser_stage.IMAGE_OCR_UPSCALE_TARGET_DIMENSION, max(1, parser_stage.IMAGE_OCR_UPSCALE_TARGET_DIMENSION // 2)),
+            "white",
+        )
+        prepared = parser_stage.prepare_image_for_ocr(source)
+
+        self.assertEqual(prepared.mode, "L")
+        self.assertEqual(prepared.size, source.size)
+        self.assertLessEqual(max(prepared.size), parser_stage.IMAGE_OCR_MAX_DIMENSION)
+
     def test_extract_text_from_image_passes_timeout_to_ocr(self):
         calls = {}
 
@@ -473,15 +499,18 @@ class UploadBackendTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-        fake_image_module = types.SimpleNamespace(open=lambda path: FakeImage())
+        source_image = FakeImage()
+        prepared_image = object()
+        fake_image_module = types.SimpleNamespace(open=lambda path: source_image)
 
         def fake_image_to_string(image, *, timeout):
+            calls["image"] = image
             calls["timeout"] = timeout
             return "ocr text"
 
         fake_pytesseract = types.SimpleNamespace(image_to_string=fake_image_to_string)
 
-        with mock.patch.dict(
+        with mock.patch.object(parser_stage, "prepare_image_for_ocr", return_value=prepared_image) as prepare_mock, mock.patch.dict(
             sys.modules,
             {
                 "pytesseract": fake_pytesseract,
@@ -491,8 +520,37 @@ class UploadBackendTests(unittest.TestCase):
         ):
             text = extract_text_from_image(Path("/tmp/fake.png"))
 
+        prepare_mock.assert_called_once_with(source_image)
+        self.assertIs(calls["image"], prepared_image)
         self.assertEqual(text, "ocr text")
         self.assertEqual(calls["timeout"], IMAGE_OCR_TIMEOUT_SECONDS)
+
+    def test_extract_text_from_image_preserves_raw_ocr_text_without_substitution(self):
+        class FakeImage:
+            size = (800, 600)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_image_module = types.SimpleNamespace(open=lambda path: FakeImage())
+        fake_pytesseract = types.SimpleNamespace(
+            image_to_string=lambda image, *, timeout: "ALPHA-1 score 38"
+        )
+
+        with mock.patch.object(parser_stage, "prepare_image_for_ocr", return_value=object()), mock.patch.dict(
+            sys.modules,
+            {
+                "pytesseract": fake_pytesseract,
+                "PIL": types.SimpleNamespace(Image=fake_image_module),
+                "PIL.Image": fake_image_module,
+            },
+        ):
+            text = extract_text_from_image(Path("/tmp/fake.png"))
+
+        self.assertEqual(text, "ALPHA-1 score 38")
 
     def test_extract_text_from_image_rejects_oversized_dimensions(self):
         class FakeImage:
@@ -507,7 +565,11 @@ class UploadBackendTests(unittest.TestCase):
         fake_image_module = types.SimpleNamespace(open=lambda path: FakeImage())
         fake_pytesseract = types.SimpleNamespace(image_to_string=lambda image, *, timeout: "ocr text")
 
-        with mock.patch.dict(
+        with mock.patch.object(
+            parser_stage,
+            "prepare_image_for_ocr",
+            side_effect=AssertionError("preprocessing must not run for oversized images"),
+        ) as prepare_mock, mock.patch.dict(
             sys.modules,
             {
                 "pytesseract": fake_pytesseract,
@@ -518,6 +580,7 @@ class UploadBackendTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as error:
                 extract_text_from_image(Path("/tmp/fake.png"))
 
+        prepare_mock.assert_not_called()
         self.assertIn(str(IMAGE_OCR_MAX_DIMENSION), str(error.exception))
 
     def test_extract_text_from_image_maps_timeout_to_controlled_error(self):
@@ -537,7 +600,7 @@ class UploadBackendTests(unittest.TestCase):
 
         fake_pytesseract = types.SimpleNamespace(image_to_string=fake_image_to_string)
 
-        with mock.patch.dict(
+        with mock.patch.object(parser_stage, "prepare_image_for_ocr", return_value=object()), mock.patch.dict(
             sys.modules,
             {
                 "pytesseract": fake_pytesseract,

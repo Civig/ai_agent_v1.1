@@ -32,6 +32,7 @@ MAX_PARSED_DOCUMENT_CHARS = MAX_DOCUMENT_CHARS
 MAX_PDF_PAGES = settings.FILE_PROCESSING_MAX_PDF_PAGES
 IMAGE_OCR_MAX_DIMENSION = settings.FILE_PROCESSING_IMAGE_MAX_DIMENSION
 IMAGE_OCR_TIMEOUT_SECONDS = settings.FILE_PROCESSING_OCR_TIMEOUT_SECONDS
+IMAGE_OCR_UPSCALE_TARGET_DIMENSION = min(1000, IMAGE_OCR_MAX_DIMENSION)
 DOCUMENT_TRUNCATION_MARKER = "[DOCUMENT_TRUNCATED]"
 UPLOAD_UNSUPPORTED_TYPE_ERROR = "Поддерживаются только TXT, PDF, DOCX, PNG, JPG и JPEG."
 DOCUMENT_NO_INFORMATION_RESPONSE = "В предоставленных документах нет информации для ответа на этот вопрос."
@@ -155,6 +156,34 @@ def ocr_timeout_exceeded_detail() -> str:
     return f"OCR превысил лимит времени {IMAGE_OCR_TIMEOUT_SECONDS:g} сек"
 
 
+def prepare_image_for_ocr(image: Any) -> Any:
+    from PIL import Image, ImageOps  # type: ignore
+
+    prepared = ImageOps.autocontrast(image.convert("L"))
+    width, height = prepared.size
+    max_dimension = max(width, height)
+    if max_dimension <= 0 or max_dimension >= IMAGE_OCR_UPSCALE_TARGET_DIMENSION:
+        return prepared
+
+    scale = min(
+        2.0,
+        IMAGE_OCR_UPSCALE_TARGET_DIMENSION / max_dimension,
+        IMAGE_OCR_MAX_DIMENSION / max_dimension,
+    )
+    if scale <= 1.0:
+        return prepared
+
+    resized = (
+        max(1, min(IMAGE_OCR_MAX_DIMENSION, int(round(width * scale)))),
+        max(1, min(IMAGE_OCR_MAX_DIMENSION, int(round(height * scale)))),
+    )
+    if resized == prepared.size:
+        return prepared
+
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC)
+    return prepared.resize(resized, resampling)
+
+
 def trim_document_content(content: str) -> str:
     normalized = (content or "").strip()
     if len(normalized) <= MAX_PARSED_DOCUMENT_CHARS:
@@ -252,7 +281,8 @@ def extract_text_from_image(path: Path) -> str:
             if max(width, height) > IMAGE_OCR_MAX_DIMENSION:
                 raise RuntimeError(image_dimension_limit_exceeded_detail(width, height))
             try:
-                return trim_document_content(pytesseract.image_to_string(image, timeout=IMAGE_OCR_TIMEOUT_SECONDS))
+                prepared_image = prepare_image_for_ocr(image)
+                return trim_document_content(pytesseract.image_to_string(prepared_image, timeout=IMAGE_OCR_TIMEOUT_SECONDS))
             except RuntimeError as exc:
                 if "timeout" in str(exc).lower():
                     raise RuntimeError(ocr_timeout_exceeded_detail()) from exc
