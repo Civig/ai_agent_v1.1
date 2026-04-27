@@ -28,6 +28,35 @@ EXPECTED_FILE_CASE_KEYS = {
     "notes",
 }
 
+SMOKE_MONTH_ALIASES = {
+    "january": "january",
+    "январь": "january",
+    "января": "january",
+    "february": "february",
+    "февраль": "february",
+    "февраля": "february",
+    "march": "march",
+    "март": "march",
+    "марта": "march",
+    "april": "april",
+    "апрель": "april",
+    "апреля": "april",
+}
+_SMOKE_MONTH_PATTERN = re.compile(
+    r"(?<![0-9a-zа-яё_-])("
+    + "|".join(re.escape(month) for month in sorted(SMOKE_MONTH_ALIASES, key=len, reverse=True))
+    + r")(?![0-9a-zа-яё_-])"
+)
+_SMOKE_UNICODE_SPACE_PATTERN = re.compile(r"[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+")
+_SMOKE_MARKDOWN_PREFIX_UNDERSCORES = re.compile(r"(^|[\s([{])_{1,3}(?=\S)")
+_SMOKE_MARKDOWN_SUFFIX_UNDERSCORES = re.compile(r"(?<=\S)_{1,3}($|[\s)\]}.,:;!?])")
+_SMOKE_DECORATIVE_DASH_PATTERN = re.compile(r"[\u2010-\u2015\u2212]+")
+_SMOKE_PUNCTUATION_PATTERN = re.compile(r"[,;:!?/\\|()\[\]{}<>\"'“”‘’]+")
+_SMOKE_NON_DECIMAL_DOT_PATTERN = re.compile(r"(?<!\d)\.(?!\d)")
+_SMOKE_NUMERIC_TOKEN_PATTERN = re.compile(r"^\d+(?:[.,]\d+)?%?$")
+_SMOKE_STRICT_TOKEN_CHARS = "0-9a-zа-яё_"
+_SMOKE_STRICT_HYPHEN_TOKEN_CHARS = "0-9a-zа-яё_-"
+
 
 @dataclass(frozen=True)
 class SSESummary:
@@ -119,8 +148,38 @@ def resolve_repo_path(path_value: str | Path, *, repo_root: Path | None = None) 
     return (repo_root or REPO_ROOT) / candidate
 
 
+def normalize_smoke_match_text(value: str) -> str:
+    text = str(value or "")
+    text = _SMOKE_UNICODE_SPACE_PATTERN.sub(" ", text)
+    text = text.replace("`", "").replace("*", "").replace("~", "")
+    text = _SMOKE_MARKDOWN_PREFIX_UNDERSCORES.sub(r"\1", text)
+    text = _SMOKE_MARKDOWN_SUFFIX_UNDERSCORES.sub(r"\1", text)
+    text = text.casefold()
+    text = _SMOKE_MONTH_PATTERN.sub(lambda match: SMOKE_MONTH_ALIASES[match.group(1)], text)
+    text = _SMOKE_DECORATIVE_DASH_PATTERN.sub(" ", text)
+    text = _SMOKE_PUNCTUATION_PATTERN.sub(" ", text)
+    text = _SMOKE_NON_DECIMAL_DOT_PATTERN.sub(" ", text)
+    return _SMOKE_UNICODE_SPACE_PATTERN.sub(" ", text).strip()
+
+
 def _contains(haystack: str, needle: str) -> bool:
-    return str(needle).casefold() in haystack.casefold()
+    normalized_haystack = normalize_smoke_match_text(haystack)
+    normalized_needle = normalize_smoke_match_text(needle)
+    if not normalized_needle:
+        return False
+
+    if _SMOKE_NUMERIC_TOKEN_PATTERN.fullmatch(normalized_needle):
+        pattern = rf"(?<![\d.,]){re.escape(normalized_needle)}(?![\d.,])"
+        return re.search(pattern, normalized_haystack) is not None
+
+    escaped_needle = re.escape(normalized_needle).replace(r"\ ", r"\s+")
+    token_chars = _SMOKE_STRICT_HYPHEN_TOKEN_CHARS if "-" in normalized_needle else _SMOKE_STRICT_TOKEN_CHARS
+    pattern = rf"(?<![{token_chars}]){escaped_needle}(?![{token_chars}])"
+    return re.search(pattern, normalized_haystack) is not None
+
+
+def contains_expected_text(haystack: str, needle: str) -> bool:
+    return _contains(haystack, needle)
 
 
 def evaluate_expectations(
