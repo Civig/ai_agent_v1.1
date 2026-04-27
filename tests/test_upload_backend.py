@@ -52,6 +52,91 @@ class UploadBackendTests(unittest.TestCase):
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr("word/document.xml", document_xml)
 
+    def _xlsx_cell_ref(self, column_index: int, row_index: int) -> str:
+        name = ""
+        column = column_index
+        while column:
+            column, remainder = divmod(column - 1, 26)
+            name = chr(ord("A") + remainder) + name
+        return f"{name}{row_index}"
+
+    def _write_xlsx_fixture(self, path: Path, sheets: list[tuple[str, list[list[object]]]]) -> None:
+        shared_strings: list[str] = []
+        shared_indexes: dict[str, int] = {}
+        workbook_sheets: list[str] = []
+        relationships: list[str] = []
+        sheet_documents: list[tuple[str, str]] = []
+
+        def shared_index(value: object) -> int:
+            text = str(value)
+            if text not in shared_indexes:
+                shared_indexes[text] = len(shared_strings)
+                shared_strings.append(text)
+            return shared_indexes[text]
+
+        for sheet_index, (sheet_name, rows) in enumerate(sheets, start=1):
+            relationship_id = f"rId{sheet_index}"
+            workbook_sheets.append(f'<sheet name="{sheet_name}" sheetId="{sheet_index}" r:id="{relationship_id}"/>')
+            relationships.append(
+                f'<Relationship Id="{relationship_id}" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+                f'Target="worksheets/sheet{sheet_index}.xml"/>'
+            )
+
+            row_xml: list[str] = []
+            for row_index, row in enumerate(rows, start=1):
+                cell_xml: list[str] = []
+                for column_index, value in enumerate(row, start=1):
+                    reference = self._xlsx_cell_ref(column_index, row_index)
+                    if isinstance(value, dict):
+                        cached_value = value.get("cached")
+                        cached_xml = f"<v>{cached_value}</v>" if cached_value is not None else ""
+                        cell_xml.append(f'<c r="{reference}"><f>{value["formula"]}</f>{cached_xml}</c>')
+                    elif value is None:
+                        cell_xml.append(f'<c r="{reference}"/>')
+                    else:
+                        cell_xml.append(f'<c r="{reference}" t="s"><v>{shared_index(value)}</v></c>')
+                row_xml.append(f'<row r="{row_index}">{"".join(cell_xml)}</row>')
+
+            sheet_documents.append(
+                (
+                    f"xl/worksheets/sheet{sheet_index}.xml",
+                    (
+                        '<?xml version="1.0" encoding="UTF-8"?>'
+                        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                        f'<sheetData>{"".join(row_xml)}</sheetData>'
+                        "</worksheet>"
+                    ),
+                )
+            )
+
+        workbook_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            f'<sheets>{"".join(workbook_sheets)}</sheets>'
+            "</workbook>"
+        )
+        rels_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            f'{"".join(relationships)}'
+            "</Relationships>"
+        )
+        shared_strings_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            + "".join(f"<si><t>{value}</t></si>" for value in shared_strings)
+            + "</sst>"
+        )
+
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("xl/workbook.xml", workbook_xml)
+            archive.writestr("xl/_rels/workbook.xml.rels", rels_xml)
+            archive.writestr("xl/sharedStrings.xml", shared_strings_xml)
+            for sheet_path, sheet_xml in sheet_documents:
+                archive.writestr(sheet_path, sheet_xml)
+
     def test_sanitize_upload_filename_blocks_traversal_and_prefixes_uuid(self):
         safe_name = sanitize_upload_filename("../../etc/passwd.txt")
         self.assertTrue(safe_name.endswith("-passwd.txt"))
@@ -185,8 +270,11 @@ class UploadBackendTests(unittest.TestCase):
     def test_stage_uploads_accepts_supported_extension_and_content_type_pairs(self):
         cases = [
             ("notes.txt", "text/plain"),
+            ("orders.csv", "text/csv"),
+            ("orders.csv", "application/csv"),
             ("report.pdf", "application/pdf"),
             ("contract.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            ("orders.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
             ("scan.png", "image/png"),
             ("photo.jpg", "image/jpeg"),
             ("photo.jpeg", "image/jpeg"),
@@ -235,7 +323,10 @@ class UploadBackendTests(unittest.TestCase):
     def test_upload_content_type_helpers_normalize_and_allow_compatible_types(self):
         self.assertEqual(normalize_upload_content_type("text/plain; charset=utf-8"), "text/plain")
         self.assertTrue(upload_content_type_is_allowed(".txt", "text/plain; charset=utf-8"))
+        self.assertTrue(upload_content_type_is_allowed(".csv", "text/plain; charset=utf-8"))
+        self.assertTrue(upload_content_type_is_allowed(".csv", "application/csv"))
         self.assertTrue(upload_content_type_is_allowed(".pdf", "application/octet-stream"))
+        self.assertTrue(upload_content_type_is_allowed(".xlsx", "application/octet-stream"))
 
     def test_stage_uploads_rejects_content_type_mismatch(self):
         upload = UploadFile(
@@ -248,10 +339,10 @@ class UploadBackendTests(unittest.TestCase):
             asyncio.run(stage_uploads([upload]))
 
         self.assertEqual(error.exception.status_code, 400)
-        self.assertEqual(error.exception.detail, "Поддерживаются только TXT, PDF, DOCX, PNG, JPG и JPEG.")
+        self.assertEqual(error.exception.detail, "Поддерживаются только TXT, CSV, PDF, DOCX, XLSX, PNG, JPG и JPEG.")
 
     def test_stage_uploads_rejects_other_unsupported_extensions(self):
-        for filename in ("malware.sh", "payload.bin"):
+        for filename in ("malware.sh", "payload.bin", "legacy.xls"):
             with self.subTest(filename=filename):
                 upload = UploadFile(filename=filename, file=io.BytesIO(b"payload"))
                 with self.assertRaises(HTTPException) as error:
@@ -315,6 +406,116 @@ class UploadBackendTests(unittest.TestCase):
         self.assertIn("doc_chars=800", joined_logs)
         self.assertIn("original_doc_chars=1200", joined_logs)
         self.assertIn("trimmed_doc_chars=800", joined_logs)
+
+    def test_extract_text_from_csv_simple_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "orders.csv"
+            path.write_text("Name,Amount\nAlpha,100\nBeta,200\n", encoding="utf-8")
+
+            text = parser_stage.extract_text_from_csv(path)
+
+        self.assertEqual(text, "CSV: orders.csv\n\nName | Amount\nAlpha | 100\nBeta | 200")
+
+    def test_extract_text_from_csv_trims_cells_and_bounds_rows_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "orders.csv"
+            path.write_text(
+                " Name ; Amount ; Extra ;  \n Alpha ; 100 ; ignored ; \n Beta ; 200 ; ignored ; \n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(parser_stage, "MAX_SPREADSHEET_ROWS", 2), mock.patch.object(
+                parser_stage, "MAX_SPREADSHEET_COLUMNS", 2
+            ):
+                text = parser_stage.extract_text_from_csv(path)
+
+        self.assertIn("Name | Amount", text)
+        self.assertIn("Alpha | 100", text)
+        self.assertNotIn("Beta", text)
+        self.assertNotIn("Extra", text)
+        self.assertNotIn(" |  | ", text)
+
+    def test_extract_text_from_csv_empty_file_returns_controlled_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "empty.csv"
+            path.write_text(" \n , , \n", encoding="utf-8")
+
+            with self.assertRaises(RuntimeError) as error:
+                parser_stage.extract_text_from_csv(path)
+
+        self.assertEqual(str(error.exception), parser_stage.spreadsheet_empty_detail())
+
+    def test_extract_text_from_xlsx_simple_workbook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "orders.xlsx"
+            self._write_xlsx_fixture(path, [("Orders", [["Item", "Qty"], ["Widget", "3"]])])
+
+            text = parser_stage.extract_text_from_xlsx(path)
+
+        self.assertIn("Sheet: Orders", text)
+        self.assertIn("Item | Qty", text)
+        self.assertIn("Widget | 3", text)
+
+    def test_extract_text_from_xlsx_bounds_sheet_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "orders.xlsx"
+            self._write_xlsx_fixture(
+                path,
+                [
+                    ("Orders", [["Item", "Qty"], ["Widget", "3"]]),
+                    ("Archive", [["Old", "99"]]),
+                ],
+            )
+
+            with mock.patch.object(parser_stage, "MAX_SPREADSHEET_SHEETS", 1):
+                text = parser_stage.extract_text_from_xlsx(path)
+
+        self.assertIn("Sheet: Orders", text)
+        self.assertNotIn("Archive", text)
+        self.assertNotIn("Old | 99", text)
+
+    def test_extract_text_from_xlsx_empty_workbook_returns_controlled_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "empty.xlsx"
+            self._write_xlsx_fixture(path, [("Orders", [])])
+
+            with self.assertRaises(RuntimeError) as error:
+                parser_stage.extract_text_from_xlsx(path)
+
+        self.assertEqual(str(error.exception), parser_stage.spreadsheet_empty_detail())
+
+    def test_extract_text_from_xlsx_corrupted_file_returns_controlled_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "broken.xlsx"
+            path.write_bytes(b"not-a-zip")
+
+            with self.assertRaises(RuntimeError) as error:
+                parser_stage.extract_text_from_xlsx(path)
+
+        self.assertEqual(str(error.exception), parser_stage.xlsx_parse_failed_detail())
+
+    def test_extract_text_from_xlsx_uses_cached_formula_value_without_formula_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "formula.xlsx"
+            self._write_xlsx_fixture(
+                path,
+                [("Orders", [["Metric", "Value"], ["Cached", {"formula": "2+5", "cached": "7"}]])],
+            )
+
+            text = parser_stage.extract_text_from_xlsx(path)
+
+        self.assertIn("Cached | 7", text)
+        self.assertNotIn("2+5", text)
+
+    def test_parse_uploaded_file_dispatches_csv_and_xlsx(self):
+        with mock.patch.object(parser_stage, "extract_text_from_csv", return_value="csv") as csv_mock, mock.patch.object(
+            parser_stage, "extract_text_from_xlsx", return_value="xlsx"
+        ) as xlsx_mock:
+            self.assertEqual(parser_stage.parse_uploaded_file(Path("/tmp/orders.csv")), "csv")
+            self.assertEqual(parser_stage.parse_uploaded_file(Path("/tmp/orders.xlsx")), "xlsx")
+
+        csv_mock.assert_called_once()
+        xlsx_mock.assert_called_once()
 
     def test_extract_text_from_docx_preserves_simple_paragraphs(self):
         with tempfile.TemporaryDirectory() as tmp:

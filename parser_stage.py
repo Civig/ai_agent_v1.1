@@ -1,3 +1,4 @@
+import csv
 import json
 import logging
 import re
@@ -21,8 +22,10 @@ MAX_UPLOAD_FILES = settings.FILE_PROCESSING_MAX_FILES
 GENERIC_UPLOAD_CONTENT_TYPES = {"", "application/octet-stream"}
 ALLOWED_UPLOAD_MIME_TYPES: dict[str, set[str]] = {
     ".txt": {"text/plain"},
+    ".csv": {"text/csv", "application/csv", "text/plain"},
     ".pdf": {"application/pdf"},
     ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
     ".png": {"image/png"},
     ".jpg": {"image/jpeg"},
     ".jpeg": {"image/jpeg"},
@@ -33,8 +36,12 @@ MAX_PDF_PAGES = settings.FILE_PROCESSING_MAX_PDF_PAGES
 IMAGE_OCR_MAX_DIMENSION = settings.FILE_PROCESSING_IMAGE_MAX_DIMENSION
 IMAGE_OCR_TIMEOUT_SECONDS = settings.FILE_PROCESSING_OCR_TIMEOUT_SECONDS
 IMAGE_OCR_UPSCALE_TARGET_DIMENSION = min(1000, IMAGE_OCR_MAX_DIMENSION)
+MAX_SPREADSHEET_ROWS = 200
+MAX_SPREADSHEET_COLUMNS = 30
+MAX_SPREADSHEET_SHEETS = 3
+MAX_SPREADSHEET_CELL_CHARS = 500
 DOCUMENT_TRUNCATION_MARKER = "[DOCUMENT_TRUNCATED]"
-UPLOAD_UNSUPPORTED_TYPE_ERROR = "Поддерживаются только TXT, PDF, DOCX, PNG, JPG и JPEG."
+UPLOAD_UNSUPPORTED_TYPE_ERROR = "Поддерживаются только TXT, CSV, PDF, DOCX, XLSX, PNG, JPG и JPEG."
 DOCUMENT_NO_INFORMATION_RESPONSE = "В предоставленных документах нет информации для ответа на этот вопрос."
 
 
@@ -145,6 +152,18 @@ def docx_parse_failed_detail() -> str:
     return "Не удалось извлечь текст из DOCX"
 
 
+def csv_parse_failed_detail() -> str:
+    return "Не удалось извлечь текст из CSV"
+
+
+def xlsx_parse_failed_detail() -> str:
+    return "Не удалось извлечь текст из XLSX"
+
+
+def spreadsheet_empty_detail() -> str:
+    return "Таблица не содержит извлекаемых данных"
+
+
 def pdf_no_text_layer_detail() -> str:
     return "PDF не содержит извлекаемого текстового слоя; OCR для PDF пока не поддержан"
 
@@ -217,10 +236,68 @@ def extract_text_from_txt(path: Path) -> str:
     return trim_document_content("".join(chunks))
 
 
+def _trim_spreadsheet_cell(value: Any) -> str:
+    normalized = str(value if value is not None else "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = re.sub(r"[ \t\f\v]+", " ", normalized)
+    normalized = re.sub(r"\n+", " ", normalized)
+    if len(normalized) <= MAX_SPREADSHEET_CELL_CHARS:
+        return normalized
+    return normalized[:MAX_SPREADSHEET_CELL_CHARS].rstrip()
+
+
+def _format_table_rows(rows: list[list[str]]) -> str:
+    formatted_rows: list[str] = []
+    for row in rows[:MAX_SPREADSHEET_ROWS]:
+        bounded_row = [_trim_spreadsheet_cell(cell) for cell in row[:MAX_SPREADSHEET_COLUMNS]]
+        while bounded_row and not bounded_row[-1]:
+            bounded_row.pop()
+        if any(bounded_row):
+            formatted_rows.append(" | ".join(bounded_row))
+    return "\n".join(formatted_rows).strip()
+
+
+def extract_text_from_csv(path: Path) -> str:
+    try:
+        raw_bytes = path.read_bytes()
+        try:
+            text = raw_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw_bytes.decode("utf-8", errors="replace")
+
+        sample = text[:4096]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|") if sample.strip() else csv.excel
+        except csv.Error:
+            dialect = csv.excel
+
+        reader = csv.reader(text.splitlines(), dialect)
+        rows: list[list[str]] = []
+        for index, row in enumerate(reader):
+            if index >= MAX_SPREADSHEET_ROWS:
+                break
+            rows.append(row[:MAX_SPREADSHEET_COLUMNS])
+
+        table_text = _format_table_rows(rows)
+        if not table_text:
+            raise RuntimeError(spreadsheet_empty_detail())
+        return trim_document_content(f"CSV: {path.name}\n\n{table_text}")
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(csv_parse_failed_detail()) from exc
+
+
 def _xml_local_name(tag: Any) -> str:
     if not isinstance(tag, str):
         return ""
     return tag.rsplit("}", 1)[-1]
+
+
+def _xml_attr_local(element: ElementTree.Element, name: str) -> str:
+    for key, value in element.attrib.items():
+        if _xml_local_name(key) == name:
+            return value
+    return ""
 
 
 def _docx_node_text(node: ElementTree.Element) -> str:
@@ -302,6 +379,106 @@ def extract_text_from_docx(path: Path) -> str:
         raise RuntimeError(docx_parse_failed_detail()) from exc
 
 
+def _xlsx_relationship_target(target: str) -> str:
+    normalized = (target or "").strip().lstrip("/")
+    if normalized.startswith("xl/"):
+        return normalized
+    return f"xl/{normalized}"
+
+
+def _xlsx_shared_strings(archive: zipfile.ZipFile) -> list[str]:
+    try:
+        xml_bytes = archive.read("xl/sharedStrings.xml")
+    except KeyError:
+        return []
+
+    root = ElementTree.fromstring(xml_bytes)
+    return [_docx_node_text(item) for item in root.iter() if _xml_local_name(item.tag) == "si"]
+
+
+def _xlsx_cell_value(cell: ElementTree.Element, shared_strings: list[str]) -> str:
+    cell_type = cell.attrib.get("t", "")
+    value_node = next((child for child in cell if _xml_local_name(child.tag) == "v"), None)
+
+    if cell_type == "inlineStr":
+        inline_node = next((child for child in cell if _xml_local_name(child.tag) == "is"), None)
+        return _docx_node_text(inline_node) if inline_node is not None else ""
+
+    raw_value = (value_node.text or "") if value_node is not None else ""
+    if cell_type == "s":
+        try:
+            return shared_strings[int(raw_value)]
+        except (IndexError, ValueError):
+            return ""
+    if cell_type == "b":
+        return "TRUE" if raw_value == "1" else "FALSE" if raw_value == "0" else raw_value
+    return raw_value
+
+
+def _xlsx_sheet_rows(archive: zipfile.ZipFile, sheet_path: str, shared_strings: list[str]) -> list[list[str]]:
+    root = ElementTree.fromstring(archive.read(sheet_path))
+    rows: list[list[str]] = []
+    for row in root.iter():
+        if _xml_local_name(row.tag) != "row":
+            continue
+        cells: list[str] = []
+        for cell in row:
+            if _xml_local_name(cell.tag) != "c":
+                continue
+            cells.append(_xlsx_cell_value(cell, shared_strings))
+            if len(cells) >= MAX_SPREADSHEET_COLUMNS:
+                break
+        rows.append(cells)
+        if len(rows) >= MAX_SPREADSHEET_ROWS:
+            break
+    return rows
+
+
+def _xlsx_workbook_sheets(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
+    workbook_root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+    rels_root = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+
+    relationships: dict[str, str] = {}
+    for relationship in rels_root:
+        if _xml_local_name(relationship.tag) == "Relationship":
+            rel_id = relationship.attrib.get("Id", "")
+            target = relationship.attrib.get("Target", "")
+            if rel_id and target:
+                relationships[rel_id] = _xlsx_relationship_target(target)
+
+    sheets: list[tuple[str, str]] = []
+    for node in workbook_root.iter():
+        if _xml_local_name(node.tag) != "sheet":
+            continue
+        sheet_name = node.attrib.get("name", "Sheet").strip() or "Sheet"
+        rel_id = _xml_attr_local(node, "id")
+        sheet_path = relationships.get(rel_id)
+        if sheet_path:
+            sheets.append((sheet_name, sheet_path))
+        if len(sheets) >= MAX_SPREADSHEET_SHEETS:
+            break
+    return sheets
+
+
+def extract_text_from_xlsx(path: Path) -> str:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            shared_strings = _xlsx_shared_strings(archive)
+            blocks: list[str] = []
+            for sheet_name, sheet_path in _xlsx_workbook_sheets(archive):
+                table_text = _format_table_rows(_xlsx_sheet_rows(archive, sheet_path, shared_strings))
+                if table_text:
+                    blocks.append(f"Sheet: {sheet_name}\n\n{table_text}")
+
+        if not blocks:
+            raise RuntimeError(spreadsheet_empty_detail())
+        return trim_document_content("\n\n".join(blocks))
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(xlsx_parse_failed_detail()) from exc
+
+
 def _trim_pdf_text_or_raise(text_fragments: list[str]) -> str:
     text = trim_document_content("\n".join(text_fragments))
     if not text.strip():
@@ -378,8 +555,12 @@ def parse_uploaded_file(path: Path) -> str:
     extension = detect_extension(path.name)
     if extension == ".txt":
         return extract_text_from_txt(path)
+    if extension == ".csv":
+        return extract_text_from_csv(path)
     if extension == ".docx":
         return extract_text_from_docx(path)
+    if extension == ".xlsx":
+        return extract_text_from_xlsx(path)
     if extension == ".pdf":
         return extract_text_from_pdf(path)
     if extension in {".png", ".jpg", ".jpeg"}:
