@@ -141,6 +141,10 @@ def pdf_parse_failed_detail() -> str:
     return "Не удалось извлечь текст из PDF"
 
 
+def docx_parse_failed_detail() -> str:
+    return "Не удалось извлечь текст из DOCX"
+
+
 def pdf_no_text_layer_detail() -> str:
     return "PDF не содержит извлекаемого текстового слоя; OCR для PDF пока не поддержан"
 
@@ -213,23 +217,89 @@ def extract_text_from_txt(path: Path) -> str:
     return trim_document_content("".join(chunks))
 
 
-def extract_text_from_docx(path: Path) -> str:
-    with zipfile.ZipFile(path) as archive:
-        xml_bytes = archive.read("word/document.xml")
-    root = ElementTree.fromstring(xml_bytes)
-    text_chunks = []
-    consumed = 0
-    hard_limit = MAX_PARSED_DOCUMENT_CHARS + 1
-    for node in root.iter():
-        if node.tag.endswith("}t") and node.text:
-            if consumed >= hard_limit:
+def _xml_local_name(tag: Any) -> str:
+    if not isinstance(tag, str):
+        return ""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _docx_node_text(node: ElementTree.Element) -> str:
+    chunks: list[str] = []
+    for child in node.iter():
+        child_name = _xml_local_name(child.tag)
+        if child_name == "t" and child.text:
+            chunks.append(child.text)
+        elif child_name in {"br", "cr"}:
+            chunks.append("\n")
+        elif child_name == "tab":
+            chunks.append("\t")
+    return "".join(chunks).strip()
+
+
+def _docx_table_text(table: ElementTree.Element) -> str:
+    rows: list[str] = []
+    for row in table:
+        if _xml_local_name(row.tag) != "tr":
+            continue
+
+        cells: list[str] = []
+        for cell in row:
+            if _xml_local_name(cell.tag) != "tc":
                 continue
-            chunk = node.text[: hard_limit - consumed]
-            text_chunks.append(chunk)
-            consumed += len(chunk)
-        elif node.tag.endswith("}p"):
-            text_chunks.append("\n")
-    return trim_document_content("".join(text_chunks))
+            paragraph_texts = [
+                _docx_node_text(paragraph)
+                for paragraph in cell
+                if _xml_local_name(paragraph.tag) == "p"
+            ]
+            paragraph_texts = [text for text in paragraph_texts if text]
+            cells.append(" ".join(paragraph_texts).strip())
+
+        if any(cell for cell in cells):
+            rows.append(" | ".join(cells))
+    return "\n".join(rows).strip()
+
+
+def _docx_flat_text(root: ElementTree.Element) -> str:
+    chunks: list[str] = []
+    for node in root.iter():
+        node_name = _xml_local_name(node.tag)
+        if node_name == "t" and node.text:
+            chunks.append(node.text)
+        elif node_name == "p":
+            chunks.append("\n")
+    return trim_document_content("".join(chunks))
+
+
+def extract_docx_document_xml_text(xml_bytes: bytes) -> str:
+    root = ElementTree.fromstring(xml_bytes)
+    body = next((child for child in root if _xml_local_name(child.tag) == "body"), None)
+    if body is None:
+        return _docx_flat_text(root)
+
+    blocks: list[str] = []
+    for child in body:
+        child_name = _xml_local_name(child.tag)
+        if child_name == "p":
+            text = _docx_node_text(child)
+            if text:
+                blocks.append(text)
+        elif child_name == "tbl":
+            text = _docx_table_text(child)
+            if text:
+                blocks.append(text)
+
+    if not blocks:
+        return _docx_flat_text(root)
+    return trim_document_content("\n\n".join(blocks))
+
+
+def extract_text_from_docx(path: Path) -> str:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            xml_bytes = archive.read("word/document.xml")
+        return extract_docx_document_xml_text(xml_bytes)
+    except Exception as exc:
+        raise RuntimeError(docx_parse_failed_detail()) from exc
 
 
 def _trim_pdf_text_or_raise(text_fragments: list[str]) -> str:

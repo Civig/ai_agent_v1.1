@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -42,6 +43,15 @@ from app import (
 
 
 class UploadBackendTests(unittest.TestCase):
+    def _write_docx_fixture(self, path: Path, body_xml: str) -> None:
+        document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>{body_xml}<w:sectPr /></w:body>
+</w:document>
+"""
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("word/document.xml", document_xml)
+
     def test_sanitize_upload_filename_blocks_traversal_and_prefixes_uuid(self):
         safe_name = sanitize_upload_filename("../../etc/passwd.txt")
         self.assertTrue(safe_name.endswith("-passwd.txt"))
@@ -305,6 +315,83 @@ class UploadBackendTests(unittest.TestCase):
         self.assertIn("doc_chars=800", joined_logs)
         self.assertIn("original_doc_chars=1200", joined_logs)
         self.assertIn("trimmed_doc_chars=800", joined_logs)
+
+    def test_extract_text_from_docx_preserves_simple_paragraphs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paragraphs.docx"
+            self._write_docx_fixture(
+                path,
+                """
+<w:p><w:r><w:t>First paragraph</w:t></w:r></w:p>
+<w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p>
+""",
+            )
+
+            text = parser_stage.extract_text_from_docx(path)
+
+        self.assertEqual(text, "First paragraph\n\nSecond paragraph")
+
+    def test_extract_text_from_docx_preserves_table_rows_cells_and_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "table.docx"
+            self._write_docx_fixture(
+                path,
+                """
+<w:p><w:r><w:t>Project Helios configuration</w:t></w:r></w:p>
+<w:p><w:r><w:t>   </w:t></w:r></w:p>
+<w:tbl>
+  <w:tr>
+    <w:tc><w:p><w:r><w:t>parameter</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>value</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>unit</w:t></w:r></w:p></w:tc>
+  </w:tr>
+  <w:tr>
+    <w:tc><w:p><w:r><w:t>max_tokens</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>2048</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>tokens</w:t></w:r></w:p></w:tc>
+  </w:tr>
+  <w:tr>
+    <w:tc><w:p><w:r><w:t>temperature</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>0.2</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>ratio</w:t></w:r></w:p></w:tc>
+  </w:tr>
+  <w:tr>
+    <w:tc><w:p><w:r><w:t>retry_limit</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>3</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>attempts</w:t></w:r></w:p></w:tc>
+  </w:tr>
+  <w:tr>
+    <w:tc><w:p /></w:tc>
+    <w:tc><w:p><w:r><w:t> </w:t></w:r></w:p></w:tc>
+  </w:tr>
+</w:tbl>
+<w:p><w:r><w:t>Review complete</w:t></w:r></w:p>
+""",
+            )
+
+            text = parser_stage.extract_text_from_docx(path)
+
+        self.assertIn("Project Helios", text)
+        self.assertIn("max_tokens | 2048", text)
+        self.assertIn("temperature | 0.2", text)
+        self.assertIn("retry_limit | 3", text)
+        self.assertIn("parameter | value | unit", text)
+        self.assertIn("Review complete", text)
+        self.assertLess(text.index("Project Helios"), text.index("parameter | value | unit"))
+        self.assertLess(text.index("retry_limit | 3"), text.index("Review complete"))
+        self.assertNotIn("0,2", text)
+        self.assertNotIn(" |  | ", text)
+
+    def test_extract_text_from_docx_maps_missing_document_xml_to_controlled_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missing-document-xml.docx"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("[Content_Types].xml", "<Types />")
+
+            with self.assertRaises(RuntimeError) as error:
+                parser_stage.extract_text_from_docx(path)
+
+        self.assertEqual(str(error.exception), parser_stage.docx_parse_failed_detail())
 
     def test_extract_text_from_pdf_rejects_page_count_over_limit(self):
         class FakePage:
