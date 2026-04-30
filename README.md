@@ -83,4 +83,9 @@ This repository contains the earlier `v1.1.0` baseline plus the current release-
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+This project is proprietary. All rights reserved. No use, copying, modification,
+redistribution, deployment, hosting, or derivative works are permitted without
+explicit written permission.
+
+Public repository access does not grant a license. For commercial or private
+licensing, contact the owner. See [LICENSE](LICENSE).
