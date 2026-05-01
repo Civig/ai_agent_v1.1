@@ -22,6 +22,12 @@ Phase 2 source helpers prepared: `comparison_engine.py` добавляет deter
 
 API, UI, LLM summary, report generator, storage и production runtime integration ещё не реализованы. Текущий file-chat behavior не должен меняться из-за Phase 2.
 
+## Phase 3 Implementation Status
+
+Phase 3 source helpers prepared: `comparison_engine.py` добавляет Markdown report generator поверх `ComparisonResult`.
+
+API, UI, LLM summary, storage и production runtime integration ещё не реализованы. LLM explanation остаётся future phase и не участвует в генерации v1 report.
+
 ## Почему Нельзя Сравнивать Только Через LLM
 
 LLM полезен для объяснения уже найденных различий, но не должен быть единственным механизмом поиска изменений:

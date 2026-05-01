@@ -16,6 +16,8 @@ from typing import Any
 
 DEFAULT_PARSER_VERSION = "parser-v1"
 MAX_NORMALIZED_BLOCK_TEXT_CHARS = 8000
+DEFAULT_MARKDOWN_MAX_ITEMS_PER_SECTION = 20
+DEFAULT_MARKDOWN_MAX_TEXT_CHARS = 500
 
 DOCX_SECTION_LABELS = {
     "DOCX Body": "body",
@@ -159,6 +161,18 @@ class ComparisonResult:
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True)
 
+    def to_markdown(
+        self,
+        *,
+        max_items_per_section: int = DEFAULT_MARKDOWN_MAX_ITEMS_PER_SECTION,
+        max_text_chars: int = DEFAULT_MARKDOWN_MAX_TEXT_CHARS,
+    ) -> str:
+        return render_comparison_markdown(
+            self,
+            max_items_per_section=max_items_per_section,
+            max_text_chars=max_text_chars,
+        )
+
 
 @dataclass(frozen=True)
 class _Section:
@@ -264,6 +278,148 @@ def compare_normalized_documents(doc_a: NormalizedDocument, doc_b: NormalizedDoc
         unchanged_count=unchanged_count,
         summary=summary,
     )
+
+
+def render_comparison_markdown(
+    result: ComparisonResult,
+    *,
+    max_items_per_section: int = DEFAULT_MARKDOWN_MAX_ITEMS_PER_SECTION,
+    max_text_chars: int = DEFAULT_MARKDOWN_MAX_TEXT_CHARS,
+) -> str:
+    if not isinstance(result, ComparisonResult):
+        raise ValueError("render_comparison_markdown expects a ComparisonResult input")
+
+    item_limit = max(0, int(max_items_per_section))
+    text_limit = max(0, int(max_text_chars))
+    summary = result.summary
+    lines = [
+        "# Сравнение документов",
+        "",
+        "## Итог",
+        "",
+        f"- Добавлено: {summary.get('added_count', len(result.added))}",
+        f"- Удалено: {summary.get('removed_count', len(result.removed))}",
+        f"- Изменено: {summary.get('changed_count', len(result.changed))}",
+        f"- Без изменений: {result.unchanged_count}",
+        "",
+    ]
+
+    lines.extend(_format_markdown_section("Изменённые блоки", result.changed, item_limit, text_limit))
+    lines.extend(_format_markdown_section("Добавленные блоки", result.added, item_limit, text_limit))
+    lines.extend(_format_markdown_section("Удалённые блоки", result.removed, item_limit, text_limit))
+    lines.extend(
+        [
+            "## Техническая информация",
+            "",
+            f"- document_a_id: `{_safe_markdown_inline(result.document_a_id)}`",
+            f"- document_b_id: `{_safe_markdown_inline(result.document_b_id)}`",
+            f"- total_a_blocks: {summary.get('total_a_blocks', 0)}",
+            f"- total_b_blocks: {summary.get('total_b_blocks', 0)}",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_markdown_section(
+    title: str,
+    changes: tuple[ComparisonChange, ...],
+    max_items: int,
+    max_text_chars: int,
+) -> list[str]:
+    lines = [f"## {title}", ""]
+    if not changes:
+        lines.append("Нет изменений.")
+        lines.append("")
+        return lines
+    if max_items == 0:
+        lines.append("Нет показанных элементов.")
+        lines.append(f"... ещё {len(changes)} элементов не показано")
+        lines.append("")
+        return lines
+
+    shown = changes[:max_items]
+    for index, change in enumerate(shown, start=1):
+        lines.extend(_format_change_for_markdown(index, change, max_text_chars))
+    hidden_count = len(changes) - len(shown)
+    if hidden_count > 0:
+        lines.append(f"... ещё {hidden_count} элементов не показано")
+        lines.append("")
+    return lines
+
+
+def _format_change_for_markdown(index: int, change: ComparisonChange, max_text_chars: int) -> list[str]:
+    lines = [
+        f"### {index}. `{_safe_markdown_inline(change.change_id)}`",
+        "",
+        f"- Тип изменения: {_safe_markdown_inline(change.change_type)}",
+        f"- Тип блока: {_safe_markdown_inline(change.block_type)}",
+    ]
+    source_text = _format_source(change.source_b if change.change_type == "added" else change.source_a)
+    if source_text:
+        lines.append(f"- Источник: {source_text}")
+    if change.reason:
+        lines.append(f"- Причина: {_safe_markdown_inline(change.reason)}")
+    lines.append("")
+
+    if change.change_type == "changed":
+        lines.extend(_format_text_block("Было", change.text_a, max_text_chars))
+        lines.extend(_format_text_block("Стало", change.text_b, max_text_chars))
+    elif change.change_type == "added":
+        lines.extend(_format_text_block("Добавлено", change.text_b, max_text_chars))
+    elif change.change_type == "removed":
+        lines.extend(_format_text_block("Удалено", change.text_a, max_text_chars))
+    else:
+        lines.extend(_format_text_block("Текст", change.text_b or change.text_a, max_text_chars))
+    return lines
+
+
+def _format_text_block(label: str, text: str, max_text_chars: int) -> list[str]:
+    return [
+        f"{label}:",
+        "",
+        "```text",
+        _safe_markdown_text(_truncate_text(text, max_text_chars)),
+        "```",
+        "",
+    ]
+
+
+def _format_source(source: BlockSource | None) -> str:
+    if source is None:
+        return ""
+    parts = []
+    if source.filename:
+        parts.append(f"file={source.filename}")
+    if source.section:
+        parts.append(f"section={source.section}")
+    if source.page is not None:
+        parts.append(f"page={source.page}")
+    if source.sheet:
+        parts.append(f"sheet={source.sheet}")
+    if source.row_index is not None:
+        parts.append(f"row={source.row_index}")
+    if source.column:
+        parts.append(f"column={source.column}")
+    if source.raw_label:
+        parts.append(f"label={source.raw_label}")
+    return ", ".join(_safe_markdown_inline(part) for part in parts)
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    if max_chars <= 3:
+        return "." * max(0, max_chars)
+    return f"{normalized[: max_chars - 3].rstrip()}..."
+
+
+def _safe_markdown_text(text: str) -> str:
+    return (text or "").replace("```", "`` `").replace("|", "\\|")
+
+
+def _safe_markdown_inline(text: str) -> str:
+    return _safe_markdown_text(str(text or "")).replace("\n", " ").replace("`", "'")
 
 
 def _normalize_filename(filename: str) -> str:
