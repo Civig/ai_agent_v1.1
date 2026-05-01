@@ -10,6 +10,12 @@ Comparison engine ещё не реализован. Текущий baseline ум
 
 Это не implementation plan для текущего patch, не API specification, не UI design и не live validation report.
 
+## Phase 1 Implementation Status
+
+Phase 1 source helpers prepared: `comparison_engine.py` добавляет normalized document model helpers для преобразования уже извлечённого parser text в JSON-serializable blocks.
+
+Deterministic diff, API, UI, LLM summary, storage и production runtime integration ещё не реализованы. Текущий file-chat behavior не должен меняться из-за Phase 1.
+
 ## Почему Нельзя Сравнивать Только Через LLM
 
 LLM полезен для объяснения уже найденных различий, но не должен быть единственным механизмом поиска изменений:
