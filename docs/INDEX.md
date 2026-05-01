@@ -29,9 +29,10 @@ Russian documents are the primary operator reference. English documents are kept
 - Limitations / Ограничения: [PILOT_LIMITATIONS_ru.md](PILOT_LIMITATIONS_ru.md), [PILOT_LIMITATIONS_en.md](PILOT_LIMITATIONS_en.md)
 - Acceptance / Приёмка: [PILOT_ACCEPTANCE_CHECKLIST_ru.md](PILOT_ACCEPTANCE_CHECKLIST_ru.md), [PILOT_ACCEPTANCE_CHECKLIST_en.md](PILOT_ACCEPTANCE_CHECKLIST_en.md)
 - GPU playbook / GPU-плейбук: [GPU_VALIDATION_PLAYBOOK_ru.md](GPU_VALIDATION_PLAYBOOK_ru.md), [GPU_VALIDATION_PLAYBOOK_en.md](GPU_VALIDATION_PLAYBOOK_en.md)
+- Live GPU regression plan / План следующего live GPU regression window: [GPU_LIVE_REGRESSION_PLAN_ru.md](GPU_LIVE_REGRESSION_PLAN_ru.md)
 - Handoff runbook / Документ handoff и runbook: [PILOT_RUNBOOK_ru.md](PILOT_RUNBOOK_ru.md), [PILOT_RUNBOOK_en.md](PILOT_RUNBOOK_en.md)
 - When to read / Когда читать: before pilot kickoff, pilot handoff, acceptance review, and dedicated GPU validation
-- Covers / Что покрывает: exact pilot baseline SHA, scope boundaries, known limitations, pilot acceptance criteria, GPU validation procedure, operator handoff checks
+- Covers / Что покрывает: exact pilot baseline SHA, scope boundaries, known limitations, pilot acceptance criteria, GPU validation procedure, next-window live GPU regression plan, operator handoff checks
 - Does not cover / Что не покрывает: full installation details, deep troubleshooting catalog, architecture rationale
 
 ## Full Install / Полная установка
@@ -98,6 +99,7 @@ Russian documents are the primary operator reference. English documents are kept
 - [PILOT_LIMITATIONS_ru.md](PILOT_LIMITATIONS_ru.md) / [PILOT_LIMITATIONS_en.md](PILOT_LIMITATIONS_en.md) - honest pilot limitations and non-promises
 - [PILOT_ACCEPTANCE_CHECKLIST_ru.md](PILOT_ACCEPTANCE_CHECKLIST_ru.md) / [PILOT_ACCEPTANCE_CHECKLIST_en.md](PILOT_ACCEPTANCE_CHECKLIST_en.md) - strict acceptance checklist for pilot sign-off
 - [GPU_VALIDATION_PLAYBOOK_ru.md](GPU_VALIDATION_PLAYBOOK_ru.md) / [GPU_VALIDATION_PLAYBOOK_en.md](GPU_VALIDATION_PLAYBOOK_en.md) - dedicated GPU validation procedure and verdict criteria
+- [GPU_LIVE_REGRESSION_PLAN_ru.md](GPU_LIVE_REGRESSION_PLAN_ru.md) - next-window live GPU regression plan after Office file optimization v1.0 and parser quality gate
 - [PILOT_RUNBOOK_ru.md](PILOT_RUNBOOK_ru.md) / [PILOT_RUNBOOK_en.md](PILOT_RUNBOOK_en.md) - operator-facing pilot handoff and first-response checks
 - [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md) - target server-side thread/session model, current limitations, and migration path from username-based history
 - [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md) - implemented PostgreSQL persistence groundwork, current transition baseline, and remaining durable-storage gaps
