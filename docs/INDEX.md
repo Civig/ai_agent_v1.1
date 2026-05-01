@@ -59,6 +59,7 @@ Russian documents are the primary operator reference. English documents are kept
 - Parser-stage design and current file-chat path / Дизайн parser-stage и текущий file-chat path: [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md)
 - Parser/file baseline status / Статус parser/file baseline: [PARSER_FILE_BASELINE_ru.md](PARSER_FILE_BASELINE_ru.md)
 - PDF OCR design/audit / Дизайн и аудит PDF OCR: [PDF_OCR_DESIGN_ru.md](PDF_OCR_DESIGN_ru.md)
+- Comparison engine design/audit / Дизайн и аудит comparison engine: [COMPARISON_ENGINE_DESIGN_ru.md](COMPARISON_ENGINE_DESIGN_ru.md)
 - Server-side thread/session target model / Целевая server-side модель thread/session: [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md)
 - When to read / Когда читать: when you need the implemented system design, component boundaries, request paths, and current limitations
 - Covers / Что покрывает: current architecture, components, request flows, storage model, implemented vs planned scope
@@ -96,6 +97,7 @@ Russian documents are the primary operator reference. English documents are kept
 - [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md) - current parser-stage architecture, design rationale, and file-chat path boundaries
 - [PARSER_FILE_BASELINE_ru.md](PARSER_FILE_BASELINE_ru.md) - current parser/file format support baseline, local parser quality gate, and remaining file-intelligence gaps
 - [PDF_OCR_DESIGN_ru.md](PDF_OCR_DESIGN_ru.md) - design/audit plan for safe opt-in PDF OCR after the current scanned-PDF controlled rejection baseline
+- [COMPARISON_ENGINE_DESIGN_ru.md](COMPARISON_ENGINE_DESIGN_ru.md) - design/audit plan for safe deterministic document/table comparison after the current parser/file baseline
 - [PILOT_BASELINE_ru.md](PILOT_BASELINE_ru.md) / [PILOT_BASELINE_en.md](PILOT_BASELINE_en.md) - pilot baseline candidate, evidence boundary, and validation status
 - [PILOT_SCOPE_ru.md](PILOT_SCOPE_ru.md) / [PILOT_SCOPE_en.md](PILOT_SCOPE_en.md) - exact in-scope vs out-of-scope pilot contract
 - [PILOT_LIMITATIONS_ru.md](PILOT_LIMITATIONS_ru.md) / [PILOT_LIMITATIONS_en.md](PILOT_LIMITATIONS_en.md) - honest pilot limitations and non-promises
