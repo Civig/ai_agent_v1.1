@@ -43,7 +43,7 @@ from app import (
 
 
 class UploadBackendTests(unittest.TestCase):
-    def _write_docx_fixture(self, path: Path, body_xml: str) -> None:
+    def _write_docx_fixture(self, path: Path, body_xml: str, extra_parts: dict[str, str | bytes] | None = None) -> None:
         document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>{body_xml}<w:sectPr /></w:body>
@@ -51,6 +51,8 @@ class UploadBackendTests(unittest.TestCase):
 """
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr("word/document.xml", document_xml)
+            for name, content in (extra_parts or {}).items():
+                archive.writestr(name, content)
 
     def _xlsx_cell_ref(self, column_index: int, row_index: int) -> str:
         name = ""
@@ -60,12 +62,18 @@ class UploadBackendTests(unittest.TestCase):
             name = chr(ord("A") + remainder) + name
         return f"{name}{row_index}"
 
-    def _write_xlsx_fixture(self, path: Path, sheets: list[tuple[str, list[list[object]]]]) -> None:
+    def _write_xlsx_fixture(
+        self,
+        path: Path,
+        sheets: list[tuple[str, list[list[object]]]],
+        sheet_options: dict[str, dict[str, object]] | None = None,
+    ) -> None:
         shared_strings: list[str] = []
         shared_indexes: dict[str, int] = {}
         workbook_sheets: list[str] = []
         relationships: list[str] = []
         sheet_documents: list[tuple[str, str]] = []
+        options_by_sheet = sheet_options or {}
 
         def shared_index(value: object) -> int:
             text = str(value)
@@ -75,14 +83,20 @@ class UploadBackendTests(unittest.TestCase):
             return shared_indexes[text]
 
         for sheet_index, (sheet_name, rows) in enumerate(sheets, start=1):
+            options = options_by_sheet.get(sheet_name, {})
+            sheet_state = str(options.get("state", "") or "")
+            state_attr = f' state="{sheet_state}"' if sheet_state else ""
             relationship_id = f"rId{sheet_index}"
-            workbook_sheets.append(f'<sheet name="{sheet_name}" sheetId="{sheet_index}" r:id="{relationship_id}"/>')
+            workbook_sheets.append(
+                f'<sheet name="{sheet_name}" sheetId="{sheet_index}"{state_attr} r:id="{relationship_id}"/>'
+            )
             relationships.append(
                 f'<Relationship Id="{relationship_id}" '
                 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
                 f'Target="worksheets/sheet{sheet_index}.xml"/>'
             )
 
+            hidden_rows = set(options.get("hidden_rows", []))
             row_xml: list[str] = []
             for row_index, row in enumerate(rows, start=1):
                 cell_xml: list[str] = []
@@ -96,7 +110,25 @@ class UploadBackendTests(unittest.TestCase):
                         cell_xml.append(f'<c r="{reference}"/>')
                     else:
                         cell_xml.append(f'<c r="{reference}" t="s"><v>{shared_index(value)}</v></c>')
-                row_xml.append(f'<row r="{row_index}">{"".join(cell_xml)}</row>')
+                hidden_attr = ' hidden="1"' if row_index in hidden_rows else ""
+                row_xml.append(f'<row r="{row_index}"{hidden_attr}>{"".join(cell_xml)}</row>')
+
+            hidden_columns = options.get("hidden_columns", [])
+            cols_xml = ""
+            if hidden_columns:
+                col_entries = []
+                for min_column, max_column in hidden_columns:
+                    col_entries.append(f'<col min="{min_column}" max="{max_column}" hidden="1"/>')
+                cols_xml = f"<cols>{''.join(col_entries)}</cols>"
+
+            merge_refs = options.get("merge_refs", [])
+            merge_xml = ""
+            if merge_refs:
+                merge_xml = (
+                    f'<mergeCells count="{len(merge_refs)}">'
+                    + "".join(f'<mergeCell ref="{merge_ref}"/>' for merge_ref in merge_refs)
+                    + "</mergeCells>"
+                )
 
             sheet_documents.append(
                 (
@@ -104,7 +136,7 @@ class UploadBackendTests(unittest.TestCase):
                     (
                         '<?xml version="1.0" encoding="UTF-8"?>'
                         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-                        f'<sheetData>{"".join(row_xml)}</sheetData>'
+                        f'{cols_xml}<sheetData>{"".join(row_xml)}</sheetData>{merge_xml}'
                         "</worksheet>"
                     ),
                 )
@@ -505,7 +537,43 @@ class UploadBackendTests(unittest.TestCase):
             text = parser_stage.extract_text_from_xlsx(path)
 
         self.assertIn("Cached | 7", text)
-        self.assertNotIn("2+5", text)
+        self.assertIn("Formula: B2 formula: =2+5 cached: 7", text)
+
+    def test_extract_text_from_xlsx_reports_merge_formula_and_hidden_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metadata.xlsx"
+            self._write_xlsx_fixture(
+                path,
+                [
+                    (
+                        "Orders",
+                        [
+                            ["Report title", None, None],
+                            ["Metric", "Value"],
+                            ["Total", {"formula": "SUM(B2:B3)", "cached": "300"}],
+                            ["Pending", {"formula": "SUM(C2:C3)"}],
+                        ],
+                    ),
+                    ("Archive", [["Old", "1"]]),
+                ],
+                sheet_options={
+                    "Orders": {
+                        "hidden_columns": [(2, 2)],
+                        "hidden_rows": {4},
+                        "merge_refs": ["A1:C1"],
+                    },
+                    "Archive": {"state": "hidden"},
+                },
+            )
+
+            text = parser_stage.extract_text_from_xlsx(path)
+
+        self.assertIn("Merged cells: A1:C1 = Report title", text)
+        self.assertIn("Formula: B3 formula: =SUM(B2:B3) cached: 300", text)
+        self.assertIn("Formula: B4 formula: =SUM(C2:C3) cached: unavailable", text)
+        self.assertIn("Hidden columns: B", text)
+        self.assertIn("Hidden row: 4", text)
+        self.assertIn("Hidden sheet: Archive (state=hidden)", text)
 
     def test_parse_uploaded_file_dispatches_csv_and_xlsx(self):
         with mock.patch.object(parser_stage, "extract_text_from_csv", return_value="csv") as csv_mock, mock.patch.object(
@@ -582,6 +650,88 @@ class UploadBackendTests(unittest.TestCase):
         self.assertLess(text.index("retry_limit | 3"), text.index("Review complete"))
         self.assertNotIn("0,2", text)
         self.assertNotIn(" |  | ", text)
+
+    def test_extract_text_from_docx_includes_headers_and_footers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "headers-footers.docx"
+            self._write_docx_fixture(
+                path,
+                '<w:p><w:r><w:t>Body paragraph</w:t></w:r></w:p>',
+                {
+                    "word/header1.xml": (
+                        '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                        "<w:p><w:r><w:t>Quarterly Header</w:t></w:r></w:p>"
+                        "</w:hdr>"
+                    ),
+                    "word/footer1.xml": (
+                        '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                        "<w:p><w:r><w:t>Confidential Footer</w:t></w:r></w:p>"
+                        "</w:ftr>"
+                    ),
+                },
+            )
+
+            text = parser_stage.extract_text_from_docx(path)
+
+        self.assertIn("DOCX Body", text)
+        self.assertIn("Body paragraph", text)
+        self.assertIn("DOCX Header", text)
+        self.assertIn("Quarterly Header", text)
+        self.assertIn("DOCX Footer", text)
+        self.assertIn("Confidential Footer", text)
+
+    def test_extract_text_from_docx_includes_comments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "comments.docx"
+            self._write_docx_fixture(
+                path,
+                '<w:p><w:r><w:t>Body paragraph</w:t></w:r></w:p>',
+                {
+                    "word/comments.xml": (
+                        '<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                        '<w:comment w:id="1" w:author="Synthetic QA">'
+                        "<w:p><w:r><w:t>Reviewer comment text</w:t></w:r></w:p>"
+                        "</w:comment>"
+                        "</w:comments>"
+                    )
+                },
+            )
+
+            text = parser_stage.extract_text_from_docx(path)
+
+        self.assertIn("DOCX Comments", text)
+        self.assertIn("Reviewer comment text", text)
+
+    def test_extract_text_from_docx_reports_tracked_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tracked.docx"
+            self._write_docx_fixture(
+                path,
+                """
+<w:p><w:ins w:id="1"><w:r><w:t>new clause</w:t></w:r></w:ins></w:p>
+<w:p><w:del w:id="2"><w:r><w:delText>old clause</w:delText></w:r></w:del></w:p>
+""",
+            )
+
+            text = parser_stage.extract_text_from_docx(path)
+
+        self.assertIn("Tracked changes", text)
+        self.assertIn("Inserted: new clause", text)
+        self.assertIn("Deleted: old clause", text)
+
+    def test_extract_text_from_docx_reports_embedded_images_without_ocr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "embedded-image.docx"
+            self._write_docx_fixture(
+                path,
+                '<w:p><w:r><w:t>Body paragraph</w:t></w:r></w:p>',
+                {"word/media/image1.png": b"\x89PNG\r\n\x1a\n"},
+            )
+
+            text = parser_stage.extract_text_from_docx(path)
+
+        self.assertIn("Embedded images", text)
+        self.assertIn("DOCX contains embedded images; OCR inside DOCX is not supported yet", text)
 
     def test_extract_text_from_docx_maps_missing_document_xml_to_controlled_error(self):
         with tempfile.TemporaryDirectory() as tmp:

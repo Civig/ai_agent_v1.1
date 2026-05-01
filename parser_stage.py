@@ -347,6 +347,34 @@ def _docx_flat_text(root: ElementTree.Element) -> str:
     return trim_document_content("".join(chunks))
 
 
+def _docx_change_text(node: ElementTree.Element) -> str:
+    chunks: list[str] = []
+    for child in node.iter():
+        child_name = _xml_local_name(child.tag)
+        if child_name in {"t", "delText"} and child.text:
+            chunks.append(child.text)
+        elif child_name in {"br", "cr"}:
+            chunks.append("\n")
+        elif child_name == "tab":
+            chunks.append("\t")
+    return trim_document_content("".join(chunks))
+
+
+def _docx_tracked_changes_text(xml_bytes: bytes) -> str:
+    root = ElementTree.fromstring(xml_bytes)
+    lines: list[str] = []
+    for node in root.iter():
+        node_name = _xml_local_name(node.tag)
+        if node_name not in {"ins", "del"}:
+            continue
+        text = _docx_change_text(node)
+        if not text:
+            continue
+        label = "Inserted" if node_name == "ins" else "Deleted"
+        lines.append(f"{label}: {text}")
+    return "\n".join(lines)
+
+
 def extract_docx_document_xml_text(xml_bytes: bytes) -> str:
     root = ElementTree.fromstring(xml_bytes)
     body = next((child for child in root if _xml_local_name(child.tag) == "body"), None)
@@ -370,11 +398,79 @@ def extract_docx_document_xml_text(xml_bytes: bytes) -> str:
     return trim_document_content("\n\n".join(blocks))
 
 
+def _docx_part_texts(archive: zipfile.ZipFile, prefix: str) -> list[str]:
+    texts: list[str] = []
+    for name in sorted(archive.namelist()):
+        if not name.startswith(prefix) or not name.endswith(".xml"):
+            continue
+        text = extract_docx_document_xml_text(archive.read(name))
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _docx_optional_part_text(archive: zipfile.ZipFile, name: str) -> str:
+    try:
+        return extract_docx_document_xml_text(archive.read(name))
+    except KeyError:
+        return ""
+
+
+def _docx_tracked_changes_blocks(archive: zipfile.ZipFile) -> list[str]:
+    blocks: list[str] = []
+    for name in sorted(archive.namelist()):
+        if not name.startswith("word/") or not name.endswith(".xml"):
+            continue
+        text = _docx_tracked_changes_text(archive.read(name))
+        if text:
+            blocks.append(text)
+    return blocks
+
+
+def _docx_contains_embedded_images(archive: zipfile.ZipFile) -> bool:
+    if any(name.startswith("word/media/") and not name.endswith("/") for name in archive.namelist()):
+        return True
+
+    for name in sorted(archive.namelist()):
+        if not name.startswith("word/") or not name.endswith(".xml"):
+            continue
+        root = ElementTree.fromstring(archive.read(name))
+        if any(_xml_local_name(node.tag) in {"drawing", "pict", "blip"} for node in root.iter()):
+            return True
+    return False
+
+
 def extract_text_from_docx(path: Path) -> str:
     try:
         with zipfile.ZipFile(path) as archive:
-            xml_bytes = archive.read("word/document.xml")
-        return extract_docx_document_xml_text(xml_bytes)
+            body_text = extract_docx_document_xml_text(archive.read("word/document.xml"))
+
+            extra_blocks: list[str] = []
+            header_text = "\n\n".join(_docx_part_texts(archive, "word/header"))
+            if header_text:
+                extra_blocks.append(f"DOCX Header\n{header_text}")
+
+            footer_text = "\n\n".join(_docx_part_texts(archive, "word/footer"))
+            if footer_text:
+                extra_blocks.append(f"DOCX Footer\n{footer_text}")
+
+            comments_text = _docx_optional_part_text(archive, "word/comments.xml")
+            if comments_text:
+                extra_blocks.append(f"DOCX Comments\n{comments_text}")
+
+            tracked_changes = "\n".join(_docx_tracked_changes_blocks(archive))
+            if tracked_changes:
+                extra_blocks.append(f"Tracked changes\n{tracked_changes}")
+
+            if _docx_contains_embedded_images(archive):
+                extra_blocks.append("Embedded images\nDOCX contains embedded images; OCR inside DOCX is not supported yet")
+
+        if not extra_blocks:
+            return body_text
+
+        blocks = [f"DOCX Body\n{body_text}"] if body_text else []
+        blocks.extend(extra_blocks)
+        return trim_document_content("\n\n".join(blocks))
     except Exception as exc:
         raise RuntimeError(docx_parse_failed_detail()) from exc
 
@@ -415,8 +511,28 @@ def _xlsx_cell_value(cell: ElementTree.Element, shared_strings: list[str]) -> st
     return raw_value
 
 
-def _xlsx_sheet_rows(archive: zipfile.ZipFile, sheet_path: str, shared_strings: list[str]) -> list[list[str]]:
-    root = ElementTree.fromstring(archive.read(sheet_path))
+def _xlsx_column_name(column_index: int) -> str:
+    name = ""
+    column = column_index
+    while column > 0:
+        column, remainder = divmod(column - 1, 26)
+        name = chr(ord("A") + remainder) + name
+    return name or str(column_index)
+
+
+def _xlsx_hidden_column_label(column: ElementTree.Element) -> str:
+    try:
+        min_column = int(column.attrib.get("min", "0"))
+        max_column = int(column.attrib.get("max", str(min_column)))
+    except ValueError:
+        return column.attrib.get("min", "unknown")
+
+    start = _xlsx_column_name(min_column)
+    end = _xlsx_column_name(max_column)
+    return start if start == end else f"{start}:{end}"
+
+
+def _xlsx_sheet_rows(root: ElementTree.Element, shared_strings: list[str]) -> list[list[str]]:
     rows: list[list[str]] = []
     for row in root.iter():
         if _xml_local_name(row.tag) != "row":
@@ -434,7 +550,110 @@ def _xlsx_sheet_rows(archive: zipfile.ZipFile, sheet_path: str, shared_strings: 
     return rows
 
 
-def _xlsx_workbook_sheets(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
+def _xlsx_formula_text(cell: ElementTree.Element) -> str:
+    formula_node = next((child for child in cell if _xml_local_name(child.tag) == "f"), None)
+    formula = (formula_node.text or "").strip() if formula_node is not None else ""
+    if formula and not formula.startswith("="):
+        formula = f"={formula}"
+    return formula
+
+
+def _xlsx_cell_map(root: ElementTree.Element, shared_strings: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    row_count = 0
+    for row in root.iter():
+        if _xml_local_name(row.tag) != "row":
+            continue
+        row_count += 1
+        if row_count > MAX_SPREADSHEET_ROWS:
+            break
+
+        cell_count = 0
+        for cell in row:
+            if _xml_local_name(cell.tag) != "c":
+                continue
+            cell_count += 1
+            if cell_count > MAX_SPREADSHEET_COLUMNS:
+                break
+            reference = cell.attrib.get("r", "")
+            value = _xlsx_cell_value(cell, shared_strings)
+            if reference and value:
+                values[reference] = value
+    return values
+
+
+def _xlsx_sheet_metadata(
+    *,
+    sheet_name: str,
+    sheet_state: str,
+    root: ElementTree.Element,
+    shared_strings: list[str],
+) -> str:
+    lines: list[str] = []
+
+    def add_line(line: str) -> None:
+        if len(lines) < MAX_SPREADSHEET_ROWS:
+            lines.append(line)
+
+    if sheet_state and sheet_state != "visible":
+        add_line(f"Hidden sheet: {sheet_name} (state={sheet_state})")
+
+    for column in root.iter():
+        if _xml_local_name(column.tag) != "col":
+            continue
+        if column.attrib.get("hidden") in {"1", "true", "TRUE"}:
+            add_line(f"Hidden columns: {_xlsx_hidden_column_label(column)}")
+        if len(lines) >= MAX_SPREADSHEET_ROWS:
+            break
+
+    cell_values = _xlsx_cell_map(root, shared_strings)
+    for merge_cell in root.iter():
+        if _xml_local_name(merge_cell.tag) != "mergeCell":
+            continue
+        merge_ref = merge_cell.attrib.get("ref", "").strip()
+        if not merge_ref:
+            continue
+        top_left = merge_ref.split(":", 1)[0]
+        top_left_value = cell_values.get(top_left, "")
+        suffix = f" = {top_left_value}" if top_left_value else ""
+        add_line(f"Merged cells: {merge_ref}{suffix}")
+        if len(lines) >= MAX_SPREADSHEET_ROWS:
+            break
+
+    row_count = 0
+    for row in root.iter():
+        if _xml_local_name(row.tag) != "row":
+            continue
+        row_count += 1
+        if row_count > MAX_SPREADSHEET_ROWS:
+            break
+
+        row_ref = row.attrib.get("r", str(row_count))
+        if row.attrib.get("hidden") in {"1", "true", "TRUE"}:
+            add_line(f"Hidden row: {row_ref}")
+
+        cell_count = 0
+        for cell in row:
+            if _xml_local_name(cell.tag) != "c":
+                continue
+            cell_count += 1
+            if cell_count > MAX_SPREADSHEET_COLUMNS:
+                break
+            formula = _xlsx_formula_text(cell)
+            if not formula:
+                continue
+
+            value_node = next((child for child in cell if _xml_local_name(child.tag) == "v"), None)
+            cached = _xlsx_cell_value(cell, shared_strings) if value_node is not None else ""
+            formula_text = _trim_spreadsheet_cell(formula)
+            cached_text = _trim_spreadsheet_cell(cached) if cached else "unavailable"
+            reference = cell.attrib.get("r", "unknown")
+            add_line(f"Formula: {reference} formula: {formula_text} cached: {cached_text}")
+
+    return "\n".join(lines)
+
+
+def _xlsx_workbook_sheets(archive: zipfile.ZipFile) -> list[tuple[str, str, str]]:
     workbook_root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
     rels_root = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
 
@@ -446,15 +665,16 @@ def _xlsx_workbook_sheets(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
             if rel_id and target:
                 relationships[rel_id] = _xlsx_relationship_target(target)
 
-    sheets: list[tuple[str, str]] = []
+    sheets: list[tuple[str, str, str]] = []
     for node in workbook_root.iter():
         if _xml_local_name(node.tag) != "sheet":
             continue
         sheet_name = node.attrib.get("name", "Sheet").strip() or "Sheet"
+        sheet_state = node.attrib.get("state", "visible").strip() or "visible"
         rel_id = _xml_attr_local(node, "id")
         sheet_path = relationships.get(rel_id)
         if sheet_path:
-            sheets.append((sheet_name, sheet_path))
+            sheets.append((sheet_name, sheet_path, sheet_state))
         if len(sheets) >= MAX_SPREADSHEET_SHEETS:
             break
     return sheets
@@ -465,10 +685,19 @@ def extract_text_from_xlsx(path: Path) -> str:
         with zipfile.ZipFile(path) as archive:
             shared_strings = _xlsx_shared_strings(archive)
             blocks: list[str] = []
-            for sheet_name, sheet_path in _xlsx_workbook_sheets(archive):
-                table_text = _format_table_rows(_xlsx_sheet_rows(archive, sheet_path, shared_strings))
+            for sheet_name, sheet_path, sheet_state in _xlsx_workbook_sheets(archive):
+                sheet_root = ElementTree.fromstring(archive.read(sheet_path))
+                table_text = _format_table_rows(_xlsx_sheet_rows(sheet_root, shared_strings))
                 if table_text:
                     blocks.append(f"Sheet: {sheet_name}\n\n{table_text}")
+                metadata_text = _xlsx_sheet_metadata(
+                    sheet_name=sheet_name,
+                    sheet_state=sheet_state,
+                    root=sheet_root,
+                    shared_strings=shared_strings,
+                )
+                if metadata_text:
+                    blocks.append(f"Sheet metadata: {sheet_name}\n\n{metadata_text}")
 
         if not blocks:
             raise RuntimeError(spreadsheet_empty_detail())
