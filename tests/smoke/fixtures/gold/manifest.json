@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "description": "Golden synthetic parser/file-chat corpus for stable quality checks.",
+  "generated_by": "scripts/smoke/generate_gold_corpus.py",
+  "max_fixture_bytes": 2097152,
+  "fixture_count": 12,
+  "fixtures": [
+    {
+      "id": "txt_entities_alpha_bravo_charlie",
+      "format": "txt",
+      "path": "tests/smoke/fixtures/txt/entities.txt",
+      "scenario": "TXT entity extraction baseline for file-chat grounding.",
+      "expected_status": "success",
+      "expected_entities": [
+        "ALPHA-17",
+        "BRAVO-42",
+        "CHARLIE-09"
+      ],
+      "expected_values": {},
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Existing smoke fixture reused to avoid duplicate TXT content.",
+      "bytes": 212,
+      "sha256": "3a03b111f46ed79770b0a23955530e09519dbe21be851cb4c294130860f6f616"
+    },
+    {
+      "id": "txt_parameters_parser_budget",
+      "format": "txt",
+      "path": "tests/smoke/fixtures/txt/parameters_table.txt",
+      "scenario": "TXT parameter extraction baseline with deterministic parser settings.",
+      "expected_status": "success",
+      "expected_entities": [],
+      "expected_values": {
+        "max_tokens": "2048",
+        "temperature": "0.2",
+        "retry_limit": "3",
+        "ocr_timeout": "30"
+      },
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Existing smoke fixture covers parser parameter values.",
+      "bytes": 241,
+      "sha256": "f92bdd4506d1a4bc19bb5a5e8addf77afc7a593bdb96ed6d5a70fa3b82c81b7a"
+    },
+    {
+      "id": "csv_orders_contract_status",
+      "format": "csv",
+      "path": "tests/smoke/fixtures/gold/csv/orders.csv",
+      "scenario": "CSV baseline for contract/order table extraction.",
+      "expected_status": "success",
+      "expected_entities": [
+        "CNT-001",
+        "CNT-002",
+        "Alpha LLC",
+        "Beta LLC"
+      ],
+      "expected_values": {
+        "headers": [
+          "ContractID",
+          "Vendor",
+          "Amount",
+          "Currency",
+          "Status"
+        ],
+        "rows": [
+          {
+            "ContractID": "CNT-001",
+            "Vendor": "Alpha LLC",
+            "Amount": "100000",
+            "Currency": "RUB",
+            "Status": "Active"
+          },
+          {
+            "ContractID": "CNT-002",
+            "Vendor": "Beta LLC",
+            "Amount": "250000",
+            "Currency": "RUB",
+            "Status": "Review"
+          }
+        ]
+      },
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Synthetic CSV fixture added because CSV was covered only by unit tests.",
+      "bytes": 112,
+      "sha256": "471b9863345a0afcea07a9a4e4a4457a74686339c569c8e437883dae021d97e7"
+    },
+    {
+      "id": "xlsx_orders_and_metrics",
+      "format": "xlsx",
+      "path": "tests/smoke/fixtures/gold/xlsx/synthetic_workbook.xlsx",
+      "scenario": "XLSX baseline with Orders and Metrics worksheets.",
+      "expected_status": "success",
+      "expected_entities": [
+        "CNT-001",
+        "CNT-002",
+        "January",
+        "February",
+        "March"
+      ],
+      "expected_values": {
+        "sheets": [
+          "Orders",
+          "Metrics"
+        ],
+        "headers": {
+          "Orders": [
+            "ContractID",
+            "Vendor",
+            "Amount",
+            "Currency",
+            "Status"
+          ],
+          "Metrics": [
+            "Month",
+            "SuccessRate",
+            "Tickets"
+          ]
+        },
+        "metrics": {
+          "January": {
+            "SuccessRate": "91",
+            "Tickets": "118"
+          },
+          "February": {
+            "SuccessRate": "93",
+            "Tickets": "126"
+          },
+          "March": {
+            "SuccessRate": "95",
+            "Tickets": "139"
+          }
+        }
+      },
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Synthetic XLSX generated with lightweight OOXML and no runtime dependency.",
+      "bytes": 2332,
+      "sha256": "1c45f6745e95ab79f0686d95011a29cbe339d7fa66af3b25580ba3e91b7a4e83"
+    },
+    {
+      "id": "docx_project_helios_table",
+      "format": "docx",
+      "path": "tests/smoke/fixtures/docx/table_and_paragraphs.docx",
+      "scenario": "DOCX paragraph plus table extraction baseline.",
+      "expected_status": "success",
+      "expected_entities": [
+        "Project Helios"
+      ],
+      "expected_values": {
+        "table_header": "parameter | value | unit",
+        "max_tokens": "2048",
+        "temperature": "0.2",
+        "retry_limit": "3"
+      },
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Existing DOCX smoke fixture already matches the gold table scenario.",
+      "bytes": 1132,
+      "sha256": "eb99559b3955754795f09ba020a5776460d299f4868ccc75355f3e0be2854d1a"
+    },
+    {
+      "id": "pdf_text_layer_entities",
+      "format": "pdf",
+      "path": "tests/smoke/fixtures/pdf/entity_report.pdf",
+      "scenario": "PDF text-layer entity extraction baseline.",
+      "expected_status": "success",
+      "expected_entities": [
+        "ALPHA-17",
+        "BRAVO-42",
+        "CHARLIE-09"
+      ],
+      "expected_values": {},
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Existing text-layer PDF fixture reused.",
+      "bytes": 847,
+      "sha256": "7553ab6c97a92de547ea0dad69de09f853764e282faea2f76e0181ddcb13c35a"
+    },
+    {
+      "id": "pdf_text_layer_parameters",
+      "format": "pdf",
+      "path": "tests/smoke/fixtures/pdf/parameter_table.pdf",
+      "scenario": "PDF text-layer parameter table extraction baseline.",
+      "expected_status": "success",
+      "expected_entities": [],
+      "expected_values": {
+        "max_tokens": "2048",
+        "temperature": "0.2",
+        "retry_limit": "3",
+        "ocr_timeout": "30"
+      },
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Existing text-layer PDF parameter fixture reused.",
+      "bytes": 911,
+      "sha256": "25e478ae4ffe96bc18fb52d379796d5f296fa8a82169d69cc651bc36968d76e4"
+    },
+    {
+      "id": "pdf_scanned_no_text_layer",
+      "format": "pdf",
+      "path": "tests/smoke/fixtures/gold/pdf/scanned_no_text_layer.pdf",
+      "scenario": "Image-only PDF negative case for controlled no-text-layer detection.",
+      "expected_status": "failure",
+      "expected_entities": [],
+      "expected_values": {},
+      "expected_controlled_error_substring": "PDF не содержит извлекаемого текстового слоя",
+      "unsupported_features": [
+        "pdf_ocr_not_supported"
+      ],
+      "notes": "Small synthetic PDF contains an image XObject and no text layer.",
+      "bytes": 698,
+      "sha256": "1291dbe995fae0418617d8ed5150d264ea1756404f26381fe74d4c94a70eaf48"
+    },
+    {
+      "id": "pdf_malformed_payload",
+      "format": "pdf",
+      "path": "tests/smoke/fixtures/gold/pdf/malformed_payload.pdf",
+      "scenario": "Malformed PDF negative case for controlled parse failure.",
+      "expected_status": "failure",
+      "expected_entities": [],
+      "expected_values": {},
+      "expected_controlled_error_substring": "Не удалось извлечь текст из PDF",
+      "unsupported_features": [
+        "malformed_pdf"
+      ],
+      "notes": "Tiny synthetic invalid payload mirrors existing parser unit-test coverage.",
+      "bytes": 15,
+      "sha256": "de84d980ac6be7a50113cfda432da737d2049599f18cb2751d80927cc2988f7b"
+    },
+    {
+      "id": "png_ocr_success_alpha_score",
+      "format": "png",
+      "path": "tests/smoke/fixtures/images/ocr_success.png",
+      "scenario": "PNG OCR-positive baseline for image file-chat.",
+      "expected_status": "success",
+      "expected_entities": [
+        "ALPHA",
+        "17",
+        "98"
+      ],
+      "expected_values": {},
+      "expected_controlled_error_substring": "",
+      "unsupported_features": [],
+      "notes": "Existing PNG smoke fixture reused; OCR execution is left to smoke, not manifest validation.",
+      "bytes": 1539,
+      "sha256": "3bbba31554f1fbe315571b780f8499b7a04172974929c4a92ef29c3a968445d4"
+    },
+    {
+      "id": "docx_missing_document_xml",
+      "format": "docx",
+      "path": "tests/smoke/fixtures/gold/docx/missing_document_xml.docx",
+      "scenario": "Malformed DOCX negative case for missing word/document.xml.",
+      "expected_status": "failure",
+      "expected_entities": [],
+      "expected_values": {},
+      "expected_controlled_error_substring": "Не удалось извлечь текст из DOCX",
+      "unsupported_features": [
+        "malformed_docx_missing_document_xml"
+      ],
+      "notes": "Small synthetic DOCX zip mirrors existing parser unit-test coverage.",
+      "bytes": 243,
+      "sha256": "8411044a95e15278f2acae89557decffb39d77ef3337fcb53ee1cbd77348a8d9"
+    },
+    {
+      "id": "xls_unsupported_legacy_workbook",
+      "format": "xls",
+      "path": "tests/smoke/fixtures/gold/unsupported/orders.xls",
+      "scenario": "Unsupported legacy XLS upload negative case.",
+      "expected_status": "failure",
+      "expected_entities": [],
+      "expected_values": {},
+      "expected_controlled_error_substring": "Поддерживаются только TXT, CSV, PDF, DOCX, XLSX, PNG, JPG и JPEG",
+      "unsupported_features": [
+        "legacy_xls_not_supported"
+      ],
+      "notes": "Synthetic placeholder; .xls remains intentionally unsupported.",
+      "bytes": 69,
+      "sha256": "2950b3a20f0e688898d544bf9e0e100fbe16ea6ae51cb5c21e993812c561824c"
+    }
+  ],
+  "roadmap_gaps": [
+    {
+      "format": "jpg",
+      "reason": "PNG OCR success is covered by an existing fixture; JPG OCR is intentionally deferred until a stable synthetic JPG OCR fixture is needed."
+    }
+  ]
+}
