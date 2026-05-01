@@ -8,6 +8,7 @@ Office file optimization v1.0 готов как source-level parser baseline и 
 
 Этот документ фиксирует фактическое состояние после следующих изменений:
 
+- `a0c5267 parser: add opt-in PDF OCR v1`
 - `8d4de22 parser: add Office metadata extraction baseline`
 - `7e383ce test(parser): add parser quality gate script`
 - `640cf78 test(parser): validate gold corpus extraction`
@@ -23,7 +24,7 @@ Office file optimization v1.0 готов как source-level parser baseline и 
 | --- | --- | --- | --- |
 | TXT | Поддержан | Text extraction. | Только plain text extraction, без отдельной semantic-разметки. |
 | PDF text-layer | Поддержан | Text-layer extraction, page limit, malformed/invalid cases map to controlled errors. | Text-layer PDF не должен уходить в OCR; качество зависит от наличия извлекаемого текстового слоя. |
-| Scanned / image-only PDF | Controlled reject by default; opt-in OCR v1 | По умолчанию explicit controlled detection и понятная ошибка для PDF без текстового слоя. При `ENABLE_PDF_OCR=true` доступен bounded PDF OCR v1 для первых страниц. | PDF OCR выключен по умолчанию; нет table reconstruction, layout-perfect extraction, handwriting recognition или production capacity guarantee. |
+| Scanned / image-only PDF | Controlled reject by default; opt-in OCR v1, live pending | По умолчанию explicit controlled detection и понятная ошибка для PDF без текстового слоя. При `ENABLE_PDF_OCR=true` доступен bounded PDF OCR v1 для первых страниц. | PDF OCR v1 реализован source-level и покрыт unit/parser quality tests, но live validation pending; нет table reconstruction, layout-perfect extraction, handwriting recognition или production capacity guarantee. |
 | DOCX | Поддержан | Body text, paragraphs, tables with row/cell structure, headers, footers, comments, tracked changes detection, embedded images detection. | OCR inside DOCX не поддержан; full Word semantics, complex content controls и legal compare не заявлены. |
 | PNG / JPG / JPEG | Поддержан baseline | OCR baseline, safe preprocessing, dimension cap, OCR timeout. | OCR quality зависит от исходного изображения и OCR runtime; это не PDF OCR. |
 | CSV | Поддержан | Rows/columns baseline extraction, bounded rows/columns/cells. | Нет advanced typing/semantic schema inference. |
@@ -75,7 +76,7 @@ Extended gate дополнительно запускает:
 - Advanced Excel charts/pivots/macros.
 - Full legal/document comparison engine.
 - Production-ready dashboard RBAC / claim model.
-- Final live GPU regression после последних parser/file patches.
+- Final live GPU regression после PDF OCR v1 и последних parser/file patches.
 
 ## Следующий validation step
 
@@ -89,6 +90,7 @@ Extended gate дополнительно запускает:
 - file-chat smoke;
 - TXT / PDF / DOCX / CSV / XLSX / PNG / JPG scenarios;
 - negative cases: scanned PDF, malformed PDF, unsupported XLS;
+- `ENABLE_PDF_OCR=false` default behavior и отдельный `ENABLE_PDF_OCR=true` PDF OCR v1 pass;
 - latency, cold start и warm response;
 - отсутствие secrets в artifacts.
 

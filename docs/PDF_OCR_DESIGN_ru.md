@@ -10,6 +10,20 @@
 
 Этот документ не является live validation report или production certification.
 
+## v1 Implementation Status
+
+Commit `a0c5267 parser: add opt-in PDF OCR v1` реализовал PDF OCR v1 как source implementation:
+
+- `ENABLE_PDF_OCR=false` по умолчанию;
+- opt-in path использует PyMuPDF/`fitz` renderer, Pillow preprocessing и `pytesseract`;
+- OCR path bounded по числу страниц, DPI и per-page timeout;
+- text-layer PDF не должен уходить в OCR;
+- scanned/image-only PDF при default-off flag сохраняет текущий controlled error;
+- malformed PDF остаётся controlled PDF parse error;
+- mock-based unit tests и parser quality gate core/extended прошли на source-of-truth VM.
+
+Live validation pending: этот статус не означает production-ready, pilot claim или подтверждение на GPU/validation host.
+
 ## Текущий PDF Pipeline
 
 Текущий upload/parser entrypoint:
@@ -49,9 +63,10 @@ Fallback path:
 
 Текущий scanned/image-only behavior:
 
-- PDF без извлекаемого text layer не идёт в OCR;
-- image OCR path не вызывается для PDF;
-- тест `test_extract_text_from_pdf_rejects_empty_text_layer_without_ocr` явно защищает этот контракт;
+- при `ENABLE_PDF_OCR=false` PDF без извлекаемого text layer не идёт в OCR;
+- при `ENABLE_PDF_OCR=true` scanned/image-only PDF может идти в bounded PDF OCR v1;
+- text-layer PDF не должен уходить в OCR;
+- тесты защищают default-off behavior, opt-in behavior и no-OCR path для text-layer PDF;
 - gold corpus содержит `pdf_scanned_no_text_layer` как expected controlled failure.
 
 ## Текущий Image OCR Pipeline

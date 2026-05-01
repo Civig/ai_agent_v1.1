@@ -2,9 +2,9 @@
 
 ## Статус документа
 
-Этот документ описывает план следующего live GPU validation window для текущего HEAD ветки `beta/gpu-model-validation` после Office file optimization v1.0 и parser quality gate.
+Этот документ описывает план следующего live GPU validation window для текущего HEAD ветки `beta/gpu-model-validation` после Office file optimization v1.0, parser quality gate и PDF OCR v1 source implementation.
 
-Это не отчёт о выполненной проверке, не подтверждение результатов на GPU-стенде и не capacity benchmark. Цель окна - подтвердить demo / pilot validation readiness текущего regression baseline, а не провести production certification.
+Это не отчёт о выполненной проверке, не подтверждение результатов на GPU-стенде и не capacity benchmark. PDF OCR v1 реализован как opt-in source implementation behind feature flag, default-off; live validation pending. Цель окна - подтвердить demo / pilot validation readiness текущего regression baseline, а не провести production certification.
 
 Source-of-truth VM для подготовки patches остаётся `SRV-AI` под пользователем `admin_ai` в репозитории `/home/admin_ai/ai_agent_v1.1`. Арендованный GPU host используется только как validation target и не становится source of truth.
 
@@ -21,7 +21,11 @@ Source-of-truth VM для подготовки patches остаётся `SRV-AI`
 - file-chat smoke;
 - локальный parser quality gate после clone/pull;
 - Office file optimization v1.0 на live runtime;
+- PDF OCR v1 opt-in behavior;
+- default `ENABLE_PDF_OCR=false` behavior remains safe for scanned/image-only PDF;
+- `ENABLE_PDF_OCR=true` scanned PDF OCR behavior on validation host;
 - cold start latency, warm response latency и file-chat latency;
+- PDF OCR latency and controlled error behavior;
 - сбор artifact bundle без секретов.
 
 ## Требования к GPU host
@@ -79,6 +83,15 @@ git status --short --branch
 git rev-parse --short HEAD
 git log --oneline --decorate -n 15
 ```
+
+PDF OCR env policy:
+
+```bash
+grep '^ENABLE_PDF_OCR=' .env 2>/dev/null || true
+grep '^FILE_PROCESSING_PDF_OCR_' .env 2>/dev/null || true
+```
+
+Default regression run должен идти с `ENABLE_PDF_OCR=false` или unset/default false. OCR-specific pass должен быть отдельным documented run/config с `ENABLE_PDF_OCR=true`. Не смешивать default regression и opt-in OCR regression в одном неразделённом прогоне.
 
 Готовый preflight script текущего smoke kit:
 
@@ -243,15 +256,24 @@ Smoke artifacts сохраняются в `artifacts/smoke/<timestamp>/`.
 - PNG OCR baseline;
 - JPG OCR quick check, если есть fixture или manual test.
 
-Expected controlled failures:
+Default mode, `ENABLE_PDF_OCR=false`:
 
-- scanned/image-only PDF -> explicit "PDF OCR not supported yet" / controlled no-text-layer message;
+- scanned/image-only PDF -> current controlled no-text-layer / PDF OCR not enabled message;
+- text-layer PDF -> success, no OCR required;
 - malformed PDF -> controlled error;
 - broken DOCX / missing `word/document.xml` -> controlled error;
 - unsupported `.xls` -> unsupported / controlled error;
 - oversized image -> controlled error.
 
-Текущий `tests/smoke/specs/file_chat_cases.json` покрывает TXT, text-layer PDF, DOCX paragraph/table, PNG OCR и oversized image controlled failure. CSV, XLSX, scanned PDF, malformed PDF, broken DOCX, `.xls`, DOCX headers/footers/comments/tracked changes и JPG могут быть покрыты parser quality gate, gold corpus или manual validation, но не должны считаться fully automated live smoke coverage, если соответствующего smoke case нет в текущем HEAD.
+Opt-in OCR mode, `ENABLE_PDF_OCR=true`:
+
+- scanned PDF simple text -> OCR success expected;
+- OCR response should contain known expected words/numbers from synthetic fixture;
+- malformed PDF -> controlled malformed PDF error, not OCR fallback masking;
+- oversized/render/timeout cases -> controlled OCR error;
+- text-layer PDF -> success without forced OCR.
+
+Текущий `tests/smoke/specs/file_chat_cases.json` покрывает TXT, text-layer PDF, DOCX paragraph/table, PNG OCR и oversized image controlled failure. CSV, XLSX, scanned PDF, malformed PDF, broken DOCX, `.xls`, DOCX headers/footers/comments/tracked changes, PDF OCR opt-in и JPG могут быть покрыты parser quality gate, gold corpus или manual validation, но не должны считаться fully automated live smoke coverage, если соответствующего smoke case нет в текущем HEAD.
 
 Если live smoke suite ещё не покрывает все новые Office metadata cases, это фиксируется как manual/regression gap, а не как product failure.
 
@@ -273,6 +295,12 @@ Expected controlled failures:
 - failed/rejected jobs metrics;
 - HTTP `429` events;
 - OCR/file parser controlled failure counts.
+- PDF OCR latency per file in opt-in run;
+- PDF OCR pages attempted, succeeded and failed, if observable;
+- total PDF OCR chars, if observable;
+- PDF OCR timeout count;
+- CPU/RAM snapshot during PDF OCR;
+- GPU usage note: PDF OCR v1 is CPU/Tesseract-bound and is not the primary GPU acceleration path.
 
 Metrics are validation-window measurements, not production capacity planning.
 
@@ -295,9 +323,12 @@ Metrics are validation-window measurements, not production capacity planning.
 - docker logs;
 - parser quality gate output;
 - model selection summary;
+- env-safe flag snapshot including `ENABLE_PDF_OCR`;
+- scanned PDF OCR request/response artifacts from synthetic files only;
+- parser/worker logs around OCR;
 - cleanup notes, если host reused.
 
-Не сохранять secret values, bootstrap secret contents, `.env` целиком, passwords, tokens, keytabs или cookie jars за пределами smoke artifact rules.
+Не сохранять secret values, bootstrap secret contents, `.env` целиком, passwords, tokens, keytabs, cookie jars за пределами smoke artifact rules или extracted sensitive real documents. PDF OCR validation artifacts должны использовать synthetic/test files.
 
 На текущем HEAD отдельный universal bundle script не зафиксирован в docs/scripts audit. Базовый сбор обеспечивают `scripts/smoke/preflight_gpu_host.sh`, `scripts/smoke/check_runtime_ready.sh`, `scripts/smoke/run_full_smoke.sh` и `scripts/smoke/collect_metrics.sh`; недостающие файлы из списка выше сохранить вручную в validation artifacts.
 
@@ -319,11 +350,17 @@ File-chat PASS:
 - core TXT/PDF/DOCX/CSV/XLSX cases PASS;
 - expected negative cases fail controlled;
 - OCR image case PASS либо documented OCR issue без masking regression;
+- default `ENABLE_PDF_OCR=false` scanned PDF behavior unchanged;
+- `ENABLE_PDF_OCR=true` works for a simple scanned PDF synthetic case;
+- malformed PDF remains controlled and is not hidden by OCR;
 - нет неожиданных 5xx в `app`/`nginx` logs.
 
 DEGRADED:
 
 - runtime healthy и chat работает, но file-chat имеет известную OCR quality issue;
+- PDF OCR opt-in works but quality is imperfect;
+- PDF OCR latency is high but bounded and controlled;
+- PDF OCR opt-in case fails, but default parser/file-chat regression remains stable;
 - smoke blocked by login `429`, но manual auth работает после cooldown;
 - one non-critical model pull failed, но primary default работает.
 
@@ -335,6 +372,11 @@ FAIL:
 - selected default model missing;
 - chat smoke cannot run after cooldown;
 - parser quality gate fails;
+- default `ENABLE_PDF_OCR=false` behavior changes unexpectedly;
+- text-layer PDF is forced through OCR;
+- PDF OCR causes uncontrolled exception;
+- PDF OCR hangs or timeout is not controlled;
+- malformed PDF becomes raw exception;
 - uncontrolled parser crash / unhandled exception;
 - secrets exposed in artifacts.
 
@@ -364,14 +406,16 @@ FAIL:
 
 ## Что Не Трогаем В Этом Validation Window
 
-- не разрабатываем PDF OCR;
+- не разрабатываем новые возможности PDF OCR во время validation window;
+- не расширяем PDF OCR сверх v1 в этом validation window;
 - не разрабатываем comparison engine;
 - не расширяем installer;
 - не меняем model catalog;
 - не правим production code на validation host;
 - не benchmark `30B`/`32B`/`70B` без отдельного approval;
 - не делаем SOC/SIEM integration;
-- не заявляем production capacity.
+- не заявляем production capacity;
+- не заявляем PDF OCR production-ready или live-подтверждённым до отдельного validation report.
 
 ## Report Format
 
