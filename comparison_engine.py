@@ -1,7 +1,7 @@
 """Internal helpers for future document comparison normalization.
 
-This module intentionally does not run comparison, call an LLM, expose API
-surface, or affect the existing file-chat runtime path.
+This module intentionally does not call an LLM, expose API surface, run file
+uploads, use storage, or affect the existing file-chat runtime path.
 """
 
 from __future__ import annotations
@@ -108,6 +108,59 @@ class NormalizedDocument:
 
 
 @dataclass(frozen=True)
+class ComparisonChange:
+    change_id: str
+    change_type: str
+    block_type: str
+    source_a: BlockSource | None = None
+    source_b: BlockSource | None = None
+    text_a: str = ""
+    text_b: str = ""
+    hash_a: str = ""
+    hash_b: str = ""
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "change_id": self.change_id,
+            "change_type": self.change_type,
+            "block_type": self.block_type,
+            "source_a": self.source_a.to_dict() if self.source_a else None,
+            "source_b": self.source_b.to_dict() if self.source_b else None,
+            "text_a": self.text_a,
+            "text_b": self.text_b,
+            "hash_a": self.hash_a,
+            "hash_b": self.hash_b,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class ComparisonResult:
+    document_a_id: str
+    document_b_id: str
+    added: tuple[ComparisonChange, ...]
+    removed: tuple[ComparisonChange, ...]
+    changed: tuple[ComparisonChange, ...]
+    unchanged_count: int
+    summary: dict[str, int]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "document_a_id": self.document_a_id,
+            "document_b_id": self.document_b_id,
+            "added": [change.to_dict() for change in self.added],
+            "removed": [change.to_dict() for change in self.removed],
+            "changed": [change.to_dict() for change in self.changed],
+            "unchanged_count": self.unchanged_count,
+            "summary": dict(self.summary),
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True)
+
+
+@dataclass(frozen=True)
 class _Section:
     label: str
     text: str
@@ -158,6 +211,58 @@ def normalize_extracted_document(
         format=normalized_format,
         parser_version=parser_version,
         blocks=tuple(blocks),
+    )
+
+
+def compare_normalized_documents(doc_a: NormalizedDocument, doc_b: NormalizedDocument) -> ComparisonResult:
+    if not isinstance(doc_a, NormalizedDocument) or not isinstance(doc_b, NormalizedDocument):
+        raise ValueError("compare_normalized_documents expects NormalizedDocument inputs")
+
+    blocks_a = tuple(doc_a.blocks)
+    blocks_b = tuple(doc_b.blocks)
+    unmatched_a = set(range(len(blocks_a)))
+    unmatched_b = set(range(len(blocks_b)))
+    matched_pairs: list[tuple[int, int, str]] = []
+
+    _match_by_exact_hash(blocks_a, blocks_b, unmatched_a, unmatched_b, matched_pairs)
+    _match_by_source_key(blocks_a, blocks_b, unmatched_a, unmatched_b, matched_pairs)
+    _match_by_type_order(blocks_a, blocks_b, unmatched_a, unmatched_b, matched_pairs)
+
+    unchanged_count = 0
+    changed: list[ComparisonChange] = []
+    for index_a, index_b, reason in sorted(matched_pairs, key=lambda pair: (pair[0], pair[1], pair[2])):
+        block_a = blocks_a[index_a]
+        block_b = blocks_b[index_b]
+        if block_a.hash == block_b.hash:
+            unchanged_count += 1
+            continue
+        changed.append(_make_changed_change(doc_a, doc_b, block_a, block_b, reason))
+
+    removed = tuple(
+        _make_removed_change(doc_a, doc_b, blocks_a[index])
+        for index in sorted(unmatched_a, key=lambda item: _block_sort_key(blocks_a[item]))
+    )
+    added = tuple(
+        _make_added_change(doc_a, doc_b, blocks_b[index])
+        for index in sorted(unmatched_b, key=lambda item: _block_sort_key(blocks_b[item]))
+    )
+    changed_tuple = tuple(changed)
+    summary = {
+        "added_count": len(added),
+        "removed_count": len(removed),
+        "changed_count": len(changed_tuple),
+        "unchanged_count": unchanged_count,
+        "total_a_blocks": len(blocks_a),
+        "total_b_blocks": len(blocks_b),
+    }
+    return ComparisonResult(
+        document_a_id=doc_a.document_id,
+        document_b_id=doc_b.document_id,
+        added=added,
+        removed=removed,
+        changed=changed_tuple,
+        unchanged_count=unchanged_count,
+        summary=summary,
     )
 
 
@@ -620,3 +725,188 @@ def _hash_text(text: str) -> str:
 
 def _short_hash(text: str, *, length: int) -> str:
     return _hash_text(text)[:length]
+
+
+def _match_by_exact_hash(
+    blocks_a: tuple[NormalizedBlock, ...],
+    blocks_b: tuple[NormalizedBlock, ...],
+    unmatched_a: set[int],
+    unmatched_b: set[int],
+    matched_pairs: list[tuple[int, int, str]],
+) -> None:
+    candidates_by_key = _build_unmatched_index(blocks_b, unmatched_b, _exact_match_key)
+    for index_a in sorted(list(unmatched_a), key=lambda item: _block_sort_key(blocks_a[item])):
+        candidate = _take_candidate(candidates_by_key.get(_exact_match_key(blocks_a[index_a]), []), unmatched_b)
+        if candidate is None:
+            continue
+        unmatched_a.remove(index_a)
+        unmatched_b.remove(candidate)
+        matched_pairs.append((index_a, candidate, "exact_hash"))
+
+
+def _match_by_source_key(
+    blocks_a: tuple[NormalizedBlock, ...],
+    blocks_b: tuple[NormalizedBlock, ...],
+    unmatched_a: set[int],
+    unmatched_b: set[int],
+    matched_pairs: list[tuple[int, int, str]],
+) -> None:
+    candidates_by_key = _build_unmatched_index(blocks_b, unmatched_b, _source_match_key)
+    for index_a in sorted(list(unmatched_a), key=lambda item: _block_sort_key(blocks_a[item])):
+        key = _source_match_key(blocks_a[index_a])
+        if key is None:
+            continue
+        candidate = _take_candidate(candidates_by_key.get(key, []), unmatched_b)
+        if candidate is None:
+            continue
+        unmatched_a.remove(index_a)
+        unmatched_b.remove(candidate)
+        matched_pairs.append((index_a, candidate, "source_key"))
+
+
+def _match_by_type_order(
+    blocks_a: tuple[NormalizedBlock, ...],
+    blocks_b: tuple[NormalizedBlock, ...],
+    unmatched_a: set[int],
+    unmatched_b: set[int],
+    matched_pairs: list[tuple[int, int, str]],
+) -> None:
+    candidates_by_key = _build_unmatched_index(blocks_b, unmatched_b, lambda block: block.type)
+    for index_a in sorted(list(unmatched_a), key=lambda item: _block_sort_key(blocks_a[item])):
+        candidate = _take_candidate(candidates_by_key.get(blocks_a[index_a].type, []), unmatched_b)
+        if candidate is None:
+            continue
+        unmatched_a.remove(index_a)
+        unmatched_b.remove(candidate)
+        matched_pairs.append((index_a, candidate, "type_order"))
+
+
+def _build_unmatched_index(
+    blocks: tuple[NormalizedBlock, ...],
+    unmatched: set[int],
+    key_fn: Any,
+) -> dict[Any, list[int]]:
+    indexed: dict[Any, list[int]] = {}
+    for index in sorted(unmatched, key=lambda item: _block_sort_key(blocks[item])):
+        key = key_fn(blocks[index])
+        if key is None:
+            continue
+        indexed.setdefault(key, []).append(index)
+    return indexed
+
+
+def _take_candidate(candidates: list[int], unmatched: set[int]) -> int | None:
+    while candidates:
+        candidate = candidates.pop(0)
+        if candidate in unmatched:
+            return candidate
+    return None
+
+
+def _exact_match_key(block: NormalizedBlock) -> tuple[str, str]:
+    return (block.type, block.hash)
+
+
+def _source_match_key(block: NormalizedBlock) -> tuple[Any, ...] | None:
+    source = block.source
+    if block.type == "ocr_page" and source.page is not None:
+        return (block.type, source.page)
+    if block.type == "sheet_row" and (source.sheet or source.row_index is not None):
+        return (block.type, source.sheet, source.row_index)
+    if block.type == "table_row" and source.row_index is not None:
+        return (block.type, source.section, source.row_index)
+    if block.type == "metadata" and (source.section or source.sheet or source.raw_label):
+        return (block.type, source.section, source.sheet, source.page, source.row_index, source.raw_label)
+    if block.type == "paragraph" and source.page is not None:
+        return (block.type, source.page, source.section)
+    return None
+
+
+def _block_sort_key(block: NormalizedBlock) -> tuple[int, str, str, str]:
+    return (block.order_index, block.type, _source_identity(block.source), block.hash)
+
+
+def _source_identity(source: BlockSource | None) -> str:
+    if source is None:
+        return ""
+    return "|".join(
+        [
+            source.section,
+            str(source.page) if source.page is not None else "",
+            source.sheet,
+            str(source.row_index) if source.row_index is not None else "",
+            source.column,
+            source.raw_label,
+        ]
+    )
+
+
+def _make_changed_change(
+    doc_a: NormalizedDocument,
+    doc_b: NormalizedDocument,
+    block_a: NormalizedBlock,
+    block_b: NormalizedBlock,
+    reason: str,
+) -> ComparisonChange:
+    return ComparisonChange(
+        change_id=_make_change_id("changed", block_a.type, block_a=block_a, block_b=block_b),
+        change_type="changed",
+        block_type=block_a.type,
+        source_a=block_a.source,
+        source_b=block_b.source,
+        text_a=block_a.text,
+        text_b=block_b.text,
+        hash_a=block_a.hash,
+        hash_b=block_b.hash,
+        reason=f"matched_by_{reason}",
+    )
+
+
+def _make_removed_change(doc_a: NormalizedDocument, doc_b: NormalizedDocument, block: NormalizedBlock) -> ComparisonChange:
+    return ComparisonChange(
+        change_id=_make_change_id("removed", block.type, block_a=block, block_b=None),
+        change_type="removed",
+        block_type=block.type,
+        source_a=block.source,
+        source_b=None,
+        text_a=block.text,
+        text_b="",
+        hash_a=block.hash,
+        hash_b="",
+        reason="unmatched_in_revised",
+    )
+
+
+def _make_added_change(doc_a: NormalizedDocument, doc_b: NormalizedDocument, block: NormalizedBlock) -> ComparisonChange:
+    return ComparisonChange(
+        change_id=_make_change_id("added", block.type, block_a=None, block_b=block),
+        change_type="added",
+        block_type=block.type,
+        source_a=None,
+        source_b=block.source,
+        text_a="",
+        text_b=block.text,
+        hash_a="",
+        hash_b=block.hash,
+        reason="unmatched_in_baseline",
+    )
+
+
+def _make_change_id(
+    change_type: str,
+    block_type: str,
+    *,
+    block_a: NormalizedBlock | None,
+    block_b: NormalizedBlock | None,
+) -> str:
+    seed = "\n".join(
+        [
+            change_type,
+            block_type,
+            block_a.hash if block_a else "",
+            block_b.hash if block_b else "",
+            _source_identity(block_a.source if block_a else None),
+            _source_identity(block_b.source if block_b else None),
+        ]
+    )
+    return f"{change_type}:{_short_hash(seed, length=16)}"

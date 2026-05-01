@@ -16,6 +16,12 @@ Phase 1 source helpers prepared: `comparison_engine.py` добавляет norma
 
 Deterministic diff, API, UI, LLM summary, storage и production runtime integration ещё не реализованы. Текущий file-chat behavior не должен меняться из-за Phase 1.
 
+## Phase 2 Implementation Status
+
+Phase 2 source helpers prepared: `comparison_engine.py` добавляет deterministic diff над `NormalizedDocument` через `compare_normalized_documents()`.
+
+API, UI, LLM summary, report generator, storage и production runtime integration ещё не реализованы. Текущий file-chat behavior не должен меняться из-за Phase 2.
+
 ## Почему Нельзя Сравнивать Только Через LLM
 
 LLM полезен для объяснения уже найденных различий, но не должен быть единственным механизмом поиска изменений:
