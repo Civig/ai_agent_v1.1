@@ -1,4 +1,5 @@
 import csv
+import io
 import json
 import logging
 import re
@@ -33,6 +34,10 @@ ALLOWED_UPLOAD_MIME_TYPES: dict[str, set[str]] = {
 MAX_DOCUMENT_CHARS = settings.FILE_PROCESSING_MAX_DOCUMENT_CHARS
 MAX_PARSED_DOCUMENT_CHARS = MAX_DOCUMENT_CHARS
 MAX_PDF_PAGES = settings.FILE_PROCESSING_MAX_PDF_PAGES
+ENABLE_PDF_OCR = settings.ENABLE_PDF_OCR
+PDF_OCR_MAX_PAGES = settings.FILE_PROCESSING_PDF_OCR_MAX_PAGES
+PDF_OCR_DPI = settings.FILE_PROCESSING_PDF_OCR_DPI
+PDF_OCR_TIMEOUT_SECONDS_PER_PAGE = settings.FILE_PROCESSING_PDF_OCR_TIMEOUT_SECONDS_PER_PAGE
 IMAGE_OCR_MAX_DIMENSION = settings.FILE_PROCESSING_IMAGE_MAX_DIMENSION
 IMAGE_OCR_TIMEOUT_SECONDS = settings.FILE_PROCESSING_OCR_TIMEOUT_SECONDS
 IMAGE_OCR_UPSCALE_TARGET_DIMENSION = min(1000, IMAGE_OCR_MAX_DIMENSION)
@@ -168,6 +173,26 @@ def pdf_no_text_layer_detail() -> str:
     return "PDF не содержит извлекаемого текстового слоя; OCR для PDF пока не поддержан"
 
 
+def pdf_ocr_renderer_unavailable_detail() -> str:
+    return "PDF OCR renderer недоступен на сервере"
+
+
+def pdf_ocr_render_failed_detail() -> str:
+    return "Не удалось подготовить страницы PDF для OCR"
+
+
+def pdf_ocr_page_failed_detail(page_number: int) -> str:
+    return f"Не удалось выполнить OCR для PDF страницы {page_number}"
+
+
+def pdf_ocr_timeout_exceeded_detail(page_number: int) -> str:
+    return f"PDF OCR превысил лимит времени {PDF_OCR_TIMEOUT_SECONDS_PER_PAGE:g} сек на странице {page_number}"
+
+
+def pdf_ocr_no_text_detail() -> str:
+    return "Не удалось извлечь текст OCR из PDF"
+
+
 def image_dimension_limit_exceeded_detail(width: int, height: int) -> str:
     return (
         f"Изображение превышает лимит размера: {width}x{height}. "
@@ -209,6 +234,23 @@ def prepare_image_for_ocr(image: Any) -> Any:
 
     resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC)
     return prepared.resize(resized, resampling)
+
+
+def bound_image_for_ocr(image: Any) -> Any:
+    from PIL import Image  # type: ignore
+
+    width, height = image.size
+    max_dimension = max(width, height)
+    if max_dimension <= IMAGE_OCR_MAX_DIMENSION:
+        return image
+
+    scale = IMAGE_OCR_MAX_DIMENSION / max_dimension
+    resized = (
+        max(1, int(round(width * scale))),
+        max(1, int(round(height * scale))),
+    )
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC)
+    return image.resize(resized, resampling)
 
 
 def trim_document_content(content: str) -> str:
@@ -708,10 +750,85 @@ def extract_text_from_xlsx(path: Path) -> str:
         raise RuntimeError(xlsx_parse_failed_detail()) from exc
 
 
-def _trim_pdf_text_or_raise(text_fragments: list[str]) -> str:
-    text = trim_document_content("\n".join(text_fragments))
-    if not text.strip():
+def _trim_pdf_text(text_fragments: list[str]) -> str:
+    return trim_document_content("\n".join(text_fragments))
+
+
+def _handle_pdf_no_text_layer(path: Path, *, page_count: int) -> str:
+    if not ENABLE_PDF_OCR:
         raise RuntimeError(pdf_no_text_layer_detail())
+    return extract_text_from_pdf_ocr(path, page_count=page_count)
+
+
+def render_pdf_pages_for_ocr(path: Path, *, page_count: int, max_pages: int, dpi: int) -> list[tuple[int, Any]]:
+    try:
+        import fitz  # type: ignore
+        from PIL import Image  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(pdf_ocr_renderer_unavailable_detail()) from exc
+
+    if max_pages <= 0:
+        raise RuntimeError(pdf_ocr_no_text_detail())
+
+    pages_to_render = min(page_count, max_pages)
+    zoom = max(1, dpi) / 72.0
+    rendered_pages: list[tuple[int, Any]] = []
+    try:
+        document = fitz.open(path)
+        try:
+            matrix = fitz.Matrix(zoom, zoom)
+            for index in range(pages_to_render):
+                try:
+                    pixmap = document[index].get_pixmap(matrix=matrix, alpha=False)
+                    with Image.open(io.BytesIO(pixmap.tobytes("png"))) as image:
+                        rendered_pages.append((index + 1, bound_image_for_ocr(image.copy())))
+                except Exception as exc:
+                    raise RuntimeError(pdf_ocr_render_failed_detail()) from exc
+        finally:
+            document.close()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(pdf_ocr_render_failed_detail()) from exc
+
+    return rendered_pages
+
+
+def ocr_pdf_page_image(page_number: int, image: Any) -> str:
+    try:
+        import pytesseract  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("OCR parser unavailable on server") from exc
+
+    try:
+        bounded_image = bound_image_for_ocr(image)
+        prepared_image = prepare_image_for_ocr(bounded_image)
+        text = pytesseract.image_to_string(prepared_image, timeout=PDF_OCR_TIMEOUT_SECONDS_PER_PAGE)
+        return trim_document_content(text)
+    except RuntimeError as exc:
+        if "timeout" in str(exc).lower():
+            raise RuntimeError(pdf_ocr_timeout_exceeded_detail(page_number)) from exc
+        raise RuntimeError(pdf_ocr_page_failed_detail(page_number)) from exc
+    except Exception as exc:
+        raise RuntimeError(pdf_ocr_page_failed_detail(page_number)) from exc
+
+
+def extract_text_from_pdf_ocr(path: Path, *, page_count: int) -> str:
+    rendered_pages = render_pdf_pages_for_ocr(
+        path,
+        page_count=page_count,
+        max_pages=min(max(1, PDF_OCR_MAX_PAGES), MAX_PDF_PAGES),
+        dpi=PDF_OCR_DPI,
+    )
+    blocks = []
+    for page_number, image in rendered_pages:
+        page_text = ocr_pdf_page_image(page_number, image).strip()
+        if page_text:
+            blocks.append(f"PDF OCR Page {page_number}\n{page_text}")
+
+    text = trim_document_content("\n\n".join(blocks))
+    if not text.strip():
+        raise RuntimeError(pdf_ocr_no_text_detail())
     return text
 
 
@@ -727,7 +844,10 @@ def extract_text_from_pdf(path: Path) -> str:
             page_count = len(reader.pages)
             if page_count > MAX_PDF_PAGES:
                 raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
-            return _trim_pdf_text_or_raise([(page.extract_text() or "") for page in reader.pages])
+            text = _trim_pdf_text([(page.extract_text() or "") for page in reader.pages])
+            if text.strip():
+                return text
+            return _handle_pdf_no_text_layer(path, page_count=page_count)
         except RuntimeError:
             raise
         except Exception as exc:
@@ -742,17 +862,21 @@ def extract_text_from_pdf(path: Path) -> str:
 
     try:
         document = fitz.open(path)
-        try:
-            page_count = len(document)
-            if page_count > MAX_PDF_PAGES:
-                raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
-            return _trim_pdf_text_or_raise([document[index].get_text() for index in range(page_count)])
-        finally:
-            document.close()
-    except RuntimeError:
-        raise
     except Exception as exc:
         raise RuntimeError(pdf_parse_failed_detail()) from exc
+    try:
+        page_count = len(document)
+        if page_count > MAX_PDF_PAGES:
+            raise RuntimeError(pdf_page_limit_exceeded_detail(page_count))
+        try:
+            text = _trim_pdf_text([document[index].get_text() for index in range(page_count)])
+        except Exception as exc:
+            raise RuntimeError(pdf_parse_failed_detail()) from exc
+        if text.strip():
+            return text
+        return _handle_pdf_no_text_layer(path, page_count=page_count)
+    finally:
+        document.close()
 
 
 def extract_text_from_image(path: Path) -> str:

@@ -22,8 +22,8 @@ Office file optimization v1.0 готов как source-level parser baseline и 
 | Формат | Статус | Что поддержано | Ограничения |
 | --- | --- | --- | --- |
 | TXT | Поддержан | Text extraction. | Только plain text extraction, без отдельной semantic-разметки. |
-| PDF text-layer | Поддержан | Text-layer extraction, page limit, malformed/invalid cases map to controlled errors. | PDF OCR не реализован; качество зависит от наличия извлекаемого текстового слоя. |
-| Scanned / image-only PDF | Controlled reject | Explicit controlled detection и понятная ошибка для PDF без текстового слоя. | PDF OCR пока не поддержан. |
+| PDF text-layer | Поддержан | Text-layer extraction, page limit, malformed/invalid cases map to controlled errors. | Text-layer PDF не должен уходить в OCR; качество зависит от наличия извлекаемого текстового слоя. |
+| Scanned / image-only PDF | Controlled reject by default; opt-in OCR v1 | По умолчанию explicit controlled detection и понятная ошибка для PDF без текстового слоя. При `ENABLE_PDF_OCR=true` доступен bounded PDF OCR v1 для первых страниц. | PDF OCR выключен по умолчанию; нет table reconstruction, layout-perfect extraction, handwriting recognition или production capacity guarantee. |
 | DOCX | Поддержан | Body text, paragraphs, tables with row/cell structure, headers, footers, comments, tracked changes detection, embedded images detection. | OCR inside DOCX не поддержан; full Word semantics, complex content controls и legal compare не заявлены. |
 | PNG / JPG / JPEG | Поддержан baseline | OCR baseline, safe preprocessing, dimension cap, OCR timeout. | OCR quality зависит от исходного изображения и OCR runtime; это не PDF OCR. |
 | CSV | Поддержан | Rows/columns baseline extraction, bounded rows/columns/cells. | Нет advanced typing/semantic schema inference. |
@@ -69,7 +69,7 @@ Extended gate дополнительно запускает:
 
 ## Что НЕ готово
 
-- PDF OCR.
+- PDF OCR включён только opt-in через `ENABLE_PDF_OCR=true` и остаётся v1 baseline, не full PDF intelligence.
 - OCR inside DOCX.
 - `.xls`.
 - Advanced Excel charts/pivots/macros.
@@ -96,7 +96,7 @@ Extended gate дополнительно запускает:
 
 После docs/status sync и live regression plan нужно выбрать ровно один следующий крупный блок:
 
-- PDF OCR;
+- PDF OCR v1 live validation;
 - или comparison engine.
 
 Оба блока одновременно в рамках следующего шага не планируются.

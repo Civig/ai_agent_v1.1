@@ -836,6 +836,156 @@ class UploadBackendTests(unittest.TestCase):
 
         self.assertEqual(str(error.exception), parser_stage.pdf_no_text_layer_detail())
 
+    def test_extract_text_from_pdf_flag_false_keeps_no_text_layer_error(self):
+        class FakePage:
+            def extract_text(self):
+                return ""
+
+        class FakePdfReader:
+            def __init__(self, path):
+                self.pages = [FakePage()]
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pypdf":
+                return types.SimpleNamespace(PdfReader=FakePdfReader)
+            return original_import(name, globals, locals, fromlist, level)
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            handle.write(b"%PDF-1.4\n%dummy\n")
+            handle.flush()
+            with mock.patch("builtins.__import__", side_effect=fake_import), mock.patch.object(
+                parser_stage, "ENABLE_PDF_OCR", False
+            ), mock.patch.object(
+                parser_stage,
+                "extract_text_from_pdf_ocr",
+                side_effect=AssertionError("PDF OCR must stay disabled by default"),
+            ):
+                with self.assertRaises(RuntimeError) as error:
+                    extract_text_from_pdf(Path(handle.name))
+
+        self.assertEqual(str(error.exception), parser_stage.pdf_no_text_layer_detail())
+
+    def test_extract_text_from_pdf_text_layer_does_not_call_ocr_when_flag_true(self):
+        class FakePage:
+            def extract_text(self):
+                return "text-layer content"
+
+        class FakePdfReader:
+            def __init__(self, path):
+                self.pages = [FakePage()]
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pypdf":
+                return types.SimpleNamespace(PdfReader=FakePdfReader)
+            return original_import(name, globals, locals, fromlist, level)
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            handle.write(b"%PDF-1.4\n%dummy\n")
+            handle.flush()
+            with mock.patch("builtins.__import__", side_effect=fake_import), mock.patch.object(
+                parser_stage, "ENABLE_PDF_OCR", True
+            ), mock.patch.object(
+                parser_stage,
+                "extract_text_from_pdf_ocr",
+                side_effect=AssertionError("text-layer PDF must not use OCR"),
+            ):
+                text = extract_text_from_pdf(Path(handle.name))
+
+        self.assertEqual(text, "text-layer content")
+
+    def test_extract_text_from_pdf_flag_true_uses_ocr_for_empty_text_layer(self):
+        class FakePage:
+            def extract_text(self):
+                return ""
+
+        class FakePdfReader:
+            def __init__(self, path):
+                self.pages = [FakePage()]
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pypdf":
+                return types.SimpleNamespace(PdfReader=FakePdfReader)
+            return original_import(name, globals, locals, fromlist, level)
+
+        fake_image = object()
+        calls = {}
+
+        def fake_render(path, *, page_count, max_pages, dpi):
+            calls["page_count"] = page_count
+            calls["max_pages"] = max_pages
+            calls["dpi"] = dpi
+            return [(1, fake_image)]
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            handle.write(b"%PDF-1.4\n%dummy\n")
+            handle.flush()
+            with mock.patch("builtins.__import__", side_effect=fake_import), mock.patch.object(
+                parser_stage, "ENABLE_PDF_OCR", True
+            ), mock.patch.object(parser_stage, "PDF_OCR_MAX_PAGES", 5), mock.patch.object(
+                parser_stage, "PDF_OCR_DPI", 150
+            ), mock.patch.object(parser_stage, "render_pdf_pages_for_ocr", side_effect=fake_render), mock.patch.object(
+                parser_stage, "ocr_pdf_page_image", return_value="ALPHA-17 OCR SCORE 98"
+            ) as ocr_mock:
+                text = extract_text_from_pdf(Path(handle.name))
+
+        self.assertIn("PDF OCR Page 1", text)
+        self.assertIn("ALPHA-17 OCR SCORE 98", text)
+        self.assertEqual(calls, {"page_count": 1, "max_pages": 5, "dpi": 150})
+        ocr_mock.assert_called_once_with(1, fake_image)
+
+    def test_extract_text_from_pdf_ocr_respects_max_pages(self):
+        rendered = []
+
+        def fake_render(path, *, page_count, max_pages, dpi):
+            rendered.extend(range(1, min(page_count, max_pages) + 1))
+            return [(page_number, object()) for page_number in rendered]
+
+        with mock.patch.object(parser_stage, "PDF_OCR_MAX_PAGES", 2), mock.patch.object(
+            parser_stage, "render_pdf_pages_for_ocr", side_effect=fake_render
+        ), mock.patch.object(parser_stage, "ocr_pdf_page_image", side_effect=lambda page_number, image: f"page-{page_number}"):
+            text = parser_stage.extract_text_from_pdf_ocr(Path("/tmp/fake.pdf"), page_count=5)
+
+        self.assertEqual(rendered, [1, 2])
+        self.assertIn("PDF OCR Page 1", text)
+        self.assertIn("PDF OCR Page 2", text)
+        self.assertNotIn("PDF OCR Page 3", text)
+
+    def test_extract_text_from_pdf_ocr_maps_timeout_to_controlled_error(self):
+        with mock.patch.object(parser_stage, "bound_image_for_ocr", return_value=object()), mock.patch.object(
+            parser_stage, "prepare_image_for_ocr", return_value=object()
+        ), mock.patch.dict(
+            sys.modules,
+            {
+                "pytesseract": types.SimpleNamespace(
+                    image_to_string=lambda image, *, timeout: (_ for _ in ()).throw(RuntimeError("timeout"))
+                )
+            },
+        ):
+            with self.assertRaises(RuntimeError) as error:
+                parser_stage.ocr_pdf_page_image(3, object())
+
+        self.assertEqual(str(error.exception), parser_stage.pdf_ocr_timeout_exceeded_detail(3))
+
+    def test_extract_text_from_pdf_ocr_renderer_unavailable_is_controlled(self):
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "fitz":
+                raise ImportError("fitz unavailable")
+            return original_import(name, globals, locals, fromlist, level)
+
+        with mock.patch("builtins.__import__", side_effect=fake_import):
+            with self.assertRaises(RuntimeError) as error:
+                parser_stage.render_pdf_pages_for_ocr(Path("/tmp/fake.pdf"), page_count=1, max_pages=1, dpi=150)
+
+        self.assertEqual(str(error.exception), parser_stage.pdf_ocr_renderer_unavailable_detail())
+
     def test_extract_text_from_pdf_falls_back_to_fitz_when_pypdf_is_unavailable(self):
         class FakePage:
             def __init__(self, text):
