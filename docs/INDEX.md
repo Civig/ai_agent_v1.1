@@ -97,13 +97,13 @@ Russian documents are the primary operator reference. English documents are kept
 - [PARSER_STAGE_DESIGN.md](PARSER_STAGE_DESIGN.md) - current parser-stage architecture, design rationale, and file-chat path boundaries
 - [PARSER_FILE_BASELINE_ru.md](PARSER_FILE_BASELINE_ru.md) - current parser/file format support baseline, local parser quality gate, and remaining file-intelligence gaps
 - [PDF_OCR_DESIGN_ru.md](PDF_OCR_DESIGN_ru.md) - design/audit plan for safe opt-in PDF OCR after the current scanned-PDF controlled rejection baseline
-- [COMPARISON_ENGINE_DESIGN_ru.md](COMPARISON_ENGINE_DESIGN_ru.md) - design/audit plan for safe deterministic document/table comparison after the current parser/file baseline
+- [COMPARISON_ENGINE_DESIGN_ru.md](COMPARISON_ENGINE_DESIGN_ru.md) - design/audit and current internal baseline status for deterministic document/table comparison; API/UI/runtime integration pending
 - [PILOT_BASELINE_ru.md](PILOT_BASELINE_ru.md) / [PILOT_BASELINE_en.md](PILOT_BASELINE_en.md) - pilot baseline candidate, evidence boundary, and validation status
 - [PILOT_SCOPE_ru.md](PILOT_SCOPE_ru.md) / [PILOT_SCOPE_en.md](PILOT_SCOPE_en.md) - exact in-scope vs out-of-scope pilot contract
 - [PILOT_LIMITATIONS_ru.md](PILOT_LIMITATIONS_ru.md) / [PILOT_LIMITATIONS_en.md](PILOT_LIMITATIONS_en.md) - honest pilot limitations and non-promises
 - [PILOT_ACCEPTANCE_CHECKLIST_ru.md](PILOT_ACCEPTANCE_CHECKLIST_ru.md) / [PILOT_ACCEPTANCE_CHECKLIST_en.md](PILOT_ACCEPTANCE_CHECKLIST_en.md) - strict acceptance checklist for pilot sign-off
 - [GPU_VALIDATION_PLAYBOOK_ru.md](GPU_VALIDATION_PLAYBOOK_ru.md) / [GPU_VALIDATION_PLAYBOOK_en.md](GPU_VALIDATION_PLAYBOOK_en.md) - dedicated GPU validation procedure and verdict criteria
-- [GPU_LIVE_REGRESSION_PLAN_ru.md](GPU_LIVE_REGRESSION_PLAN_ru.md) - next-window live GPU regression plan after Office file optimization v1.0 and parser quality gate
+- [GPU_LIVE_REGRESSION_PLAN_ru.md](GPU_LIVE_REGRESSION_PLAN_ru.md) - next-window live GPU regression plan after Office file optimization v1.0, parser quality gate, PDF OCR v1 and comparison quality gate
 - [PILOT_RUNBOOK_ru.md](PILOT_RUNBOOK_ru.md) / [PILOT_RUNBOOK_en.md](PILOT_RUNBOOK_en.md) - operator-facing pilot handoff and first-response checks
 - [THREAD_SESSION_MODEL.md](THREAD_SESSION_MODEL.md) - target server-side thread/session model, current limitations, and migration path from username-based history
 - [PERSISTENT_STORAGE_DIRECTION.md](PERSISTENT_STORAGE_DIRECTION.md) - implemented PostgreSQL persistence groundwork, current transition baseline, and remaining durable-storage gaps

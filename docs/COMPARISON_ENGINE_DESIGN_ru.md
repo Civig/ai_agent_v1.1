@@ -4,35 +4,44 @@
 
 Этот документ является design/audit планом для будущего comparison engine в Corporate AI Assistant.
 
-Comparison engine ещё не реализован. Текущий baseline умеет извлекать текст и часть структуры из TXT, text-layer PDF, DOCX, CSV, XLSX, PNG/JPG/JPEG OCR baseline и opt-in PDF OCR v1, но отдельного deterministic comparison pipeline в текущем HEAD не подтверждено.
+Comparison Engine internal baseline готов; API/UI/runtime integration pending. Текущий baseline умеет извлекать текст и часть структуры из TXT, text-layer PDF, DOCX, CSV, XLSX, PNG/JPG/JPEG OCR baseline и opt-in PDF OCR v1. Внутренний deterministic comparison pipeline подтверждён локальными source/unit checks, но ещё не доступен пользователям через API/UI и не подключён к production runtime.
 
 Цель документа - безопасно спроектировать comparison engine без ломки текущего file-chat flow, parser quality gate, PDF OCR v1 default-off поведения и существующего runtime/API контракта.
 
-Это не implementation plan для текущего patch, не API specification, не UI design и не live validation report.
+Это не API specification, не UI design и не live validation report.
 
-## Phase 1 Implementation Status
+## Current Implementation Status
 
-Phase 1 source helpers prepared: `comparison_engine.py` добавляет normalized document model helpers для преобразования уже извлечённого parser text в JSON-serializable blocks.
+Done:
 
-Deterministic diff, API, UI, LLM summary, storage и production runtime integration ещё не реализованы. Текущий file-chat behavior не должен меняться из-за Phase 1.
+- Phase 1 normalized document model helpers - done.
+- Phase 2 deterministic diff helpers - done.
+- Phase 3 Markdown report generator - done.
+- Comparison quality gate - done.
 
-## Phase 2 Implementation Status
+Pending:
 
-Phase 2 source helpers prepared: `comparison_engine.py` добавляет deterministic diff над `NormalizedDocument` через `compare_normalized_documents()`.
+- comparison API - not implemented.
+- comparison UI - not implemented.
+- production runtime integration - not implemented.
+- file-chat integration - not implemented.
+- LLM summary over diff - not implemented.
+- storage for comparison artifacts - not implemented.
+- live/GPU validation - pending.
 
-API, UI, LLM summary, report generator, storage и production runtime integration ещё не реализованы. Текущий file-chat behavior не должен меняться из-за Phase 2.
+`scripts/smoke/run_comparison_quality_gate.sh` запускает локальные unittest modules для normalized document model, deterministic diff и Markdown report generator:
 
-## Phase 3 Implementation Status
+```bash
+PYTHON=/tmp/ai-agent-test-venv/bin/python bash scripts/smoke/run_comparison_quality_gate.sh
+```
 
-Phase 3 source helpers prepared: `comparison_engine.py` добавляет Markdown report generator поверх `ComparisonResult`.
+Для связанной проверки parser baseline:
 
-API, UI, LLM summary, storage и production runtime integration ещё не реализованы. LLM explanation остаётся future phase и не участвует в генерации v1 report.
+```bash
+RUN_PARSER_GATE=1 PYTHON=/tmp/ai-agent-test-venv/bin/python bash scripts/smoke/run_comparison_quality_gate.sh
+```
 
-## Comparison Quality Gate Status
-
-Comparison quality gate prepared: `scripts/smoke/run_comparison_quality_gate.sh` запускает локальные unittest modules для normalized document model, deterministic diff и Markdown report generator.
-
-По умолчанию gate не запускает parser gate, Docker, Ollama, GPU, API, UI или runtime integration. Для связанной проверки parser baseline можно отдельно включить `RUN_PARSER_GATE=1`; в этом режиме existing parser quality gate запускается через тот же `PYTHON`.
+По умолчанию gate не запускает Docker, Ollama, GPU, API, UI или runtime integration. Он не означает, что comparison engine fully ready для пользователей.
 
 ## Почему Нельзя Сравнивать Только Через LLM
 
@@ -63,21 +72,27 @@ LLM получает уже вычисленный diff и объясняет е
 - `extract_documents_from_staging()` и `extract_documents_from_shared_staging()` возвращают documents как словари с `name` и plain `content`.
 - `build_document_prompt()` собирает file-chat prompt из извлечённого текста; текущий file-chat ответ формирует LLM на основании prompt.
 - В `app.py` endpoint `/api/chat_with_files` парсит файлы, применяет document budget и передаёт prompt в LLM job.
-- Parser public cutover path готовит parser artifacts и child `file_chat` job, но normalized document model для diff не подтверждён.
+- Parser public cutover path готовит parser artifacts и child `file_chat` job; comparison helpers consume already extracted parser text and do not change this behavior.
 - DOCX baseline содержит body text, tables, headers, footers, comments, tracked changes metadata и embedded images marker без OCR внутри DOCX.
 - CSV baseline содержит bounded rows/columns/cells.
 - XLSX baseline содержит sheets, rows, cells, cached formula values, formula metadata без выполнения формул, merged cells metadata, hidden sheets/rows/columns metadata.
 - PDF text-layer поддержан; malformed/invalid PDF мапится в controlled errors.
 - PDF OCR v1 реализован opt-in через `ENABLE_PDF_OCR=true`, default-off, live validation pending.
 - Gold corpus и parser quality gate уже покрывают одиночные parser fixtures.
+- Normalized document model helpers готовы.
+- Deterministic diff helpers готовы.
+- Markdown report generator готов.
+- Comparison quality gate готов.
 
 Не подтверждено:
 
-- отдельная normalized document model;
-- deterministic document/table diff;
-- comparison artifacts;
 - comparison-specific API endpoint;
 - comparison UI;
+- production runtime integration;
+- file-chat integration;
+- LLM summary over diff;
+- storage for comparison artifacts;
+- live/GPU validation;
 - pair-based gold fixtures для `docx_v1/v2`, `xlsx_v1/v2`, `csv_v1/v2`, `pdf_v1/v2`.
 
 В коде есть conversation shadow compare для Redis/PostgreSQL read-cutover parity. Это не document comparison engine и не должно смешиваться с новым feature block.
@@ -365,14 +380,15 @@ Gold corpus extension:
 
 Quality gate:
 
-- add comparison-only test gate later;
-- deterministic diff tests must not require LLM, live server, Ollama or GPU;
+- comparison-only test gate exists as `scripts/smoke/run_comparison_quality_gate.sh`;
+- deterministic diff tests do not require LLM, live server, Ollama or GPU;
 - existing parser quality gate must remain green by default.
 
 ## Phased Implementation Plan
 
 ### Phase 1 - Normalized Document Model Only
 
+- Status: done for internal baseline.
 - no API;
 - no UI;
 - no LLM;
@@ -383,6 +399,7 @@ Phase 1 should be small enough to review as a parser-adjacent library change wit
 
 ### Phase 2 - Deterministic Diff Engine
 
+- Status: done for internal baseline.
 - block-level diff;
 - table/cell diff;
 - JSON artifact;
@@ -390,18 +407,21 @@ Phase 1 should be small enough to review as a parser-adjacent library change wit
 
 ### Phase 3 - Report Generator
 
+- Status: done for internal baseline.
 - markdown report;
 - no LLM required;
 - tests compare stable report fragments.
 
 ### Phase 4 - LLM Summary Over Diff
 
+- Status: pending.
 - model receives structured diff, not raw documents;
 - no guessing;
 - summary and risk highlights only over computed differences.
 
 ### Phase 5 - API / UI
 
+- Status: pending.
 - feature flag;
 - authenticated endpoint;
 - file pair upload flow;
@@ -410,11 +430,12 @@ Phase 1 should be small enough to review as a parser-adjacent library change wit
 
 ### Phase 6 - Live GPU Validation
 
-Only after deterministic engine passes local tests:
+Status: pending. Next GPU validation window should include internal baseline checks, but this is not API/UI/runtime validation.
 
-- include comparison engine in next GPU validation window;
+- include parser quality gate and comparison quality gate in next GPU validation window;
 - validate installer, models, file-chat, Office parser, PDF OCR v1 and comparison together;
 - capture latency, metrics and artifacts;
+- keep comparison API/UI/runtime integration out of scope until implemented;
 - do not convert this into production capacity planning.
 
 ## PASS / FAIL Criteria For Future Implementation
@@ -425,6 +446,7 @@ PASS:
 - no LLM required for correctness;
 - unsupported formats fail controlled;
 - parser quality gate remains green;
+- comparison quality gate remains green;
 - comparison tests do not require GPU;
 - existing file-chat behavior remains unchanged unless explicitly testing comparison path.
 
@@ -463,9 +485,9 @@ FAIL:
 
 ## Следующий Один Шаг
 
-После принятия design выполнить Phase 1 implementation patch:
+Следующий правильный шаг - включить Comparison Engine internal baseline status в следующий GPU validation window:
 
-- добавить normalized document model helpers;
-- не добавлять API/UI/LLM;
-- не менять текущий file-chat behavior;
-- добавить tests на synthetic fixtures.
+- запустить parser quality gate;
+- запустить comparison quality gate;
+- подтвердить, что comparison API/UI/runtime integration остаётся pending;
+- не менять текущий file-chat behavior в рамках validation.

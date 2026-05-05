@@ -30,7 +30,7 @@ Office file optimization v1.0 готов как source-level parser baseline и 
 | CSV | Поддержан | Rows/columns baseline extraction, bounded rows/columns/cells. | Нет advanced typing/semantic schema inference. |
 | XLSX | Поддержан | Workbook/sheets/rows/cells baseline, cached formula values, formula metadata без выполнения формул, merged cells metadata, hidden sheets/rows/columns metadata. | Charts, pivots, macros и advanced Excel semantics не поддержаны. |
 | XLS | Unsupported | Explicit unsupported upload type. | `.xls` support не реализован и не заявлен. |
-| Comparison engine | Not implemented | Нет. | Full legal/document comparison engine не готов. |
+| Comparison engine | Internal baseline готов | Normalized document model, deterministic diff, Markdown report и comparison quality gate. | API/UI/runtime integration, file-chat integration, LLM summary, storage и live validation не готовы. |
 
 ## Что проверяется локально
 
@@ -68,19 +68,25 @@ Extended gate дополнительно запускает:
 - `tests.test_install_model_selection`
 - `tests.test_bootstrap_ollama_models_contract`
 
+## Downstream comparison baseline
+
+Parser baseline теперь имеет downstream Comparison Engine internal baseline: normalized document model, deterministic diff, Markdown report и отдельный comparison quality gate.
+
+Comparison baseline не меняет parser/file-chat behavior и не подключает comparison к API/UI/runtime. Comparison quality gate отделён от parser quality gate, но может запускать parser baseline как linked check через `RUN_PARSER_GATE=1`.
+
 ## Что НЕ готово
 
 - PDF OCR включён только opt-in через `ENABLE_PDF_OCR=true` и остаётся v1 baseline, не full PDF intelligence.
 - OCR inside DOCX.
 - `.xls`.
 - Advanced Excel charts/pivots/macros.
-- Full legal/document comparison engine.
+- Comparison API/UI/runtime integration, file-chat integration, LLM summary, storage и live/GPU validation.
 - Production-ready dashboard RBAC / claim model.
-- Final live GPU regression после PDF OCR v1 и последних parser/file patches.
+- Final live GPU regression после PDF OCR v1, Comparison Engine internal baseline и последних parser/file patches.
 
 ## Следующий validation step
 
-Перед следующим feature-блоком нужно подготовить live regression plan для следующего GPU validation window и проверить на текущем HEAD:
+В следующем live GPU validation window нужно проверить на текущем HEAD:
 
 - clean installer path;
 - `/health/live`;
@@ -88,17 +94,17 @@ Extended gate дополнительно запускает:
 - selected hot models;
 - chat smoke;
 - file-chat smoke;
+- parser quality gate;
+- comparison quality gate;
 - TXT / PDF / DOCX / CSV / XLSX / PNG / JPG scenarios;
 - negative cases: scanned PDF, malformed PDF, unsupported XLS;
 - `ENABLE_PDF_OCR=false` default behavior и отдельный `ENABLE_PDF_OCR=true` PDF OCR v1 pass;
+- Comparison Engine internal baseline status без API/UI/runtime claim;
 - latency, cold start и warm response;
 - отсутствие secrets в artifacts.
 
 ## Следующий feature decision
 
-После docs/status sync и live regression plan нужно выбрать ровно один следующий крупный блок:
+После docs/status sync и live regression plan следующий правильный шаг - выполнить live GPU validation window, который учитывает parser quality gate, comparison quality gate и PDF OCR v1 opt-in checks.
 
-- PDF OCR v1 live validation;
-- или comparison engine.
-
-Оба блока одновременно в рамках следующего шага не планируются.
+После этого отдельным решением выбрать следующий крупный feature block; comparison API/UI/runtime integration не считать готовой до отдельного implementation и validation approval.
