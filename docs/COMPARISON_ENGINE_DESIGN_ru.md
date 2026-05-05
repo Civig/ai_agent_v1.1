@@ -28,6 +28,12 @@ Phase 3 source helpers prepared: `comparison_engine.py` добавляет Markd
 
 API, UI, LLM summary, storage и production runtime integration ещё не реализованы. LLM explanation остаётся future phase и не участвует в генерации v1 report.
 
+## Comparison Quality Gate Status
+
+Comparison quality gate prepared: `scripts/smoke/run_comparison_quality_gate.sh` запускает локальные unittest modules для normalized document model, deterministic diff и Markdown report generator.
+
+По умолчанию gate не запускает parser gate, Docker, Ollama, GPU, API, UI или runtime integration. Для связанной проверки parser baseline можно отдельно включить `RUN_PARSER_GATE=1`; в этом режиме existing parser quality gate запускается через тот же `PYTHON`.
+
 ## Почему Нельзя Сравнивать Только Через LLM
 
 LLM полезен для объяснения уже найденных различий, но не должен быть единственным механизмом поиска изменений:
