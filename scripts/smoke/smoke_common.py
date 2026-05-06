@@ -27,6 +27,14 @@ EXPECTED_FILE_CASE_KEYS = {
     "allowed_fallback",
     "notes",
 }
+OPTIONAL_FILE_CASE_PARSER_KEYS = {
+    "parser_expected_status",
+    "parser_must_contain",
+    "parser_must_not_contain",
+    "parser_error_must_contain",
+    "parser_known_gap_reason",
+}
+PARSER_EXPECTED_STATUSES = {"success", "failure", "known_gap"}
 
 SMOKE_MONTH_ALIASES = {
     "january": "january",
@@ -138,6 +146,23 @@ def validate_file_chat_cases(spec_path: Path | str) -> list[dict[str, Any]]:
         for field in ("must_contain", "must_not_contain"):
             if not isinstance(case.get(field), list):
                 raise ValueError(f"File-chat case {case['id']} field {field} must be a list")
+        parser_keys = OPTIONAL_FILE_CASE_PARSER_KEYS.intersection(case)
+        if parser_keys:
+            parser_status = case.get("parser_expected_status")
+            if parser_status not in PARSER_EXPECTED_STATUSES:
+                raise ValueError(
+                    f"File-chat case {case['id']} field parser_expected_status must be one of: "
+                    f"{', '.join(sorted(PARSER_EXPECTED_STATUSES))}"
+                )
+            for field in ("parser_must_contain", "parser_must_not_contain", "parser_error_must_contain"):
+                if field in case and not isinstance(case.get(field), list):
+                    raise ValueError(f"File-chat case {case['id']} field {field} must be a list")
+            if parser_status == "failure" and not case.get("parser_error_must_contain"):
+                raise ValueError(f"File-chat case {case['id']} parser failure must define parser_error_must_contain")
+            if parser_status == "known_gap" and not str(case.get("parser_known_gap_reason") or "").strip():
+                raise ValueError(f"File-chat case {case['id']} parser known gap must define parser_known_gap_reason")
+            if "parser_known_gap_reason" in case and not isinstance(case.get("parser_known_gap_reason"), str):
+                raise ValueError(f"File-chat case {case['id']} field parser_known_gap_reason must be a string")
     return cases
 
 

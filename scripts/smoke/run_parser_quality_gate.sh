@@ -14,6 +14,7 @@ results=()
 core_modules=(
     tests.test_gold_file_corpus
     tests.test_gold_parser_quality
+    tests.test_file_chat_parser_grounding
     tests.test_upload_backend
     tests.test_smoke_kit
     tests.smoke_evaluator_test

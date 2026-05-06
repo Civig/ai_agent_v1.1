@@ -10,6 +10,9 @@
       "must_not_contain": ["DELTA-99"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["ALPHA-17", "BRAVO-42", "CHARLIE-09"],
+      "parser_must_not_contain": ["DELTA-99"],
       "notes": "TXT entity extraction."
     },
     {
@@ -20,6 +23,9 @@
       "must_not_contain": ["4096"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["max_tokens", "2048", "temperature", "0.2", "retry_limit", "3", "ocr_timeout", "30"],
+      "parser_must_not_contain": ["4096"],
       "notes": "Table-like TXT parameter extraction."
     },
     {
@@ -30,6 +36,9 @@
       "must_not_contain": ["1000000", "2027"],
       "expected_status": "success",
       "allowed_fallback": true,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["SMK-PARTIAL-003", "Smoke QA", "Medium", "EU-North", "Budget is not provided", "Final deadline is not provided"],
+      "parser_must_not_contain": ["1000000", "2027"],
       "notes": "Partial-answer case: known fields should be returned, missing fields should stay missing."
     },
     {
@@ -40,6 +49,9 @@
       "must_not_contain": ["OMEGA-00"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["ALPHA-17", "BRAVO-42", "CHARLIE-09"],
+      "parser_must_not_contain": ["OMEGA-00"],
       "notes": "PDF text extraction with named entities."
     },
     {
@@ -50,6 +62,9 @@
       "must_not_contain": ["0.9"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["temperature", "0.2", "retry_limit", "3"],
+      "parser_must_not_contain": ["0.9"],
       "notes": "PDF table-like content."
     },
     {
@@ -60,6 +75,9 @@
       "must_not_contain": ["December"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["January", "91%", "February", "93%", "March", "95%", "April", "94%"],
+      "parser_must_not_contain": ["December"],
       "notes": "Several months and success metrics."
     },
     {
@@ -70,6 +88,9 @@
       "must_not_contain": ["Project Apollo"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["Project Helios", "ALPHA-17", "max_tokens", "January", "April"],
+      "parser_must_not_contain": ["Project Apollo"],
       "notes": "2-3 page mixed PDF content."
     },
     {
@@ -80,6 +101,9 @@
       "must_not_contain": ["Project Apollo"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["Project Helios", "max_tokens", "2048", "temperature", "0.2"],
+      "parser_must_not_contain": ["Project Apollo"],
       "notes": "DOCX table and paragraph extraction."
     },
     {
@@ -90,6 +114,9 @@
       "must_not_contain": ["DELTA-99"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["ALPHA-17", "BRAVO-42", "CHARLIE-09", "January", "91%", "March", "95%"],
+      "parser_must_not_contain": ["DELTA-99"],
       "notes": "DOCX mixed content."
     },
     {
@@ -100,6 +127,9 @@
       "must_not_contain": ["руб", "USD", "EUR"],
       "expected_status": "success",
       "allowed_fallback": true,
+      "parser_expected_status": "success",
+      "parser_must_contain": ["Project Helios", "ALPHA-17", "BRAVO-42", "CHARLIE-09"],
+      "parser_must_not_contain": ["Budget", "руб", "USD", "EUR"],
       "notes": "Question about absent information."
     },
     {
@@ -110,6 +140,10 @@
       "must_not_contain": ["BRAVO-42"],
       "expected_status": "success",
       "allowed_fallback": false,
+      "parser_expected_status": "known_gap",
+      "parser_must_contain": ["ALPHA", "17", "98"],
+      "parser_must_not_contain": ["BRAVO-42"],
+      "parser_known_gap_reason": "Live GPU audit direct parser OCR extracted ALPHA-1? SCORE 36 instead of ALPHA-17 SCORE 98.",
       "notes": "Small OCR-positive PNG."
     },
     {
@@ -120,6 +154,8 @@
       "must_not_contain": [],
       "expected_status": "failure",
       "allowed_fallback": false,
+      "parser_expected_status": "failure",
+      "parser_error_must_contain": ["превышает лимит", "2000px"],
       "notes": "Controlled parse failure: image dimension exceeds FILE_PROCESSING_IMAGE_MAX_DIMENSION."
     }
   ]
