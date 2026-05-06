@@ -33,6 +33,24 @@ from scripts.smoke.smoke_runner import (  # noqa: E402
 )
 
 
+FILE_CHAT_LOAD_RESULT_FIELDS = [
+    "request_index",
+    "worker_index",
+    "id",
+    "file",
+    "kind",
+    "expected_status",
+    "actual_status",
+    "passed",
+    "http_status",
+    "latency_ms",
+    "job_id",
+    "completed",
+    "error",
+    "response_text",
+]
+
+
 def load_profile(name: str) -> dict[str, Any]:
     profiles = read_json(REPO_ROOT / "tests/smoke/specs/load_profiles.json")["profiles"]
     if name not in profiles:
@@ -54,6 +72,47 @@ def build_client(args: argparse.Namespace) -> SmokeHttpClient:
     client.login(username=username, password=password)
     client.get_models()
     return client
+
+
+def http_status_from_reason(reason: str) -> int | None:
+    prefix = "login_failed_http_"
+    if reason.startswith(prefix):
+        try:
+            return int(reason.removeprefix(prefix))
+        except ValueError:
+            return None
+    return None
+
+
+def write_bootstrap_failure_artifacts(*, output_dir: Path, profile: dict[str, Any], reason: str) -> int:
+    result = {
+        "request_index": 0,
+        "worker_index": 0,
+        "id": "bootstrap_auth",
+        "file": "",
+        "kind": "file-chat-load",
+        "expected_status": "success",
+        "actual_status": "failure",
+        "passed": False,
+        "http_status": http_status_from_reason(reason),
+        "latency_ms": 0,
+        "job_id": "",
+        "completed": False,
+        "error": reason,
+        "response_text": reason,
+        "failure_reason": reason,
+    }
+    results_path = output_dir / "results.jsonl"
+    if results_path.exists():
+        results_path.unlink()
+    append_jsonl(results_path, result)
+    write_dicts_csv(output_dir / "results.csv", [result], FILE_CHAT_LOAD_RESULT_FIELDS + ["failure_reason"])
+    summary = build_load_summary([result], profile=profile)
+    summary["status"] = "failed"
+    summary["failure_reason"] = reason
+    write_json(output_dir / "summary.json", summary)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 2
 
 
 def run_request(
@@ -100,8 +159,9 @@ def run_worker(
     worker_index: int,
     tasks: list[tuple[dict[str, Any], int]],
     output_dir: Path,
+    bootstrap_client: SmokeHttpClient | None = None,
 ) -> list[dict[str, Any]]:
-    client = build_client(args)
+    client = bootstrap_client.clone_authenticated() if bootstrap_client is not None else build_client(args)
     rows: list[dict[str, Any]] = []
     for case, request_index in tasks:
         rows.append(
@@ -132,6 +192,14 @@ def execute(args: argparse.Namespace) -> int:
     total_requests = int(profile.get("file_chat_cases") or 1)
     concurrency = max(1, min(int(profile["concurrency"]), total_requests))
     write_json(output_dir / "plan.json", {"profile": profile, "host": args.host, "spec": str(args.spec), "timeout_seconds": timeout_seconds})
+    try:
+        bootstrap_client = build_client(args)
+    except Exception as exc:
+        return write_bootstrap_failure_artifacts(
+            output_dir=output_dir,
+            profile=profile,
+            reason=str(exc) or exc.__class__.__name__,
+        )
 
     tasks_by_worker: dict[int, list[tuple[dict[str, Any], int]]] = {worker: [] for worker in range(1, concurrency + 1)}
     for index in range(total_requests):
@@ -147,6 +215,7 @@ def execute(args: argparse.Namespace) -> int:
                 worker_index=worker_index,
                 tasks=worker_tasks,
                 output_dir=output_dir,
+                bootstrap_client=bootstrap_client,
             )
             for worker_index, worker_tasks in tasks_by_worker.items()
             if worker_tasks
@@ -163,22 +232,7 @@ def execute(args: argparse.Namespace) -> int:
     write_dicts_csv(
         output_dir / "results.csv",
         results,
-        [
-            "request_index",
-            "worker_index",
-            "id",
-            "file",
-            "kind",
-            "expected_status",
-            "actual_status",
-            "passed",
-            "http_status",
-            "latency_ms",
-            "job_id",
-            "completed",
-            "error",
-            "response_text",
-        ],
+        FILE_CHAT_LOAD_RESULT_FIELDS,
     )
     summary = build_load_summary(results, profile=profile)
     write_json(output_dir / "summary.json", summary)

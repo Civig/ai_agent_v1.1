@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from copy import copy
 from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from pathlib import Path
@@ -59,12 +60,19 @@ class StreamPayload:
 class SmokeHttpClient:
     def __init__(self, *, base_url: str, insecure: bool, timeout_seconds: int) -> None:
         self.base_url = base_url.rstrip("/")
+        self.insecure = insecure
         self.timeout_seconds = timeout_seconds
         self.cookie_jar = CookieJar()
         handlers: list[urllib.request.BaseHandler] = [urllib.request.HTTPCookieProcessor(self.cookie_jar)]
         if self.base_url.startswith("https://") and insecure:
             handlers.append(urllib.request.HTTPSHandler(context=ssl._create_unverified_context()))
         self.opener = urllib.request.build_opener(*handlers)
+
+    def clone_authenticated(self) -> "SmokeHttpClient":
+        client = SmokeHttpClient(base_url=self.base_url, insecure=self.insecure, timeout_seconds=self.timeout_seconds)
+        for cookie in self.cookie_jar:
+            client.cookie_jar.set_cookie(copy(cookie))
+        return client
 
     def url(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"
