@@ -80,6 +80,27 @@
   - `txt_missing_budget_question` был нестабилен, семантически приемлем и позднее прошёл.
 - Реальный OCR quality gap:
   - `image_ocr_success` direct parser извлёк `ALPHA-1? SCORE 36` вместо ожидаемых значений.
+- Fixture-only update после OCR audit:
+  - в ветке `beta/gpu-model-validation` добавлен commit `fa54fbe test(parser): improve deterministic OCR fixture readability`;
+  - commit меняет только deterministic OCR fixture generation/artifacts:
+    - `scripts/smoke/generate_fixtures.py`;
+    - `tests/smoke/fixtures/images/ocr_success.png`;
+    - `tests/smoke/fixtures/generated/manifest.json`;
+    - `tests/smoke/fixtures/gold/manifest.json`;
+  - runtime/security/parser logic не менялись:
+    - `app.py` не трогался;
+    - `config.py` не трогался;
+    - `parser_stage.py` не трогался;
+    - `docker-compose.yml` не трогался;
+    - login/rate limiter не трогался;
+  - новый `ocr_success.png` стал более OCR-friendly за счёт deterministic embedded `OCR_SUCCESS_FONT`;
+  - canvas нового PNG: `1260x300`;
+  - текст по смыслу тот же:
+    - `OCR PASS`;
+    - `ALPHA-17 SCORE 98`;
+  - PNG sha: `cee33681d49ab72c827cb4dbe91c0bffc3878075c3f51d352b513ee0ccde27bd`;
+  - `image_ocr_success` пока не переводится из `known_gap` в `success`, потому что на SOURCE VM нет OCR runtime deps / Tesseract и direct OCR/parser pass не был подтверждён;
+  - это подготовка к следующему OCR-capable validation, а не доказательство OCR pass.
 - Expected negative test:
   - oversized image `2201x2201` был корректно отклонён из-за `2000px` dimension limit.
 
@@ -119,15 +140,20 @@
    - подтвердить, что `chat/warm_cold` больше не падает на login `429`;
    - подтвердить, что file-chat `light`, `medium` и `warm_cold` больше не падают на login `429`;
    - подтвердить, что `results.jsonl` и `summary.json` создаются для каждого profile.
-8. Собрать final artifacts.
-9. Проверить отсутствие secrets в bundle.
-10. Только после этого остановить арендованный GPU host.
+8. Проверить OCR fixture follow-up после `fa54fbe` на OCR-capable host:
+   - выполнить direct parser extraction для `tests/smoke/fixtures/images/ocr_success.png`;
+   - ожидать `OCR PASS`, `ALPHA-17`, `SCORE 98`;
+   - проверить `tests/smoke/fixtures/images/oversized_dimension.png` как controlled failure по лимиту `2000px`;
+   - только после green OCR-capable validation обсуждать перевод `image_ocr_success` из `known_gap` в `success`.
+9. Собрать final artifacts.
+10. Проверить отсутствие secrets в bundle.
+11. Только после этого остановить арендованный GPU host.
 
 ## Следующая работа без GPU
 
 - Синхронизировать docs/status с paid GPU audit.
 - Harden non-GPU smoke/evaluator expectations там, где wording LLM вызывает brittle failures.
-- Вести OCR quality gap отдельно; не считать его исправленным load harness changes.
+- Вести OCR quality gap отдельно; fixture readability улучшена в `fa54fbe`, но `known_gap` не снят до OCR-capable validation.
 - Не запускать live GPU smoke/load до следующего approved rented GPU window.
 
 ## Итог
