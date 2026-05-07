@@ -181,6 +181,221 @@ FONT = {
 }
 
 
+OCR_SUCCESS_FONT = {
+    " ": ["000000000"] * 13,
+    "-": [
+        "000000000",
+        "000000000",
+        "000000000",
+        "000000000",
+        "000000000",
+        "000000000",
+        "001111100",
+        "001111100",
+        "000000000",
+        "000000000",
+        "000000000",
+        "000000000",
+        "000000000",
+    ],
+    "1": [
+        "000110000",
+        "001110000",
+        "011110000",
+        "000110000",
+        "000110000",
+        "000110000",
+        "000110000",
+        "000110000",
+        "000110000",
+        "000110000",
+        "000110000",
+        "011111100",
+        "011111100",
+    ],
+    "7": [
+        "111111111",
+        "111111111",
+        "000000110",
+        "000001100",
+        "000001100",
+        "000011000",
+        "000011000",
+        "000110000",
+        "000110000",
+        "001100000",
+        "001100000",
+        "001100000",
+        "001100000",
+    ],
+    "8": [
+        "001111100",
+        "011000110",
+        "110000011",
+        "110000011",
+        "110000011",
+        "011000110",
+        "001111100",
+        "011000110",
+        "110000011",
+        "110000011",
+        "110000011",
+        "011000110",
+        "001111100",
+    ],
+    "9": [
+        "001111100",
+        "011000110",
+        "110000011",
+        "110000011",
+        "110000011",
+        "011000111",
+        "001111111",
+        "000000011",
+        "000000110",
+        "000001100",
+        "000011000",
+        "001110000",
+        "011100000",
+    ],
+    "A": [
+        "000111000",
+        "001101100",
+        "011000110",
+        "110000011",
+        "110000011",
+        "111111111",
+        "111111111",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+    ],
+    "C": [
+        "001111110",
+        "011000110",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "011000110",
+        "001111110",
+    ],
+    "E": [
+        "111111111",
+        "111111111",
+        "110000000",
+        "110000000",
+        "110000000",
+        "111111100",
+        "111111100",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "111111111",
+        "111111111",
+    ],
+    "H": [
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "111111111",
+        "111111111",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+    ],
+    "L": [
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "111111111",
+        "111111111",
+    ],
+    "O": [
+        "001111100",
+        "011000110",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "110000011",
+        "011000110",
+        "001111100",
+    ],
+    "P": [
+        "111111100",
+        "111111110",
+        "110000011",
+        "110000011",
+        "110000011",
+        "111111110",
+        "111111100",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+        "110000000",
+    ],
+    "R": [
+        "111111100",
+        "111111110",
+        "110000011",
+        "110000011",
+        "110000011",
+        "111111110",
+        "111111100",
+        "110110000",
+        "110011000",
+        "110001100",
+        "110000110",
+        "110000011",
+        "110000011",
+    ],
+    "S": [
+        "011111110",
+        "111111110",
+        "110000000",
+        "110000000",
+        "110000000",
+        "011111000",
+        "001111110",
+        "000000011",
+        "000000011",
+        "000000011",
+        "000000011",
+        "111111110",
+        "111111100",
+    ],
+}
+
+
 def pdf_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
@@ -279,9 +494,20 @@ def png_chunk(kind: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", binascii.crc32(kind + data) & 0xFFFFFFFF)
 
 
-def draw_text(canvas: bytearray, width: int, height: int, x: int, y: int, text: str, scale: int) -> None:
+def draw_text(
+    canvas: bytearray,
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    text: str,
+    scale: int,
+    *,
+    font: dict[str, list[str]] = FONT,
+    letter_spacing: int = 1,
+) -> None:
     for char in text.upper():
-        glyph = FONT.get(char, FONT[" "])
+        glyph = font.get(char, font[" "])
         for row_index, row in enumerate(glyph):
             for col_index, bit in enumerate(row):
                 if bit != "1":
@@ -293,15 +519,27 @@ def draw_text(canvas: bytearray, width: int, height: int, x: int, y: int, text: 
                         if 0 <= px < width and 0 <= py < height:
                             offset = (py * width + px) * 3
                             canvas[offset : offset + 3] = b"\x00\x00\x00"
-        x += (len(glyph[0]) + 1) * scale
+        x += (len(glyph[0]) + letter_spacing) * scale
 
 
-def write_png(path: Path, width: int, height: int, text_lines: list[str]) -> None:
+def write_png(
+    path: Path,
+    width: int,
+    height: int,
+    text_lines: list[str],
+    *,
+    font: dict[str, list[str]] = FONT,
+    scale: int = 6,
+    x: int = 28,
+    y: int = 28,
+    line_gap: int = 58,
+    letter_spacing: int = 1,
+) -> None:
     canvas = bytearray(b"\xff" * width * height * 3)
-    y = 28
+    current_y = y
     for line in text_lines:
-        draw_text(canvas, width, height, 28, y, line, 6)
-        y += 58
+        draw_text(canvas, width, height, x, current_y, line, scale, font=font, letter_spacing=letter_spacing)
+        current_y += line_gap
     scanlines = bytearray()
     row_size = width * 3
     for row in range(height):
@@ -341,7 +579,18 @@ def write_binary_fixtures() -> list[Path]:
         paths.append(path)
     image_success = FIXTURE_ROOT / "images" / "ocr_success.png"
     image_success.parent.mkdir(parents=True, exist_ok=True)
-    write_png(image_success, 760, 180, ["OCR PASS", "ALPHA-17 SCORE 98"])
+    write_png(
+        image_success,
+        1260,
+        300,
+        ["OCR PASS", "ALPHA-17 SCORE 98"],
+        font=OCR_SUCCESS_FONT,
+        scale=5,
+        x=60,
+        y=54,
+        line_gap=106,
+        letter_spacing=3,
+    )
     paths.append(image_success)
 
     image_oversized = FIXTURE_ROOT / "images" / "oversized_dimension.png"

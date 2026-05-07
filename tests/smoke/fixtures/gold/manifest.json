@@ -243,8 +243,8 @@
       "expected_controlled_error_substring": "",
       "unsupported_features": [],
       "notes": "Existing PNG smoke fixture reused; OCR execution is left to smoke, not manifest validation.",
-      "bytes": 1539,
-      "sha256": "3bbba31554f1fbe315571b780f8499b7a04172974929c4a92ef29c3a968445d4"
+      "bytes": 3491,
+      "sha256": "cee33681d49ab72c827cb4dbe91c0bffc3878075c3f51d352b513ee0ccde27bd"
     },
     {
       "id": "docx_missing_document_xml",
